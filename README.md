@@ -4,6 +4,7 @@ LSPosed module with Pixel quality-of-life tweaks:
 
 - Always-visible "Clear all" in Pixel Launcher recents
 - Double-press power button to toggle the flashlight
+- Double-press volume down to launch camera from always-on display (won't launch if media is playing or a phone call is active)
 - Three-finger swipe down for a screenshot
 - Double-tap an empty home screen spot to lock the screen
 - Files by Google folders sorted newest-first
