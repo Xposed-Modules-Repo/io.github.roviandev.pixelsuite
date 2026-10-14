@@ -14,13 +14,12 @@ final class Feature {
     static final String FILES_SORT = "pixelsuite_files_sort";
     static final String TAP_CHECK = "pixelsuite_tap_check";
     static final String DOUBLE_TAP_WAKE = "pixelsuite_double_tap_wake";
-    static final String LOCK_SLEEP = "pixelsuite_lockscreen_double_tap_sleep";
     static final String LOCK_SHORTCUTS = "pixelsuite_lockscreen_shortcuts";
 
     private Feature() {}
 
     static int defaultFor(String key) {
-        return (FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key) || LOCK_SLEEP.equals(key)
+        return (FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
                 || LOCK_SHORTCUTS.equals(key)) ? 0 : 1;
     }
 

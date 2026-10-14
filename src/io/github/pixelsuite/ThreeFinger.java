@@ -15,6 +15,8 @@ import android.view.MotionEvent;
 
 import java.lang.reflect.Method;
 
+import io.github.libxposed.api.XposedInterface;
+
 final class ThreeFinger {
 
     private ThreeFinger() {}
@@ -34,9 +36,12 @@ final class ThreeFinger {
     private static final int SCREENSHOT_VENDOR_GESTURE = 6;
 
     private static ClassLoader sClassLoader;
-    private static volatile boolean sEnabled = 1 == 1;
+    private static volatile boolean sEnabled = true;
     private static volatile boolean sInitDone;
     private static volatile boolean sMonitorActive;
+    private static volatile boolean sUseFallback;
+    private static volatile Object sFallbackHook;
+    private static HandlerThread sThread;
 
     private static Context sContext;
     private static Object sScreenshotHelper;
@@ -63,26 +68,49 @@ final class ThreeFinger {
                         }
                     });
 
-            Xp.hookAllMethods(Xp.findClass(LISTENER, cl), "onPointerEvent",
-                    new Xp.Callback() {
+            installFallback();
+            Module.log("system hooks installed");
+        } catch (Throwable t) {
+            Module.log("system hook setup failed", t);
+        }
+    }
+
+    private static synchronized void installFallback() {
+        if (sFallbackHook != null) return;
+        try {
+            for (Object h : Xp.hookAllMethods(Xp.findClass(LISTENER, sClassLoader),
+                    "onPointerEvent", new Xp.Callback() {
                         @Override
                         protected void afterHookedMethod(Xp.Param param) {
                             if (sMonitorActive) return;
-                            if (param.args.length == 0 || !(param.args[0] instanceof MotionEvent)) {
+                            if (param.args.length == 0
+                                    || !(param.args[0] instanceof MotionEvent)) {
                                 return;
                             }
                             if (!sInitDone) init(systemContext());
-                            if (sMonitorActive) return;
+                            if (!sUseFallback || sMonitorActive) return;
                             try {
                                 Detector.FALLBACK.onTouch((MotionEvent) param.args[0], false);
                             } catch (Throwable t) {
                                 Module.log("fallback touch handling failed", t);
                             }
                         }
-                    });
-            Module.log("system hooks installed");
+                    })) {
+                sFallbackHook = h;
+            }
         } catch (Throwable t) {
-            Module.log("system hook setup failed", t);
+            Module.log("fallback hook failed", t);
+        }
+    }
+
+    private static synchronized void removeFallback() {
+        Object h = sFallbackHook;
+        if (h == null) return;
+        sFallbackHook = null;
+        try {
+            if (h instanceof XposedInterface.HookHandle) ((XposedInterface.HookHandle) h).unhook();
+        } catch (Throwable t) {
+            Module.log("could not remove the fallback hook", t);
         }
     }
 
@@ -101,6 +129,7 @@ final class ThreeFinger {
 
             HandlerThread t = new HandlerThread("3FingerShot");
             t.start();
+            sThread = t;
             sWorker = new Handler(t.getLooper());
 
             sEnabled = isEnabled(ctx);
@@ -111,41 +140,96 @@ final class ThreeFinger {
                         public void onChange(boolean selfChange) {
                             sEnabled = isEnabled(sContext);
                             Module.log("enabled: " + sEnabled);
+                            updateMonitor();
                         }
                     });
             sInitDone = true;
 
-            createMonitor(ctx, t);
-            Module.log("initialised, enabled: " + sEnabled + ", blocks app touches: "
-                    + sMonitorActive + ", min swipe " + (int) sMinDistancePx + "px");
+            sWorker.post(new Runnable() {
+                @Override
+                public void run() {
+                    updateMonitor();
+                    Module.log("initialised, enabled: " + sEnabled + ", blocks app touches: "
+                            + sMonitorActive + ", min swipe " + (int) sMinDistancePx + "px");
+                }
+            });
         } catch (Throwable t) {
             Module.log("init failed", t);
         }
     }
 
+    private static void updateMonitor() {
+        if (sEnabled) {
+            if (!sMonitorActive) createMonitor(sContext, sThread);
+            if (sMonitorActive) {
+                sUseFallback = false;
+                removeFallback();
+            } else {
+                sUseFallback = true;
+                installFallback();
+            }
+        } else {
+            disposeMonitor();
+            sUseFallback = false;
+            removeFallback();
+        }
+    }
+
     private static void createMonitor(Context ctx, HandlerThread thread) {
+        Object monitor = null;
         try {
             Object im = ctx.getSystemService(Context.INPUT_SERVICE);
-            sInputMonitor = Xp.callMethod(im, "monitorGestureInput",
+            monitor = Xp.callMethod(im, "monitorGestureInput",
                     "ThreeFingerScreenshot", Display.DEFAULT_DISPLAY);
-            sInputChannel = (InputChannel) Xp.callMethod(sInputMonitor, "getInputChannel");
-            sReceiver = new Receiver(sInputChannel, thread);
+            InputChannel channel = (InputChannel) Xp.callMethod(monitor, "getInputChannel");
+            Receiver receiver = new Receiver(channel, thread);
+            sInputMonitor = monitor;
+            sInputChannel = channel;
+            sReceiver = receiver;
             sMonitorActive = true;
         } catch (Throwable t) {
             sMonitorActive = false;
+            if (monitor != null) {
+                try {
+                    Xp.callMethod(monitor, "dispose");
+                } catch (Throwable ignored) { }
+            }
             Module.log("gesture monitor unavailable, using read-only fallback", t);
         }
     }
 
-    static void pilfer() {
+    private static void disposeMonitor() {
+        if (!sMonitorActive) return;
+        sMonitorActive = false;
+        Object monitor = sInputMonitor;
+        Receiver receiver = sReceiver;
+        sInputMonitor = null;
+        sInputChannel = null;
+        sReceiver = null;
+        Detector.MONITOR.reset();
         try {
-            IBinder token = sInputChannel.getToken();
+            if (receiver != null) receiver.dispose();
+        } catch (Throwable ignored) { }
+        try {
+            if (monitor != null) Xp.callMethod(monitor, "dispose");
+        } catch (Throwable t) {
+            Module.log("monitor dispose failed", t);
+        }
+        Module.log("gesture monitor removed (feature off)");
+    }
+
+    static void pilfer() {
+        InputChannel channel = sInputChannel;
+        Object monitor = sInputMonitor;
+        if (channel == null || monitor == null) return;
+        try {
+            IBinder token = channel.getToken();
             Object im = sContext.getSystemService(Context.INPUT_SERVICE);
             Xp.callMethod(im, "pilferPointers", token);
             return;
         } catch (Throwable ignored) { }
         try {
-            Xp.callMethod(sInputMonitor, "pilferPointers");
+            Xp.callMethod(monitor, "pilferPointers");
         } catch (Throwable t) {
             Module.log("pilfer failed", t);
         }
@@ -311,11 +395,6 @@ final class ThreeFinger {
     }
 
     static boolean isEnabled(Context ctx) {
-        try {
-            return Settings.Secure.getInt(ctx.getContentResolver(),
-                    Feature.THREE_FINGER, 1) == 1;
-        } catch (Throwable t) {
-            return 1 == 1;
-        }
+        return Feature.on(ctx, Feature.THREE_FINGER);
     }
 }

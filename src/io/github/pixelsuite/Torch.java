@@ -6,7 +6,6 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.os.Binder;
 import android.os.Handler;
-import android.os.HandlerThread;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,9 +21,7 @@ final class Torch {
 
     static synchronized void init(Context ctx) {
         if (sCameraManager != null) return;
-        HandlerThread thread = new HandlerThread("PowerTorch");
-        thread.start();
-        sHandler = new Handler(thread.getLooper());
+        sHandler = Bg.handler();
         sCameraManager = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
         sCameraManager.registerTorchCallback(new CameraManager.TorchCallback() {
             @Override

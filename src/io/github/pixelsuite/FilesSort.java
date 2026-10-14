@@ -6,7 +6,9 @@ import java.io.File;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 final class FilesSort {
 
@@ -19,9 +21,8 @@ final class FilesSort {
             Xp.Callback collectionsHook = new Xp.Callback() {
                 @Override
                 protected void beforeHookedMethod(Xp.Param param) {
-                    if (!active()) return;
-                    Object list = param.args[0];
-                    Comparator<Object> replacement = replacementFor(list);
+                    if (param.args[1] instanceof NewestFirst || !active()) return;
+                    Comparator<Object> replacement = replacementFor(param.args[0]);
                     if (replacement != null) param.args[1] = replacement;
                 }
             };
@@ -32,7 +33,7 @@ final class FilesSort {
                     new Xp.Callback() {
                         @Override
                         protected void beforeHookedMethod(Xp.Param param) {
-                            if (!active()) return;
+                            if (param.args[0] instanceof NewestFirst || !active()) return;
                             Comparator<Object> replacement = replacementFor(param.thisObject);
                             if (replacement != null) param.args[0] = replacement;
                         }
@@ -42,7 +43,7 @@ final class FilesSort {
                     new Xp.Callback() {
                         @Override
                         protected void beforeHookedMethod(Xp.Param param) {
-                            if (!active()) return;
+                            if (param.args[0] instanceof NewestFirst || !active()) return;
                             Comparator<Object> replacement = replacementFor(param.thisObject);
                             if (replacement != null) param.args[0] = replacement;
                         }
@@ -72,20 +73,48 @@ final class FilesSort {
         }
         if (sample == null) return null;
 
-        final Accessor accessor = accessorFor(sample.getClass());
-        if (accessor == null) return null;
-
-        return new Comparator<Object>() {
-            @Override
-            public int compare(Object a, Object b) {
-                long ta = accessor.lastModified(a);
-                long tb = accessor.lastModified(b);
-                return Long.compare(tb, ta);
-            }
-        };
+        Accessor accessor = accessorFor(sample.getClass());
+        return accessor == null ? null : new NewestFirst(accessor);
     }
 
+    private static final class NewestFirst implements Comparator<Object> {
+        private final Accessor mAccessor;
+        private final IdentityHashMap<Object, Long> mTimes = new IdentityHashMap<Object, Long>();
+
+        NewestFirst(Accessor accessor) {
+            mAccessor = accessor;
+        }
+
+        @Override
+        public int compare(Object a, Object b) {
+            return Long.compare(time(b), time(a));
+        }
+
+        private long time(Object o) {
+            Long t = mTimes.get(o);
+            if (t == null) {
+                t = o == null ? 0L : mAccessor.lastModified(o);
+                mTimes.put(o, t);
+            }
+            return t;
+        }
+    }
+
+    private static final Object NO_ACCESSOR = new Object();
+    private static final ConcurrentHashMap<Class<?>, Object> sAccessors =
+            new ConcurrentHashMap<Class<?>, Object>();
+
     private static Accessor accessorFor(Class<?> type) {
+        Object hit = sAccessors.get(type);
+        if (hit == null) {
+            Accessor a = findAccessor(type);
+            hit = a != null ? a : NO_ACCESSOR;
+            sAccessors.put(type, hit);
+        }
+        return hit == NO_ACCESSOR ? null : (Accessor) hit;
+    }
+
+    private static Accessor findAccessor(Class<?> type) {
         if (File.class.isAssignableFrom(type)) {
             return new Accessor() {
                 @Override
