@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedInterface.Chain;
@@ -29,7 +30,9 @@ import io.github.libxposed.api.XposedInterface.Hooker;
  *     returned early it skips the original; otherwise it calls chain.proceed(), then
  *     afterHookedMethod, and returns the (possibly replaced) result.
  * Reflection helpers (callMethod, getObjectField, newInstance, additional instance fields)
- * are plain Java reflection and don't touch the framework.
+ * are plain Java reflection and don't touch the framework. Every lookup is cached (by class,
+ * name and argument types, misses included): several of these run per touch or per Settings
+ * row, and an uncached lookup scans and allocates every method of the class each time.
  *
  * The XposedInterface (the module object itself) is set once, in Module.onModuleLoaded.
  */
@@ -212,13 +215,11 @@ final class Xp {
 
     static Object newInstance(Class<?> clazz, Object... args) {
         try {
-            for (Constructor<?> c : clazz.getDeclaredConstructors()) {
-                if (accepts(c.getParameterTypes(), args)) {
-                    c.setAccessible(true);
-                    return c.newInstance(args);
-                }
+            Constructor<?> c = bestConstructor(clazz, args);
+            if (c == null) {
+                throw new NoSuchMethodException(clazz.getName() + ".<init> for given args");
             }
-            throw new NoSuchMethodException(clazz.getName() + ".<init> for given args");
+            return c.newInstance(args);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -226,9 +227,7 @@ final class Xp {
 
     static Object getObjectField(Object obj, String name) {
         try {
-            Field f = findField(obj.getClass(), name);
-            f.setAccessible(true);
-            return f.get(obj);
+            return findField(obj.getClass(), name).get(obj);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -236,9 +235,7 @@ final class Xp {
 
     static void setObjectField(Object obj, String name, Object value) {
         try {
-            Field f = findField(obj.getClass(), name);
-            f.setAccessible(true);
-            f.set(obj, value);
+            findField(obj.getClass(), name).set(obj, value);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -246,9 +243,7 @@ final class Xp {
 
     static boolean getBooleanField(Object obj, String name) {
         try {
-            Field f = findField(obj.getClass(), name);
-            f.setAccessible(true);
-            return f.getBoolean(obj);
+            return findField(obj.getClass(), name).getBoolean(obj);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -256,9 +251,7 @@ final class Xp {
 
     static void setBooleanField(Object obj, String name, boolean value) {
         try {
-            Field f = findField(obj.getClass(), name);
-            f.setAccessible(true);
-            f.setBoolean(obj, value);
+            findField(obj.getClass(), name).setBoolean(obj, value);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -303,6 +296,17 @@ final class Xp {
      * and interfaces. Matching by type matters: setTitle(CharSequence) vs setTitle(int).
      */
     private static Method bestMethod(Class<?> clazz, String name, Object[] args) {
+        Key key = new Key(clazz, name, args);
+        Object hit = sMethods.get(key);
+        if (hit == null) {
+            Method m = findBestMethod(clazz, name, args);
+            hit = m != null ? m : NONE;
+            sMethods.put(key, hit);
+        }
+        return hit == NONE ? null : (Method) hit;
+    }
+
+    private static Method findBestMethod(Class<?> clazz, String name, Object[] args) {
         for (Class<?> c = clazz; c != null; c = c.getSuperclass()) {
             for (Method m : c.getDeclaredMethods()) {
                 if (m.getName().equals(name) && accepts(m.getParameterTypes(), args)) {
@@ -357,13 +361,89 @@ final class Xp {
         return out;
     }
 
+    /** The field, accessible, from the class or a superclass; cached, misses included. */
     private static Field findField(Class<?> clazz, String name) throws NoSuchFieldException {
-        for (Class<?> c = clazz; c != null; c = c.getSuperclass()) {
-            try {
-                return c.getDeclaredField(name);
-            } catch (NoSuchFieldException ignored) { }
+        Key key = new Key(clazz, name, null);
+        Object hit = sFields.get(key);
+        if (hit == null) {
+            hit = NONE;
+            for (Class<?> c = clazz; c != null && hit == NONE; c = c.getSuperclass()) {
+                try {
+                    Field f = c.getDeclaredField(name);
+                    f.setAccessible(true);
+                    hit = f;
+                } catch (NoSuchFieldException ignored) { }
+            }
+            sFields.put(key, hit);
         }
-        throw new NoSuchFieldException(name);
+        if (hit == NONE) throw new NoSuchFieldException(clazz.getName() + "#" + name);
+        return (Field) hit;
+    }
+
+    private static Constructor<?> bestConstructor(Class<?> clazz, Object[] args) {
+        Key key = new Key(clazz, "<init>", args);
+        Object hit = sCtors.get(key);
+        if (hit == null) {
+            hit = NONE;
+            for (Constructor<?> c : clazz.getDeclaredConstructors()) {
+                if (accepts(c.getParameterTypes(), args)) {
+                    c.setAccessible(true);
+                    hit = c;
+                    break;
+                }
+            }
+            sCtors.put(key, hit);
+        }
+        return hit == NONE ? null : (Constructor<?>) hit;
+    }
+
+    // ------------------------------------------------------------------ lookup cache
+
+    private static final Object NONE = new Object();
+    private static final ConcurrentHashMap<Key, Object> sMethods =
+            new ConcurrentHashMap<Key, Object>();
+    private static final ConcurrentHashMap<Key, Object> sFields =
+            new ConcurrentHashMap<Key, Object>();
+    private static final ConcurrentHashMap<Key, Object> sCtors =
+            new ConcurrentHashMap<Key, Object>();
+
+    /** Class + member name + the runtime types of the arguments (null for a null argument). */
+    private static final class Key {
+        private final Class<?> mClass;
+        private final String mName;
+        private final Class<?>[] mTypes;
+        private final int mHash;
+
+        Key(Class<?> clazz, String name, Object[] args) {
+            mClass = clazz;
+            mName = name;
+            int h = System.identityHashCode(clazz) * 31 + name.hashCode();
+            if (args == null) {
+                mTypes = null;
+            } else {
+                mTypes = new Class<?>[args.length];
+                for (int i = 0; i < args.length; i++) {
+                    Class<?> t = args[i] == null ? null : args[i].getClass();
+                    mTypes[i] = t;
+                    h = h * 31 + (t == null ? 0 : System.identityHashCode(t));
+                }
+            }
+            mHash = h;
+        }
+
+        @Override
+        public int hashCode() {
+            return mHash;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof Key)) return false;
+            Key k = (Key) o;
+            return mHash == k.mHash && mClass == k.mClass && mName.equals(k.mName)
+                    && Arrays.equals(mTypes, k.mTypes);
+        }
     }
 
     private static String describe(Executable e) {

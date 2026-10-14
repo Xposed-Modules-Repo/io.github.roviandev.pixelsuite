@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Pixel Suite</string>
-    <string name="description">Power button flashlight, volume-down camera on the Always On Display, three-finger screenshot, double tap to sleep, an always-visible Clear all in recents, and newest-first folders in Files. The gestures also appear in Settings › System › Gestures. Scope: System Framework, Settings, System UI, Pixel Launcher, Files; then reboot.</string>
+    <string name="description">Power button flashlight, volume-down camera on the Always On Display, three-finger screenshot, double tap to sleep, tap or double tap to wake with double tap the lock screen to sleep, an always-visible Clear all in recents, and newest-first folders in Files by Google. The gestures also appear in Settings › System › Gestures. Scope: System Framework, System UI, Settings, Pixel Launcher, Files; then reboot.</string>
 </resources>

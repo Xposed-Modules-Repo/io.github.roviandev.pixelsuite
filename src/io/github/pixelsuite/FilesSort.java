@@ -6,7 +6,9 @@ import java.io.File;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 
 /**
@@ -21,6 +23,11 @@ import java.util.List;
  *
  * Because it is heuristic, a future Files update could change what gets sorted. It is scoped
  * to the Files app alone. On/off: Settings.Secure Feature.FILES_SORT.
+ *
+ * Cost: every sort in the app passes through here, so the per-class answer ("does this type
+ * have a timestamp, and how to read it") is worked out once and cached, and each element's
+ * timestamp is read once per sort instead of on every comparison (a File's lastModified() is
+ * a disk lookup).
  */
 final class FilesSort {
 
@@ -33,9 +40,8 @@ final class FilesSort {
             Xp.Callback collectionsHook = new Xp.Callback() {
                 @Override
                 protected void beforeHookedMethod(Xp.Param param) {
-                    if (!active()) return;
-                    Object list = param.args[0];
-                    Comparator<Object> replacement = replacementFor(list);
+                    if (param.args[1] instanceof NewestFirst || !active()) return;
+                    Comparator<Object> replacement = replacementFor(param.args[0]);
                     if (replacement != null) param.args[1] = replacement;
                 }
             };
@@ -46,7 +52,7 @@ final class FilesSort {
                     new Xp.Callback() {
                         @Override
                         protected void beforeHookedMethod(Xp.Param param) {
-                            if (!active()) return;
+                            if (param.args[0] instanceof NewestFirst || !active()) return;
                             Comparator<Object> replacement = replacementFor(param.thisObject);
                             if (replacement != null) param.args[0] = replacement;
                         }
@@ -56,7 +62,7 @@ final class FilesSort {
                     new Xp.Callback() {
                         @Override
                         protected void beforeHookedMethod(Xp.Param param) {
-                            if (!active()) return;
+                            if (param.args[0] instanceof NewestFirst || !active()) return;
                             Comparator<Object> replacement = replacementFor(param.thisObject);
                             if (replacement != null) param.args[0] = replacement;
                         }
@@ -92,21 +98,54 @@ final class FilesSort {
         }
         if (sample == null) return null;
 
-        final Accessor accessor = accessorFor(sample.getClass());
-        if (accessor == null) return null;
+        Accessor accessor = accessorFor(sample.getClass());
+        return accessor == null ? null : new NewestFirst(accessor);
+    }
 
-        return new Comparator<Object>() {
-            @Override
-            public int compare(Object a, Object b) {
-                long ta = accessor.lastModified(a);
-                long tb = accessor.lastModified(b);
-                return Long.compare(tb, ta);   // newest first
+    /**
+     * Newest first. One instance per sort (single-threaded), remembering each element's
+     * timestamp so it is read once, not on every comparison.
+     */
+    private static final class NewestFirst implements Comparator<Object> {
+        private final Accessor mAccessor;
+        private final IdentityHashMap<Object, Long> mTimes = new IdentityHashMap<Object, Long>();
+
+        NewestFirst(Accessor accessor) {
+            mAccessor = accessor;
+        }
+
+        @Override
+        public int compare(Object a, Object b) {
+            return Long.compare(time(b), time(a));   // newest first
+        }
+
+        private long time(Object o) {
+            Long t = mTimes.get(o);
+            if (t == null) {
+                t = o == null ? 0L : mAccessor.lastModified(o);
+                mTimes.put(o, t);
             }
-        };
+            return t;
+        }
+    }
+
+    private static final Object NO_ACCESSOR = new Object();
+    private static final ConcurrentHashMap<Class<?>, Object> sAccessors =
+            new ConcurrentHashMap<Class<?>, Object>();
+
+    /** accessorFor, worked out once per class (most lists sorted in the app aren't files). */
+    private static Accessor accessorFor(Class<?> type) {
+        Object hit = sAccessors.get(type);
+        if (hit == null) {
+            Accessor a = findAccessor(type);
+            hit = a != null ? a : NO_ACCESSOR;
+            sAccessors.put(type, hit);
+        }
+        return hit == NO_ACCESSOR ? null : (Accessor) hit;
     }
 
     /** How to read a last-modified time from an element of this type, or null if there's none. */
-    private static Accessor accessorFor(Class<?> type) {
+    private static Accessor findAccessor(Class<?> type) {
         if (File.class.isAssignableFrom(type)) {
             return new Accessor() {
                 @Override
@@ -120,7 +159,7 @@ final class FilesSort {
             };
         }
         // Obfuscated model objects: look for a zero-arg method returning a plausible epoch-ms
-        // long, named like a timestamp getter. Cache the first match per class.
+        // long, named like a timestamp getter.
         final Method m = timestampMethod(type);
         if (m != null) {
             return new Accessor() {

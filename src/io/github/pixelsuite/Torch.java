@@ -6,7 +6,6 @@ import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
 import android.os.Binder;
 import android.os.Handler;
-import android.os.HandlerThread;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Flashlight control from system_server. The torch state is tracked with a TorchCallback,
  * so it stays in sync with the Quick Settings tile and any other app using the torch.
- * All camera calls run on a private background thread, never on the input thread.
+ * All camera calls run on Pixel Suite's background thread, never on the input thread.
  */
 final class Torch {
 
@@ -27,9 +26,9 @@ final class Torch {
 
     static synchronized void init(Context ctx) {
         if (sCameraManager != null) return;
-        HandlerThread thread = new HandlerThread("PowerTorch");
-        thread.start();
-        sHandler = new Handler(thread.getLooper());
+        // Shares Pixel Suite's background thread: the torch needs it only for a moment per
+        // toggle, so a thread of its own would just sit idle.
+        sHandler = Bg.handler();
         sCameraManager = (CameraManager) ctx.getSystemService(Context.CAMERA_SERVICE);
         // Delivers the current state of every flash unit right after registration.
         sCameraManager.registerTorchCallback(new CameraManager.TorchCallback() {

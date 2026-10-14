@@ -34,6 +34,8 @@ final class DoubleTapSleep {
     private static String sHome;
     private static long sHomeAt;
     private static boolean sLoggedFirstTap;
+    /** system_server's context, found once (it never changes). */
+    private static volatile Context sCtx;
 
     private DoubleTapSleep() {}
 
@@ -120,9 +122,13 @@ final class DoubleTapSleep {
     }
 
     private static Context context(Object session) {
+        Context ctx = sCtx;
+        if (ctx != null) return ctx;
         try {
             Object wms = Xp.getObjectField(session, "mService");
-            return (Context) Xp.getObjectField(wms, "mContext");
+            ctx = (Context) Xp.getObjectField(wms, "mContext");
+            sCtx = ctx;
+            return ctx;
         } catch (Throwable t) {
             return null;
         }

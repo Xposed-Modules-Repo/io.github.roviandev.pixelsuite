@@ -5,7 +5,7 @@ import android.os.SystemClock;
 import android.provider.Settings;
 
 /**
- * The six on/off switches, all in Settings.Secure. One key per feature, shared by the phone's
+ * The on/off switches, all in Settings.Secure. One key per feature, shared by the phone's
  * Settings > System > Gestures pages and Pixel Suite's own screen, so both always agree.
  *
  * Settings.Secure is read natively by every process involved: system_server and system apps
@@ -22,20 +22,28 @@ final class Feature {
     static final String CLEAR_ALL = "pixelsuite_clear_all";
     static final String FILES_SORT = "pixelsuite_files_sort";
     /**
-     * Master switch for "Tap or Double tap to wake" (double tap to wake, lock screen double tap
-     * to sleep, lock screen shortcuts). The details live on the Settings > System > Gestures
-     * page. Default on, so the per-option choices made with v1.1.0 keep working.
+     * Master switch for "Tap or Double tap to wake". On, it brings: tap or double tap to wake
+     * (DOUBLE_TAP_WAKE picks which; on the Always On Display the touchscreen stays on while
+     * the phone is in the hand, and lying still the second tap of a double tap is felt by the
+     * motion sensor), double tap the lock screen to sleep, and the
+     * lock screen behavior (LOCK_SHORTCUTS). The choices live on Settings > System >
+     * Gestures > Tap or Double Tap to check phone. Default on.
      */
     static final String TAP_CHECK = "pixelsuite_tap_check";
+    /** 1 = double tap to wake, 0 = tap to wake. Default tap. */
     static final String DOUBLE_TAP_WAKE = "pixelsuite_double_tap_wake";
-    static final String LOCK_SLEEP = "pixelsuite_lockscreen_double_tap_sleep";
-    /** Keep the lock screen clock/alarm/weather tappable. Default off (they are suppressed). */
+    /**
+     * Lock screen behavior. 0 (default, "Modded behavior"): the cards under the clock (alarm,
+     * weather, date) act like empty space and lock screen taps don't vibrate, so a double tap to
+     * sleep never opens anything. 1 ("Stock behavior"): the cards open their apps and taps
+     * vibrate as usual.
+     */
     static final String LOCK_SHORTCUTS = "pixelsuite_lockscreen_shortcuts";
 
     private Feature() {}
 
     static int defaultFor(String key) {
-        return (FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key) || LOCK_SLEEP.equals(key)
+        return (FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
                 || LOCK_SHORTCUTS.equals(key)) ? 0 : 1;   // everything else starts on
     }
 

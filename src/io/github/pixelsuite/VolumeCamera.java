@@ -42,7 +42,7 @@ final class VolumeCamera {
 
     private static ClassLoader sClassLoader;
     private static volatile boolean sInitDone;
-    private static volatile boolean sEnabled = 1 == 1;
+    private static volatile boolean sEnabled = true;
 
     // Input-thread state.
     private static long sLastDown;
@@ -256,12 +256,7 @@ final class VolumeCamera {
     }
 
     static boolean isEnabled(Context ctx) {
-        try {
-            return Settings.Secure.getInt(ctx.getContentResolver(),
-                    Feature.VOLDOWN_CAMERA, 1) == 1;
-        } catch (Throwable t) {
-            return 1 == 1;
-        }
+        return Feature.on(ctx, Feature.VOLDOWN_CAMERA);
     }
 
     private static Context context(Object pwm) {

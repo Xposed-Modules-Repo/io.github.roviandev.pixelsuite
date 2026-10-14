@@ -28,10 +28,11 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Pixel Suite's own screen, opened from LSPosed Manager.
@@ -51,11 +52,19 @@ public class SettingsActivity extends Activity {
     private int mBg, mCard, mText, mTextSecondary, mAccent;
 
     private final Map<String, Switch> mSwitches = new LinkedHashMap<String, Switch>();
-    private final ExecutorService mIo = Executors.newSingleThreadExecutor();
+    /**
+     * One queue for every root call, shared by all instances of this screen, so a save made
+     * just before a rotation or theme change still runs before the new screen's reload. Its
+     * single thread ends after 10 s idle.
+     */
+    private static final ExecutorService IO = new ThreadPoolExecutor(0, 1, 10L,
+            TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private TextView mBanner;
     /** True while switches are set from stored values, so their listeners don't save. */
     private boolean mUpdating;
+    /** Counts saves (main thread), so a reload that started before one doesn't undo it. */
+    private int mSaves;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -109,9 +118,10 @@ public class SettingsActivity extends Activity {
                 "Double-tap empty space on the home screen to lock the phone.");
         row(gestures, Feature.TAP_CHECK, "ic_ps_tapwake", 0xFF3949AB,
                 "Tap or Double tap to wake",
-                "Double-tap to wake the screen, double-tap the lock screen to sleep, and the lock "
-                        + "screen shortcuts. Choose the options in Settings \u203a System \u203a "
-                        + "Gestures \u203a Tap or Double Tap to check phone.");
+                "Wake the screen with a tap or a double tap, and double-tap the lock screen to "
+                        + "turn it off. "
+                        + "Choose the options in Settings \u203a System \u203a Gestures \u203a "
+                        + "Tap or Double Tap to check phone.");
         finishGroup(gestures);
 
         section(page, "Apps");
@@ -155,23 +165,25 @@ public class SettingsActivity extends Activity {
         load();   // the phone's Settings may have changed something meanwhile
     }
 
-    @Override
-    protected void onDestroy() {
-        mIo.shutdown();
-        super.onDestroy();
-    }
-
     // ------------------------------------------------------------------ data
 
     private void load() {
         final String[] keys = mSwitches.keySet().toArray(new String[0]);
-        mIo.execute(new Runnable() {
+        final int savesBefore = mSaves;
+        IO.execute(new Runnable() {
             @Override
             public void run() {
                 final int[] values = Root.readSecure(keys);
                 mMain.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        // A switch was flipped while this read ran: its values are stale, and
+                        // the save already queued behind it is the truth. Read again after it.
+                        if (mSaves != savesBefore && values != null) {
+                            load();
+                            return;
+                        }
                         if (values == null) {
                             showRootBanner(true);
                             for (Switch sw : mSwitches.values()) sw.setEnabled(false);
@@ -192,14 +204,15 @@ public class SettingsActivity extends Activity {
     }
 
     private void save(final String key, final boolean on, final Switch sw) {
-        mIo.execute(new Runnable() {
+        mSaves++;
+        IO.execute(new Runnable() {
             @Override
             public void run() {
                 final boolean ok = Root.run(command(key, on)) != null;
                 mMain.post(new Runnable() {
                     @Override
                     public void run() {
-                        if (ok) return;
+                        if (ok || isFinishing() || isDestroyed()) return;
                         mUpdating = true;
                         sw.setChecked(!on);   // put the switch back
                         mUpdating = false;
