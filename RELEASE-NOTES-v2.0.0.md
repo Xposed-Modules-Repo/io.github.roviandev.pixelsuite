@@ -6,7 +6,7 @@ After 45 preview updates, a lot of testing and plenty of small adjustments, Pixe
 
 ## UI overhaul and smoother navigation
 
-Everything now lives in the module app, organized into Buttons, Gestures, Pixel Launcher and Files. Each feature has its own control and explanation. Animated demonstrations show how things work, the changelog opens inside the app, and community/support links are close at hand. The interface follows light and dark mode, with cleaner menus and consistent spacing.
+Everything now lives in the module app, organized into Buttons, Gestures, Pixel Launcher and Files. Each feature has its own control and explanation. Animated demonstrations show how things work, and the changelog opens inside the app. The interface follows light and dark mode, with cleaner menus and consistent spacing.
 
 ## Launcher and drawer refinements
 
