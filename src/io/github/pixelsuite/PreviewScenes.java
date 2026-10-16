@@ -1,0 +1,198 @@
+package io.github.pixelsuite;
+
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Typeface;
+
+final class PreviewScenes {
+    private final String key;
+    private final int accent,onAccent,ink,muted,surface;
+    private final boolean dark;
+    private final PreviewIcons icons;
+    private final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path path=new Path();
+    private final Typeface font=Typeface.create("sans-serif-medium",0);
+    private float opacity=1;
+    private static final int BLUE=0xff4285f4,RED=0xffea4335,YELLOW=0xfffbbc05,GREEN=0xff34a853;
+    private static final int[] DOCK={5,1,4,12};
+    private static final String[] RECENTS_ACTIONS={"Screenshot","Select","Clear all"};
+    private static final String[] FILE_NAMES={"Photo.jpg","Invoice.pdf","Voice note.m4a","Notes.docx","Archive.zip","Clip.mp4"};
+    private static final String[] FILE_AGES={"Today 09:15","Oct 12, 10:20","Today 14:42","Oct 8, 08:10","Sep 30, 21:00","Yesterday 18:30"};
+    private static final int[] FILE_RANK={1,3,0,4,5,2};
+    PreviewScenes(String key,int accent,int onAccent,int ink,int muted,int surface,boolean dark,PreviewIcons icons){this.key=key;this.accent=accent;this.onAccent=onAccent;this.ink=ink;this.muted=muted;this.surface=surface;this.dark=dark;this.icons=icons;}
+    long duration(){
+        if(LauncherFeatures.ICONS.equals(key))return 5000;
+        if(LauncherFeatures.DRAG_PILL.equals(key)||LauncherFeatures.GRID.equals(key)||Feature.SCREENSHOT_DOODLES.equals(key))return 4800;
+        if(LauncherFeatures.DRAWER.equals(key)||Feature.SCREENSHOT_FREE_CROP.equals(key)||Feature.FILES_SORT.equals(key))return 4500;
+        if(LauncherFeatures.RENAME.equals(key))return 4300;
+        if(LauncherFeatures.HIDE_SHORTCUTS.equals(key))return 3800;
+        if(Feature.THREE_FINGER.equals(key))return 3600;
+        if(Feature.VOLDOWN_CAMERA.equals(key))return 3200;
+        return 3000;
+    }
+    private static float clamp(float f){return Math.max(0,Math.min(1,f));}
+    private static float e(float a,float b,float t){float f=clamp((t-a)/(b-a));return f*f*(3-2*f);}
+    private static float mix(float a,float b,float f){return a+(b-a)*f;}
+    private int tint(int a,int b,float f){return Color.rgb((int)mix(Color.red(a),Color.red(b),f),(int)mix(Color.green(a),Color.green(b),f),(int)mix(Color.blue(a),Color.blue(b),f));}
+    private void paint(int color,boolean stroke,float width){p.setColor(color);p.setAlpha(Math.round(255*opacity));p.setStyle(stroke?Paint.Style.STROKE:Paint.Style.FILL);p.setStrokeWidth(width);p.setStrokeCap(Paint.Cap.ROUND);p.setStrokeJoin(Paint.Join.ROUND);}
+    private void box(Canvas c,float x,float y,float w,float h,float r,int color){paint(color,false,0);c.drawRoundRect(x,y,x+w,y+h,r,r,p);}
+    private void outline(Canvas c,float x,float y,float w,float h,float r,int color){paint(color,true,2);c.drawRoundRect(x,y,x+w,y+h,r,r,p);}
+    private void line(Canvas c,float x,float y,float a,float b,int color){paint(color,true,2.4f);c.drawLine(x,y,a,b,p);}
+    private void circle(Canvas c,float x,float y,float r,int color){paint(color,false,0);c.drawCircle(x,y,r,p);}
+    private void text(Canvas c,String s,float x,float y,float size,int color){paint(color,false,0);p.setTextSize(size);p.setTypeface(font);p.setTextAlign(Paint.Align.CENTER);c.drawText(s,x,y,p);}
+    private void alpha(Canvas c,float f){c.saveLayerAlpha(0,0,240,500,Math.round(255*clamp(f)));}
+    private void touch(Canvas c,float x,float y,float t,float start,float length){float f=(t-start)/length;if(f<0||f>1)return;float old=opacity;opacity*=1-f;paint(accent,true,2.5f);c.drawCircle(x,y,8+12*f,p);circle(c,x,y,4,accent);opacity=old;}
+    private void pill(Canvas c,float alpha){float old=opacity;opacity*=alpha;box(c,96,486,48,4,2,ink);opacity=old;}
+    private void background(Canvas c){box(c,0,0,240,500,0,surface);circle(c,214,190,165,tint(surface,accent,.12f));circle(c,4,357,170,tint(surface,accent,.07f));}
+    private void home(Canvas c,boolean dock){background(c);text(c,"10:08",120,132,38,ink);text(c,"Friday, Oct 16",120,158,12,muted);if(dock)dock(c);}
+    private void dock(Canvas c){for(int i=0;i<4;i++)app(c,DOCK[i],36+56*i,448,35,false);}
+
+    void draw(Canvas c,int width,int height,float t,float reset){
+        float scale=Math.min(width/336f,height/300f);if(scale<=0)return;
+        c.save();c.translate((width-336*scale)/2,(height-300*scale)/2);c.scale(scale,scale);
+        box(c,0,0,336,300,24,tint(surface,accent,.035f));
+        box(c,94,2,148,296,25,tint(surface,ink,.24f));box(c,97,5,142,290,23,0xff111216);
+        float power=Feature.FLASHLIGHT.equals(key)?pulse(t,.08f)+pulse(t,.16f):0;
+        float down=Feature.VOLDOWN_CAMERA.equals(key)?pulse(t,.08f)+pulse(t,.16f):0;
+        box(c,243,55,3.8f,25,1.8f,tint(muted,accent,clamp(power)));box(c,243,103,3.8f,50,1.8f,muted);box(c,243,129,3.8f,24,1.8f,tint(muted,accent,clamp(down)));line(c,243,128,247,128,surface);
+        if(power>0||down>0){float yy=power>0?67:141;float old=opacity;opacity=clamp(power+down)*.5f;circle(c,245,yy,11,accent);opacity=old;}
+        c.save();path.reset();path.addRoundRect(100,8,236,292,20,20,Path.Direction.CW);c.clipPath(path);c.translate(100,8);c.scale(136/240f,284/500f);
+        if(reset<=0)scene(c,t);else{alpha(c,1-reset);scene(c,1);c.restore();alpha(c,reset);scene(c,0);c.restore();}
+        c.restore();c.restore();
+    }
+    private float pulse(float t,float start){return t<start||t>start+.055f?0:(float)Math.sin((t-start)/.055f*Math.PI);}
+    private void app(Canvas c,int kind,float x,float y,float size,boolean label){
+        if(!icons.draw(c,kind,x,y,size,opacity))fallback(c,kind,x,y,size);
+        if(label)text(c,PreviewIcons.NAMES[Math.floorMod(kind,PreviewIcons.NAMES.length)],x,y+size*.77f,10,ink);
+    }
+    private void fallback(Canvas c,int kind,float x,float y,float size){
+        c.save();c.translate(x-size/2,y-size/2);c.scale(size/48,size/48);box(c,0,0,48,48,15,0xfff8f9fa);
+        switch(Math.floorMod(kind,13)){
+            case 0:box(c,5,3,38,42,8,YELLOW);circle(c,24,21,10,0xffffffff);box(c,20,28,8,8,2,0xffffffff);line(c,20,39,28,39,0xffffffff);break;
+            case 1:paint(RED,false,0);c.drawArc(1,1,47,47,210,120,true,p);paint(YELLOW,false,0);c.drawArc(1,1,47,47,330,120,true,p);paint(GREEN,false,0);c.drawArc(1,1,47,47,90,120,true,p);circle(c,24,24,11,0xffffffff);circle(c,24,24,8,BLUE);break;
+            case 2:circle(c,24,19,14,GREEN);path.reset();path.moveTo(13,26);path.lineTo(24,44);path.lineTo(35,26);path.close();paint(BLUE,false,0);c.drawPath(path,p);circle(c,24,19,5,0xffffffff);break;
+            case 3:paint(BLUE,false,0);c.drawArc(6,6,28,28,180,180,true,p);paint(RED,false,0);c.drawArc(20,6,42,28,270,180,true,p);paint(YELLOW,false,0);c.drawArc(20,20,42,42,0,180,true,p);paint(GREEN,false,0);c.drawArc(6,20,28,42,90,180,true,p);break;
+            case 4:line(c,8,37,8,13,BLUE);line(c,40,37,40,13,GREEN);paint(RED,true,6);path.reset();path.moveTo(8,13);path.lineTo(24,26);path.lineTo(40,13);c.drawPath(path,p);break;
+            case 5:circle(c,24,24,22,BLUE);box(c,10,12,28,22,7,0xffffffff);path.reset();path.moveTo(13,30);path.lineTo(13,39);path.lineTo(22,31);path.close();paint(0xffffffff,false,0);c.drawPath(path,p);break;
+            case 6:box(c,5,10,38,31,5,BLUE);box(c,5,8,19,10,3,YELLOW);box(c,12,17,25,5,2,0xffffffff);break;
+            case 7:box(c,5,5,38,38,5,BLUE);box(c,9,13,30,26,2,0xffffffff);text(c,"31",24,33,20,BLUE);break;
+            case 8:box(c,3,9,42,30,9,RED);path.reset();path.moveTo(20,17);path.lineTo(32,24);path.lineTo(20,32);path.close();paint(0xffffffff,false,0);c.drawPath(path,p);break;
+            case 9:line(c,12,37,24,10,GREEN);line(c,24,10,39,37,YELLOW);line(c,12,37,39,37,BLUE);break;
+            case 10:circle(c,24,24,20,0xffdde6f8);line(c,24,24,24,11,BLUE);line(c,24,24,35,27,BLUE);break;
+            case 11:paint(BLUE,true,7);c.drawArc(9,9,39,39,-35,110,false,p);paint(GREEN,true,7);c.drawArc(9,9,39,39,75,95,false,p);paint(YELLOW,true,7);c.drawArc(9,9,39,39,170,45,false,p);paint(RED,true,7);c.drawArc(9,9,39,39,215,110,false,p);paint(BLUE,true,6);c.drawLine(25,24,40,24,p);break;
+            default:box(c,5,10,38,29,8,0xff607d8b);circle(c,24,24,12,0xff263238);circle(c,24,24,7,BLUE);break;
+        }c.restore();
+    }
+    private void search(Canvas c){box(c,12,25,216,38,19,tint(surface,ink,.07f));app(c,11,33,44,20,false);text(c,"Search apps",113,48,12,muted);circle(c,207,44,3,muted);}
+    private void drawer(Canvas c,int skip){drawer(c,skip,-1);}
+    private void drawer(Canvas c,int skip,int skipSecond){
+        box(c,0,0,240,500,0,tint(surface,ink,.025f));search(c);
+        for(int i=0;i<20;i++)if(i!=skip&&i!=skipSecond)app(c,i%13,33+(i%4)*58,104+(i/4)*71,34,true);
+    }
+    private void photo(Canvas c,float x,float y,float w,float h){
+        box(c,x,y,w,h,8,dark?0xff6f92ad:0xffbdd9ed);circle(c,x+w*.73f,y+h*.23f,w*.09f,0xffffd18a);
+        path.reset();path.moveTo(x,y+h*.85f);path.lineTo(x+w*.32f,y+h*.32f);path.lineTo(x+w*.66f,y+h);path.lineTo(x,y+h);path.close();paint(0xff4f7a7b,false,0);c.drawPath(path,p);
+        path.reset();path.moveTo(x+w*.32f,y+h);path.lineTo(x+w*.73f,y+h*.49f);path.lineTo(x+w,y+h*.77f);path.lineTo(x+w,y+h);path.close();paint(0xff345b68,false,0);c.drawPath(path,p);
+    }
+    private void noteIcon(Canvas c,float x,float y,float size){
+        c.save();c.translate(x-size/2,y-size/2);c.scale(size/48,size/48);box(c,0,0,48,48,15,0xff7660ca);box(c,12,8,25,32,4,0xfffaf7ff);
+        path.reset();path.moveTo(29,8);path.lineTo(37,16);path.lineTo(29,16);path.close();paint(0xffd8ccff,false,0);c.drawPath(path,p);line(c,17,22,31,22,0xff7660ca);line(c,17,27,31,27,0xff7660ca);line(c,17,32,26,32,0xff7660ca);c.restore();
+    }
+    private void torch(Canvas c,float lit){
+        box(c,0,0,240,500,0,0xff111216);
+        if(lit>0){float old=opacity;
+            for(int i=0;i<7;i++){float spread=78-i*7;opacity=old*lit*(.035f+i*.016f);path.reset();path.moveTo(105+i,248);path.lineTo(120-spread,99);path.lineTo(120+spread,99);path.lineTo(135-i,248);path.close();paint(i<4?0xffffdf91:0xfffff9db,false,0);c.drawPath(path,p);}
+            opacity=old*lit*.14f;paint(0xffffedba,false,0);c.drawArc(42,83,198,115,0,360,true,p);opacity=old;
+        }
+        box(c,106,265,28,75,8,0xff6d707b);box(c,99,244,42,29,6,0xff9297a4);box(c,102,243,36,7,3,tint(0xff4d515c,0xfffff4c6,lit));circle(c,120,292,5,tint(0xff3b3e47,accent,lit));line(c,113,320,127,320,0xff494d57);
+    }
+    private void recentsActions(Canvas c){
+        for(int i=0;i<3;i++){float x=42+i*78;box(c,x-36,414,72,50,15,tint(surface,ink,.07f));
+            if(i==0){outline(c,x-8,421,16,12,2,ink);line(c,x-10,419,x-5,419,ink);line(c,x+5,435,x+10,435,ink);}
+            else if(i==1){outline(c,x-7,419,14,16,2,ink);line(c,x-3,426,x+3,426,ink);line(c,x-3,430,x+1,430,ink);}
+            else{line(c,x-6,420,x+6,432,ink);line(c,x+6,420,x-6,432,ink);}text(c,RECENTS_ACTIONS[i],x,452,10,ink);
+        }
+    }
+    private void folderIcon(Canvas c,float x,float y){box(c,x-13,y-8,26,20,4,0xffffca61);box(c,x-13,y-12,13,7,2,0xffffca61);line(c,x-8,y-3,x+8,y-3,0xffb98120);}
+    private void fileIcon(Canvas c,int type,float x,float y){
+        c.save();c.translate(x-14,y-17);int color=type==0?0xff3b987b:type==1?0xffdc625e:type==2?0xff8665ba:type==3?0xff4c83cb:type==4?0xffb48c34:0xff4e91b9;
+        box(c,1,1,26,32,3,color);path.reset();path.moveTo(19,1);path.lineTo(27,9);path.lineTo(19,9);path.close();paint(0xfff0e8dc,false,0);c.drawPath(path,p);
+        if(type==0){circle(c,9,14,3,0xffffdc84);path.reset();path.moveTo(5,28);path.lineTo(11,18);path.lineTo(16,24);path.lineTo(21,17);path.lineTo(25,28);path.close();paint(0xffe6f7ef,false,0);c.drawPath(path,p);}
+        else if(type==1)text(c,"PDF",14,24,10,0xffffffff);
+        else if(type==2){for(int i=0;i<5;i++){float h=i==2?12:i%2==0?5:8;line(c,7+i*4,21-h/2,7+i*4,21+h/2,0xfffaf5ff);}}
+        else if(type==3){for(int i=0;i<3;i++)line(c,6,16+i*5,22-i*3,16+i*5,0xffffffff);}
+        else if(type==4){line(c,14,9,14,28,0xffffedb6);for(int i=0;i<4;i++)line(c,11,12+i*4,17,12+i*4,0xff5a451c);}
+        else{path.reset();path.moveTo(10,14);path.lineTo(22,21);path.lineTo(10,28);path.close();paint(0xfff2f9ff,false,0);c.drawPath(path,p);}c.restore();
+    }
+    private void fileRow(Canvas c,int i,float f){
+        float y=178+mix(i,FILE_RANK[i],f)*51;box(c,11,y-21,218,46,9,tint(surface,ink,.045f));fileIcon(c,i,32,y);text(c,FILE_NAMES[i],143,y-3,11,ink);text(c,FILE_AGES[i],143,y+13,9,muted);
+        if(i==2&&f>0&&f<1)outline(c,11,y-21,218,46,9,accent);
+    }
+    private void chat(Canvas c){
+        box(c,0,0,240,500,0,surface);app(c,5,29,36,27,false);text(c,"Weekend plans",127,40,16,ink);line(c,10,66,230,66,tint(surface,muted,.2f));
+        box(c,13,86,169,58,14,tint(surface,ink,.07f));text(c,"Ready for the weekend?",97,109,12,ink);text(c,"Let's find a new place.",94,128,11,muted);
+        box(c,55,163,172,49,14,tint(surface,accent,.25f));text(c,"Yes! A coffee sounds good.",141,190,11,ink);
+        box(c,13,233,179,128,14,tint(surface,ink,.07f));photo(c,20,240,165,93);text(c,"How about this spot?",100,350,11,ink);
+        box(c,58,382,169,45,14,tint(surface,accent,.25f));text(c,"Perfect. See you there!",143,409,11,ink);box(c,12,447,216,30,15,tint(surface,ink,.07f));text(c,"Message",66,466,11,muted);
+    }
+    private void editor(Canvas c,String title){box(c,0,0,240,500,0,surface);text(c,title,120,31,15,ink);text(c,"Save",207,31,12,accent);photo(c,12,67,216,322);pill(c,1);}
+    private void popup(Canvas c,float x,float y,String a,String b,String d,float show){
+        if(show<=0)return;c.save();c.translate(0,8*(1-show));alpha(c,show);box(c,x+1,y+4,194,100,15,tint(surface,ink,.14f));box(c,x,y,194,98,15,tint(surface,ink,.07f));text(c,a,x+97,y+25,12,ink);text(c,b,x+97,y+55,12,ink);text(c,d,x+97,y+83,12,ink);c.restore();c.restore();
+    }
+    private void arrow(Canvas c,float x,float y,float a,float b,float f,int color){float xx=mix(x,a,f),yy=mix(y,b,f);line(c,x,y,xx,yy,color);if(f>.96f){float angle=(float)Math.atan2(b-y,a-x);line(c,a,b,a-14*(float)Math.cos(angle-.5),b-14*(float)Math.sin(angle-.5),color);line(c,a,b,a-14*(float)Math.cos(angle+.5),b-14*(float)Math.sin(angle+.5),color);}}
+    private void morphGrid(Canvas c,int a,int b,float f){
+        int count=Math.max(a*a,b*b);for(int i=0;i<count;i++){
+            float old=opacity;float alpha=i>=a*a?f:i>=b*b?1-f:1;if(alpha<=0)continue;opacity*=alpha;
+            float ax=16+208*(i%a+.5f)/a,ay=110+208*(i/a+.5f)/a;
+            float bx=16+208*(i%b+.5f)/b,by=110+208*(i/b+.5f)/b;
+            if(i>=a*a){ax=bx;ay=by;}if(i>=b*b){bx=ax;by=ay;}
+            float x=mix(ax,bx,f),y=mix(ay,by,f),size=mix(44-a*2,44-b*2,f);app(c,i%13,x,y,size,false);text(c,PreviewIcons.NAMES[i%13],x,y+size*.8f,Math.max(7,12-b),ink);opacity=old;
+        }
+    }
+    private void scene(Canvas c,float t){
+        if(Feature.FLASHLIGHT.equals(key)){
+            torch(c,e(.2f,.3f,t));
+        }else if(Feature.VOLDOWN_CAMERA.equals(key)){
+            box(c,0,0,240,500,0,0xff000000);float camera=e(.21f,.29f,t);if(camera>0){alpha(c,camera);photo(c,0,38,240,331);box(c,0,0,240,38,0,0xff15161b);box(c,0,369,240,131,0,0xff15161b);text(c,"PHOTO",120,400,12,0xfff5f5f5);text(c,"VIDEO",190,400,11,0xff9b9ca3);circle(c,120,446,29,0xfffafafa);circle(c,120,446,24,0xff25262c);circle(c,120,446,21,0xfffafafa);outline(c,40,438,18,18,5,0xff9b9ca3);circle(c,198,447,10,0xff60626a);c.restore();}
+        }else if(Feature.THREE_FINGER.equals(key)){
+            chat(c);float swipe=e(.08f,.32f,t);float visible=1-e(.35f,.43f,t);if(visible>0){float old=opacity;opacity=visible;for(int i=0;i<3;i++){float x=75+i*45,y=130+swipe*190;line(c,x,y-26,x,y,accent);circle(c,x,y,9,accent);}opacity=old;}
+            float flash=e(.32f,.36f,t)*(1-e(.36f,.42f,t));if(flash>0){float old=opacity;opacity=flash*.65f;box(c,0,0,240,480,0,0xffffffff);opacity=old;}
+            float captured=e(.36f,.6f,t);if(captured>0){c.save();float size=mix(1,.27f,captured),x=mix(0,12,captured),y=mix(0,338,captured);c.translate(x,y);c.scale(size,size);for(int i=5;i>0;i--)box(c,-i*2,6,240+i*4,480,18,tint(surface,ink,.035f*i));chat(c);outline(c,0,0,240,480,10,accent);c.restore();}pill(c,1);
+        }else if(Feature.SCREENSHOT_FREE_CROP.equals(key)){
+            editor(c,"Crop");float squeeze=e(.12f,.62f,t);float x=mix(20,61,squeeze),top=mix(80,220,squeeze),w=mix(200,118,squeeze),h=mix(294,12,squeeze);
+            float old=opacity;opacity=.55f;box(c,12,67,216,top-67,0,0xff101217);box(c,12,top+h,216,389-top-h,0,0xff101217);box(c,12,top,x-12,h,0,0xff101217);box(c,x+w,top,228-x-w,h,0,0xff101217);opacity=old;
+            outline(c,x,top,w,h,1,accent);for(int i=0;i<2;i++){float xx=i==0?x:x+w;line(c,xx-7,top,xx+7,top,accent);line(c,xx-7,top+h,xx+7,top+h,accent);}touch(c,x,top,t,.25f,.3f);text(c,"Crop freely",120,438,15,ink);
+        }else if(Feature.SCREENSHOT_DOODLES.equals(key)){
+            editor(c,"Doodles");arrow(c,36,325,193,119,e(.06f,.25f,t),0xffffce6b);float oval=e(.21f,.4f,t);paint(0xfffafafa,true,4);c.drawArc(39,106,115,181,-90,360*oval,false,p);float rectangle=e(.37f,.54f,t);outline(c,120,249,76*rectangle,59*rectangle,7,0xfff58ab1);arrow(c,37,355,199,355,e(.54f,.68f,t),0xffb6e0bc);float tri=e(.66f,.81f,t);if(tri>0){float old=opacity;opacity=tri;path.reset();path.moveTo(147,196);path.lineTo(172,238);path.lineTo(122,238);path.close();paint(0xffffce6b,true,3);c.drawPath(path,p);opacity=old;}box(c,19,414,202,50,20,tint(surface,ink,.07f));for(int i=0;i<5;i++){int color=i%2==0?accent:ink;float xx=41+i*40;if(i==0)arrow(c,xx-7,446,xx+7,432,1,color);else if(i==1)outline(c,xx-7,431,14,14,7,color);else if(i==2)outline(c,xx-7,432,14,13,2,color);else line(c,xx-7,444,xx+7,433,color);}
+        }else if(Feature.DOUBLE_TAP_SLEEP.equals(key)){
+            float lock=e(.2f,.32f,t);background(c);text(c,"10:08",120,210,38,ink);float old=opacity;opacity=1-lock;dock(c);pill(c,1);opacity=old;alpha(c,lock);box(c,0,0,240,500,0,0xff111216);text(c,"10:08",120,210,38,0xffc3c4ce);c.restore();touch(c,120,300,t,.07f,.07f);touch(c,120,300,t,.15f,.07f);
+        }else if(Feature.TAP_CHECK.equals(key)){
+            float wake=e(.2f,.32f,t);box(c,0,0,240,500,0,tint(0xff000000,0xff17181e,wake));text(c,"10:08",120,210,38,tint(0xff4d4f57,0xfff1f0f5,wake));touch(c,120,300,t,.07f,.07f);touch(c,120,300,t,.15f,.07f);
+        }else if(LauncherFeatures.GRID.equals(key)){
+            home(c,true);box(c,9,74,222,321,20,tint(surface,ink,.06f));if(t<.48f)morphGrid(c,3,4,e(.12f,.38f,t));else morphGrid(c,4,5,e(.51f,.78f,t));text(c,"Apps",43,374,16,ink);text(c,t<.25f?"3×3":t<.65f?"4×4":"5×5",194,374,15,accent);pill(c,1);
+        }else if(LauncherFeatures.DRAWER.equals(key)){
+            drawer(c,0,1);float move=e(.14f,.47f,t),merge=e(.48f,.6f,t);float old=opacity;opacity=1-merge;app(c,1,91,104,34,true);app(c,0,mix(33,91,move),104,34,false);opacity=old;touch(c,33,104,t,.04f,.1f);if(merge>0){alpha(c,merge);box(c,71,84,40,40,14,tint(surface,accent,.32f));app(c,0,83,96,14,false);app(c,1,99,96,14,false);text(c,"Apps",91,131,10,ink);c.restore();}pill(c,1);
+        }else if(LauncherFeatures.DRAG_PILL.equals(key)){
+            float lift=e(.16f,.4f,t),exit=e(.42f,.62f,t),drop=e(.65f,.84f,t);home(c,true);pill(c,1);c.save();c.translate(0,exit*520);drawer(c,0);float target=e(.05f,.14f,t);box(c,15,25-55*(1-target),210,40,20,tint(surface,accent,.22f));text(c,"+ Add to home screen",120,50-55*(1-target),13,ink);c.restore();float x=mix(33,120,lift),y=mix(104,44,lift);x=mix(x,61,drop);y=mix(y,260,drop);app(c,0,x,y,34,false);if(drop==1)text(c,"Keep",61,288,11,ink);touch(c,33,104,t,.02f,.08f);
+        }else if(LauncherFeatures.ICONS.equals(key)){
+            home(c,true);float picked=e(.73f,.85f,t);if(picked<1)app(c,0,70,252,42,true);if(picked>0){alpha(c,picked);noteIcon(c,70,252,42);text(c,"Keep",70,285,11,ink);c.restore();}touch(c,70,252,t,.04f,.14f);
+            float menu=e(.14f,.2f,t)*(1-e(.35f,.4f,t));popup(c,22,292,"Change icon","Rename","App info",menu);touch(c,120,315,t,.29f,.07f);
+            float picker=e(.39f,.46f,t)*(1-e(.7f,.78f,t));if(picker>0){alpha(c,picker);box(c,8,167,224,333,24,tint(surface,ink,.04f));box(c,99,179,42,4,2,muted);text(c,"Choose an image",120,215,18,ink);app(c,3,67,263,36,false);text(c,"Photos",67,295,13,ink);app(c,6,174,263,36,false);text(c,"Files",174,295,13,ink);box(c,23,321,91,115,8,tint(surface,accent,.1f));noteIcon(c,68,378,65);photo(c,126,321,91,115);touch(c,67,263,t,.48f,.08f);touch(c,68,368,t,.63f,.08f);c.restore();}pill(c,1);
+        }else if(LauncherFeatures.RENAME.equals(key)){
+            home(c,true);app(c,0,70,252,42,false);text(c,t>.84f?"Keep":"Keep Notes",70,286,11,ink);touch(c,70,252,t,.03f,.12f);float menu=e(.14f,.2f,t)*(1-e(.32f,.38f,t));popup(c,22,292,"Change icon","Rename","App info",menu);touch(c,120,347,t,.25f,.07f);
+            float dialog=e(.36f,.44f,t)*(1-e(.77f,.84f,t));if(dialog>0){alpha(c,dialog);box(c,14,176,212,161,23,tint(surface,ink,.06f));text(c,"Rename app",120,208,18,ink);box(c,29,225,182,45,8,tint(surface,accent,.12f));text(c,t<.54f?"Keep Notes":t<.6f?"K":t<.65f?"Kee":"Keep",120,254,17,ink);text(c,"Cancel",72,311,13,muted);text(c,"Save",180,311,13,accent);touch(c,180,306,t,.71f,.07f);c.restore();}pill(c,1);
+        }else if(Feature.CLEAR_ALL.equals(key)){
+            background(c);float dismiss=e(.23f,.53f,t);if(dismiss<1){for(int i=0;i<3;i++){float x=-44+i*112,y=78-dismiss*620;box(c,x,y,104,303,15,tint(surface,ink,.12f));box(c,x+3,y+4,98,295,12,surface);app(c,i==0?0:i==1?5:1,x+52,y+33,24,false);for(int j=0;j<5;j++)box(c,x+12,y+64+j*30,80-j%2*22,8,4,tint(surface,accent,.15f));}}else text(c,"No recent apps",120,245,17,muted);
+            float old=opacity;opacity=1-dismiss;recentsActions(c);opacity=old;touch(c,198,439,t,.12f,.1f);pill(c,1);
+        }else if(LauncherFeatures.HIDE_SHORTCUTS.equals(key)){
+            drawer(c,0,11);app(c,11,33,104,34,true);app(c,0,207,246,34,true);touch(c,33,104,t,.03f,.1f);float show=e(.11f,.18f,t),hide=e(.33f,.59f,t);if(show>0){alpha(c,show);box(c,13,140,214,166-48*hide,18,tint(surface,ink,.08f));float old=opacity;opacity=1-hide;text(c,"Search",120,163,12,ink);text(c,"Voice search",120,187,12,ink);opacity=old;text(c,"App info",120,211-48*hide,12,ink);text(c,"Add to home screen",120,235-48*hide,12,ink);text(c,"Change icon",120,259-48*hide,12,ink);text(c,"Rename",120,283-48*hide,12,ink);c.restore();}pill(c,1);
+        }else if(Feature.FILES_SORT.equals(key)){
+            box(c,0,0,240,500,0,surface);text(c,"Files",43,35,23,ink);text(c,"Newest first",177,35,12,accent);
+            box(c,12,57,216,35,10,tint(surface,accent,.12f));folderIcon(c,32,73);text(c,"Downloads",128,80,13,ink);
+            box(c,12,99,216,35,10,tint(surface,accent,.12f));folderIcon(c,32,115);text(c,"Documents",128,122,13,ink);
+            text(c,"Files · date modified",120,151,10,muted);float f=e(.16f,.7f,t);for(int i=0;i<6;i++)if(i!=2)fileRow(c,i,f);fileRow(c,2,f);pill(c,1);
+        }else {home(c,true);pill(c,1);}
+    }
+}
