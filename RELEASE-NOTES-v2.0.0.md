@@ -10,7 +10,7 @@ Everything now lives in the module app, organized into Buttons, Gestures, Pixel 
 
 ## Launcher and drawer refinements
 
-Create folders directly inside the app drawer, rename them, sort their contents and add more apps. Home-screen and drawer folders have separate 3×3, 4×4 and 5×5 choices. Folder layouts, local blur, dropdowns and opening/closing transitions have been refined throughout the testing builds. The drawer keeps strict alphabetical ordering: English, Arabic, then numbers and special characters, including after removing a folder.
+Create folders directly inside the app drawer, rename them, sort their contents and add more apps. Home-screen and drawer folders have separate 3×3, 4×4 and 5×5 choices. Folder layouts, local blur, dropdowns and opening/closing transitions have been refined throughout the testing builds. The drawer stays alphabetically sorted.
 
 Dragging stays inside the drawer until you move an app to the **Add to home screen** target. Rename apps or choose custom icons through Photos or Files, and see the changes across the home screen, folders, drawer and both app searches without a manual refresh. Reset controls restore the originals.
 

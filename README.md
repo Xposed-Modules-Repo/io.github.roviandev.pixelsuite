@@ -14,7 +14,7 @@ After **45 preview updates**, v2.0.0 brings the work together into one release: 
 
 ## Launcher and app drawer
 
-- Create folders inside the drawer. Rename folders, add apps, sort their contents A–Z, or remove them to return their apps to the alphabetical drawer (English, Arabic, then numbers and special characters). Sorting and removal ask for confirmation.
+- Create folders inside the drawer. Rename folders, add apps, sort their contents A–Z, or remove them to return their apps to the alphabetical drawer. Sorting and removal ask for confirmation.
 - Choose **3×3, 4×4 or 5×5** folder grids. Home-screen and drawer choices are separate. Menus use local frosted backgrounds, confined to their frames.
 - Move apps within the drawer. Drag to the **Add to home screen** target to continue onto the home screen.
 - **Rename apps** and **change icons** using images from Photos or Files. Changes update across home, folders, drawer, drawer search and Google app search without a manual refresh. Restore the original name or icon when needed. Google must be in the module scope for its search integration.
