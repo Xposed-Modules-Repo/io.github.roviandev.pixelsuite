@@ -1,14 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.roviandev.pixelsuite"
-    android:versionCode="13"
-    android:versionName="1.1.3">
+    android:versionCode="59"
+    android:versionName="2.0.0">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <queries>
+        <package android:name="com.google.android.apps.nexuslauncher" />
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.google.android.keep" />
+        <package android:name="com.android.chrome" />
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.google.android.apps.photos" />
+        <package android:name="com.google.android.gm" />
+        <package android:name="com.google.android.apps.messaging" />
+        <package android:name="com.google.android.apps.nbu.files" />
+        <package android:name="com.google.android.calendar" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.google.android.apps.docs" />
+        <package android:name="com.google.android.deskclock" />
+        <package android:name="com.google.android.GoogleCamera" />
+    </queries>
     <application
         android:label="@string/app_name"
         android:description="@string/description"
         android:icon="@drawable/ic_launcher"
         android:allowBackup="false">
+        <provider android:name="io.github.pixelsuite.AliasProvider"
+            android:authorities="io.github.roviandev.pixelsuite.aliases"
+            android:exported="true" android:grantUriPermissions="false" />
         <activity
             android:name="io.github.pixelsuite.SettingsActivity"
             android:exported="true"
@@ -21,3 +40,8 @@
         </activity>
     </application>
 </manifest>
+
+
+
+
+

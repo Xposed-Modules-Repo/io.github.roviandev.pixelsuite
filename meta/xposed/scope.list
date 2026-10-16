@@ -1,5 +1,8 @@
 system
-com.android.settings
 com.android.systemui
 com.google.android.apps.nexuslauncher
 com.google.android.apps.nbu.files
+com.google.android.googlequicksearchbox
+com.google.android.documentsui
+com.android.documentsui
+com.google.android.apps.pixel.creativeassistant

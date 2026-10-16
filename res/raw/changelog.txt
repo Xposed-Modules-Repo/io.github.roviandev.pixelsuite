@@ -1,0 +1,140 @@
+## v2.0.0
+Pixel Suite 2.0.0 brings the work from 45 rounds of testing and refinement into one release.
+
+A new home for Pixel Suite
+• Redesigned settings with clear categories, individual controls, themed icons and explanations.
+• Animated feature demonstrations, an offline changelog, and community/support links. Demonstrations pause between loops and stop when you leave.
+• Light and dark themes, system font preferences and accessibility settings are respected.
+
+Launcher and app drawer
+• Create, rename and organize folders inside the drawer. Sort folder contents or remove a folder to return its apps to the alphabetical drawer.
+• Separate 3×3, 4×4 and 5×5 choices for home-screen and drawer folders, with refined spacing and transitions.
+• Drag apps within the drawer, or use the Add to home screen target to move one onto the home screen.
+• Rename apps and choose custom images through Photos or Files. Names and icons update across home, folders, drawer and both app searches without a manual refresh. Original names and icons can be restored.
+• Optional five-level label sizing changes the text beneath icons without resizing the icons. Hide app-provided drawer shortcuts while keeping basic actions.
+• Clear all moves from the far left of recents to an always-visible position alongside Select and Screenshot.
+
+Gestures and screenshot tools
+• Power-button flashlight, volume-down camera, three-finger screenshots, home-screen double-tap sleep and configurable lock-screen wake remain together in the module.
+• Free screenshot cropping and Doodles in supported Pixel Studio versions: shapes, colors, thickness, fill, move/resize, and Undo/Redo integration.
+
+System polish
+• Newest-first files with folders kept first, in Files by Google and supported Android file pickers.
+• Refined local folder/menu frost, dropdown positioning, icon shapes and drawer interactions. Blur stays inside the affected panel.
+
+Setup and compatibility
+Enable the recommended LSPosed scope and reboot after updating. Add Google for home-screen search changes and Pixel Studio for screenshot tools. All Pixel Suite settings now live in the module app; old release notes below refer to their original layouts.
+
+Testing has focused on Pixel 11 Pro, Android 17 and LSPosed API 102. Pixel Studio tools target 2.3.001 (192285). Other app versions or system updates can affect compatibility. Wake detection and battery use still depend on device state and movement.
+## v1.1.3 · Published release
+Pixel Suite v1.1.3
+
+Improved double-tap wake that adapts to how the phone is resting, with better handling of soft taps, pickup and missed attempts.
+
+What changed
+
+- Better wake detection in your hand or on your lap. The held/still check also recognizes a phone resting on your thigh. While held, the touchscreen stays touch-active on the always-on display so both taps can be real touches.
+- Bounded held-touch periods. Held mode runs for up to 90 seconds per stretch, with a regular four-minute budget per lock. After a missed tap, a short recovery can re-arm touch while the phone is held.
+- Low-power behavior when resting still. On a desk or nightstand, the always-on display returns to low-power mode and motion readings help detect the second tap. An extra tap within three seconds is a backup if a quick double tap misses.
+- Softer second taps are detected more readily on a still phone.
+- Pickup and charging fixes. Better handling of taps just after pickup and small shifts while charging.
+- Lockscreen interaction fix. Delayed touch events are handled to prevent a double tap from opening lockscreen customization unexpectedly.
+
+Why this approach is better
+
+Touch detection is used where motion-based detection is less dependable, such as a held phone or one resting on a lap. When the phone is still, the display can return to low-power operation instead of keeping the touchscreen touch-active throughout standby.
+
+Movement, very soft taps and a vibrating car mount can still affect detection. The held-mode budget also limits how long touch stays active; this is not a guarantee that every double tap will register in every position.
+
+Testing and battery
+
+Tested on my Pixel 11 Pro with Android 17 and LSPosed API 102. It is working well in my testing so far, and I have not noticed additional battery drain. No measured overnight percentage is available; this is not a claim of zero power use. Other devices remain untested.
+
+Install / update
+
+Install PixelSuite-v1.1.3.apk over the previous public release, then reboot. No uninstall is needed when updating with the same signing key.
+
+Source: RovianDev/PixelSuite (https://github.com/RovianDev/PixelSuite) Â· Xposed listing (https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite)
+
+Buy me a coffee (https://buymeacoffee.com/roviandev) Â· Patreon (https://www.patreon.com/c/RovianDev)
+
+
+APK SHA-256: 602379d748b67c8c5834108176eb2532e1c411bb1e85474718c0f1f6e4c56709
+
+## v1.1.2 · Published release
+Pixel Suite v1.1.2
+
+What's new
+
+- Tap or Double tap to wake is now one setting. Double tap the lock screen to sleep is part of it, and with *Double tap to wake* one double tap now works on the always-on display too (the separate "One double tap on Always On Display" switch is gone). Keeping the touchscreen awake there uses a little extra battery while the always-on display is showing (none while charging), and it pauses itself in a pocket, with Battery Saver on, or when the battery is low.
+- New lock screen choice in Settings → System → Gestures → Tap or Double Tap to check phone, replacing the old "Lock screen shortcuts" switch:
+  - Modded behavior (recommended): the alarm, weather and date under the clock act like empty space and lock screen taps don't vibrate, so a double tap to sleep never opens anything by mistake.
+  - Stock behavior: the lock screen stays as Google made it, with tappable cards and tap vibrations. A double tap that lands on a card can open it instead of turning the screen off.
+- Fixed: unlocking with your fingerprint right after locking could pull the notification shade down.
+- Fixed: a double tap to wake right after locking could be missed while the lock screen was still coming up.
+- Lighter on battery: the lock screen touch listener now only runs while the lock screen can show (before, it saw every touch all day), the three-finger screenshot listener only runs while that feature is on, the flashlight shares Pixel Suite's background thread instead of keeping its own, and internal lookups and Files sorting are cached.
+- Fixed: in the module's settings screen, a switch flipped while the screen was reloading could jump back.
+
+Install / update
+
+Install the APK over the previous version (no uninstall needed) and reboot. Tested on a Pixel 11 Pro running Android 17 with LSPosed (API 102).
+
+## v1.1.1 · Published release
+Pixel Suite v1.1.1
+
+Tap or Double tap to wake is now one setting. Everything lives in Settings › System › Gestures › Tap or Double Tap to check phone.
+
+What's new
+- Master toggle "Tap or Double tap to wake" with all options on one page: tap to wake, double tap to wake, double tap on the lock screen to sleep, and lock screen shortcuts.
+- Lock screen shortcuts toggle (off by default):
+  - Off: tapping the clock, alarm, weather or other lock screen cards no longer launches apps, and tapping them no longer vibrates.
+  - On: stock behavior, including the stock vibration.
+  - The clock still expands as normal.
+- "Tap or Double Tap to check phone" now sits above "Double tap to sleep" in the Gestures list.
+
+Fixes
+- Alarm and weather cards no longer launch apps after a double tap and unlock.
+- Double tap no longer gets disarmed by cancelled swipes or by long-pressing into Customize lock screen.
+- Stray vibrations on the lock screen after waking, swiping back or tapping repeatedly are gone.
+- Unlock haptics are unaffected.
+
+Install
+LSPosed → Modules → enable Pixel Suite → scope System Framework → reboot.
+Android 17 (Pixel 11 Pro tested).
+
+SHA-256: 34adb27a4c2029d9e742463a524d62a98ad4463eafc3fa693564417ca1112b8e
+
+## v1.1.0 · Published release
+What's new
+- New: "Tap or Double Tap to check phone". The Settings > System > Gestures page now offers two options, Tap to wake and Double tap to wake. Turning one on turns the other off.
+- New: "Double tap lock screen to sleep". Double tap anywhere on the lock screen to turn the screen off. It never triggers while the PIN pad is open.
+- Both options can also be toggled in the Pixel Suite app.
+
+Install
+Install over v1.0.0 (no uninstall needed), then reboot.
+
+Notes
+- The Settings page rename only matches the English text.
+- This feature relies on private Android framework names, so a future Android update may break it.
+
+## v1.0.0 · Published release
+Features
+
+Pixel Suite v1.0.0: first public release.
+
+- Always-visible Clear all in recents — The "Clear all" button stays visible in Pixel Launcher's recents screen, so there's no need to scroll to the last page to find it.
+
+- Double-press power for flashlight — Tap the power button twice to toggle the flashlight instantly, from anywhere on your device.
+
+- Double-press Volume Down on AOD for camera — Open Pixel Camera instantly from the always-on display with a quick double-press of the volume down button. Won't launch if media is playing or during an active call.
+
+- Three-finger swipe down for screenshot — Swipe down with three fingers to take a screenshot, inspired by Chinese phones like Xiaomi, OPPO and Vivo.
+
+- Double-tap home screen to lock the screen — Double-tap an empty spot on the home screen to lock your phone instantly. Also inspired by Chinese phones.
+
+- Files by Google: folders sorted newest-first — By default, Files by Google sorts folders alphabetically. This feature sorts them by newest first, making recently downloaded files easy to find when you need them.
+
+- Settings screen in LSPosed to toggle each feature — Open the module's settings screen in LSPosed to enable or disable any feature you want. Full control in your hands.
+
+Tested on Pixel 11 Pro only. Feedback and ideas welcome in Issues.
+

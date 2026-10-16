@@ -21,6 +21,10 @@ final class Feature {
     static final String DOUBLE_TAP_SLEEP = "pixelsuite_double_tap_sleep";
     static final String CLEAR_ALL = "pixelsuite_clear_all";
     static final String FILES_SORT = "pixelsuite_files_sort";
+    /** Screenshot editor (Pixel Studio): crop without the stock minimum. Default on. */
+    static final String SCREENSHOT_FREE_CROP = "pixelsuite_screenshot_free_crop";
+    /** Screenshot editor (Pixel Studio): Doodles next to the pen, with shapes and colors. Default on. */
+    static final String SCREENSHOT_DOODLES = "pixelsuite_screenshot_doodles";
     /**
      * Master switch for "Tap or Double tap to wake". On, it brings: tap or double tap to wake
      * (DOUBLE_TAP_WAKE picks which; on the Always On Display the touchscreen stays on while
@@ -43,7 +47,9 @@ final class Feature {
     private Feature() {}
 
     static int defaultFor(String key) {
-        return (FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
+        if(LauncherFeatures.LABEL_LEVEL.equals(key))return 2;
+        if(LauncherFeatures.GRID_SIZE.equals(key)||LauncherFeatures.DRAWER_GRID_SIZE.equals(key))return 3;
+        return (LauncherFeatures.LABEL_SIZE.equals(key) || LauncherFeatures.HIDE_SHORTCUTS.equals(key) || LauncherFeatures.GRID.equals(key) || LauncherFeatures.DRAWER.equals(key) || LauncherFeatures.RENAME.equals(key) || LauncherFeatures.DRAG_PILL.equals(key) || LauncherFeatures.ICONS.equals(key) || FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
                 || LOCK_SHORTCUTS.equals(key)) ? 0 : 1;   // everything else starts on
     }
 

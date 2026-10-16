@@ -30,6 +30,7 @@ public class Module extends XposedModule {
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
         Xp.attach(this);
+        SuiteLog.hooked = true;
         log("loaded in " + param.getProcessName());
     }
 
@@ -48,16 +49,19 @@ public class Module extends XposedModule {
         if (!param.isFirstPackage()) return;
         ClassLoader cl = param.getClassLoader();
         String pkg = param.getPackageName();
-        if (SETTINGS.equals(pkg)) {
-            Flashlight.installSettings(cl);
-            GesturePages.install(cl);
-            DoubleTapWake.installSettings(cl);
-        } else if (SYSTEMUI.equals(pkg)) {
+        if (SYSTEMUI.equals(pkg)) {
             VolumeCamera.installSystemUi(cl);
         } else if (LAUNCHER.equals(pkg)) {
             ClearAll.installLauncher(cl);
+            LauncherFeatures.install(cl);
         } else if (FILES.equals(pkg)) {
             FilesSort.install(cl);
+        } else if (ScreenshotEditor.PACKAGE.equals(pkg)) {
+            ScreenshotEditor.install(cl);
+        } else if (DocumentsSort.GOOGLE.equals(pkg) || DocumentsSort.AOSP.equals(pkg)) {
+            DocumentsSort.install(cl);
+        } else if (AliasProvider.GOOGLE.equals(pkg)) {
+            GoogleAliases.install();
         }
     }
 

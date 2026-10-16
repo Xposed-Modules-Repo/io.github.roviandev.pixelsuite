@@ -1,98 +1,76 @@
-# Pixel Suite
+# Pixel Suite 2.0.0
 
-A small LSPosed module that adds Pixel features Google never shipped. Every feature has its own on/off switch in the module settings.
+your pixel your way
 
-> **Tested only on a Pixel 11 Pro.** It may work on other devices. Feedback is welcome.
+**Open Pixel Suite straight from your home screen:** touch and hold an empty area, then tap **Pixel Suite settings**—no need to find the app first.
 
----
+Made by **RovianDev**. Pixel Suite adds launcher customization, gestures, screenshot tools and file-sorting controls through LSPosed.
 
-## Features
+After **45 preview updates**, v2.0.0 brings the work together into one release: a redesigned settings app, more capable folders and drawer interactions, immediate app customization, and refined menus and transitions.
 
-🧹 **Always-visible "Clear all"**
-The Clear all button stays on screen in Pixel Launcher's recents, so you don't have to scroll to find it.
+[Download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.0) · [Release notes](https://github.com/RovianDev/PixelSuite/blob/main/RELEASE-NOTES-v2.0.0.md) · [Xposed listing](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite) · [Telegram](https://t.me/RovianDev)
 
-🔦 **Double-press power for flashlight**
-Double-press the power button to toggle the flashlight.
+## Launcher and app drawer
 
-📷 **Double-press volume down for camera**
-Double-press volume down on the always-on display to open Pixel Camera. It won't open while media is playing or a call is active.
+- Create folders inside the drawer. Rename folders, add apps, sort their contents A–Z, or remove them to return their apps to the alphabetical drawer (English, Arabic, then numbers and special characters). Sorting and removal ask for confirmation.
+- Choose **3×3, 4×4 or 5×5** folder grids. Home-screen and drawer choices are separate. Menus use local frosted backgrounds, confined to their frames.
+- Move apps within the drawer. Drag to the **Add to home screen** target to continue onto the home screen.
+- **Rename apps** and **change icons** using images from Photos or Files. Changes update across home, folders, drawer, drawer search and Google app search without a manual refresh. Restore the original name or icon when needed. Google must be in the module scope for its search integration.
+- Optional **five-level icon label sizing** changes text beneath icons without resizing icons. Smaller text fits more letters; long labels can still truncate. System fonts and Bold text remain respected. This option starts disabled.
+- **Hide app shortcuts** removes app-provided drawer actions while keeping basic launcher/module actions. Home-screen shortcuts are unchanged.
+- **Clear all** moves from the stock far-left location to an always-visible position alongside **Select** and **Screenshot** in recents.
 
-👆 **Tap or double tap to wake**
-One setting, found in **Settings → System → Gestures → Tap or Double Tap to check phone**:
-- **Tap to wake** or **Double tap to wake**. While the phone is held or rests on your lap, the touchscreen stays touch-active on the always-on display so both taps can be real touches. Held mode uses up to 90 seconds per stretch, with a regular four-minute budget per lock; a missed-tap recovery can briefly re-arm touch. When resting still on a desk or nightstand, the display returns to low-power mode and motion readings help detect the second tap. If a quick double tap misses, an extra tap within three seconds is a backup. Movement, very soft taps and vibrating car mounts can still affect detection.
-- **Double-tap the lock screen to sleep**: double-tap anywhere on the lock screen to turn the screen off. It never works while the PIN pad is open.
-- **Lock screen behavior**:
-  - **Modded** (recommended): the clock, alarm, weather and date act like empty space, so a double tap never opens anything by mistake.
-  - **Stock**: the lock screen works as Google made it. A double tap that lands on a card can open it instead of turning the screen off.
+## Buttons and gestures
 
-📸 **Three-finger screenshot**
-Swipe down with three fingers to take a screenshot.
+- Double-press power for the flashlight.
+- Double-press volume down on the always-on display for the camera, with media/call safeguards.
+- Three-finger swipe down for a screenshot.
+- Double-tap empty home-screen space to sleep.
+- Configurable tap or double-tap wake, lock-screen double-tap sleep, and stock/modded lock-screen interactions.
 
-🔒 **Double-tap to lock**
-Double-tap an empty spot on the home screen to lock the phone.
+Wake behavior adapts to whether the phone is held or resting still. Movement, soft taps and device state can affect detection and power use. There is no measured overnight battery percentage for this release.
 
-📁 **Newest-first in Files by Google**
-Sorts folders so the newest files appear first.
+## Screenshots and files
 
----
+**Pixel Studio:** free screenshot cropping and Doodles with shapes, colors, thickness, fill, moving/resizing and supported Undo/Redo integration. Shapes are included in saved/shared edits. Doodles history is handled before native edits; the eraser does not erase shapes. These hooks target **Pixel Studio 2.3.001 (192285)**; another version may differ.
 
-## Why v1.1.3 improves wake behavior
+**Newest first:** keeps folders above files and sorts files newest-to-oldest in Files by Google and supported Android file pickers. This overrides their normal sort choice while enabled; turn it off to restore native sorting.
 
-The wake method adapts to the phone's position: it uses touch detection while held or on a lap, where soft taps are harder to detect from motion, and returns to low-power display behavior when the phone is still. This improves pickup, missed-tap recovery and soft second taps without keeping the touchscreen touch-active throughout still standby.
+## Settings that stay together
 
-**Tested on my Pixel 11 Pro with Android 17 and LSPosed API 102.** It is working well in my testing so far, with no noticeable additional battery drain. There is no measured overnight percentage yet, and this is not a claim of zero power use. Other devices remain untested.
+All controls now live in **Pixel Suite**, with separate feature pages, explanations, themed icons and an offline changelog. Light and dark modes follow the system. Animated demonstrations pause between loops and stop when the page or app is inactive; system animation settings, Battery Saver and accessibility preferences are respected.
 
-See the [v1.1.3 release notes](https://github.com/RovianDev/PixelSuite/releases/tag/v1.1.3) for the changes and limitations.
+Long-press an empty area of the home screen to return through **Pixel Suite settings**. Android Settings > System > Gestures keeps its stock menus.
 
-## Requirements
+## Requirements and setup
 
-- A rooted device (KernelSU / KernelSU-Next, Magisk or APatch)
-- [LSPosed](https://lsposed.org) with API 102
-- Android 17
+Testing has focused on **Pixel 11 Pro running Android 17 with LSPosed API 102**. Other devices, system releases and app versions are unverified. The APK's minimum Android API is 26; this does not imply feature compatibility with all Android versions.
 
-## Installation
+1. Use a rooted device with LSPosed API 102.
+2. Install **PixelSuite-v2.0.0.apk**, enable Pixel Suite in LSPosed and allow the module app root access to save settings.
+3. Select the recommended scope: **System Framework**, **System UI**, **Pixel Launcher**, **Files by Google**, the installed **Files / DocumentsUI** picker, **Google**, and **Pixel Studio** for screenshot tools.
+4. Reboot, then open Pixel Suite and choose your features.
 
-1. Download the latest APK from the [Releases](https://github.com/RovianDev/PixelSuite/releases) page and install it.
-2. Grant it root access in your root manager.
-3. Open **LSPosed → Modules → Pixel Suite** and enable it.
-4. Select the scopes: **System Framework, System UI, Settings, Pixel Launcher, Files and Files by Google**.
-5. Reboot, then open the module settings and choose your features.
+Google package: `com.google.android.googlequicksearchbox`. Pixel Studio: `com.google.android.apps.pixel.creativeassistant`. The file picker may be `com.google.android.documentsui` or `com.android.documentsui`; select the one installed on your device. Settings is no longer a required scope.
 
-**Updating:** install the new APK over the old one (no uninstall needed) and reboot.
+For an update, install over the existing version and reboot; no uninstall is needed with the same release signature. A few controls restart their affected app when toggled; save current screenshot edits before changing Pixel Studio options.
 
-**Note:** the first time you open **System → Gestures** after changing a toggle, Settings may crash. This is a Google bug that happens with stock gestures too. Reopen Settings after boot and wait for everything to load.
+## Source and feedback
 
-## Building from Source
+[Source / bug reports](https://github.com/RovianDev/PixelSuite) · [Xposed repository](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite) · [Community and support](https://t.me/RovianDev)
 
-See [BUILD.md](https://github.com/RovianDev/PixelSuite/blob/main/src/BUILD.md). Quick start on Linux or macOS in the [source repository](https://github.com/RovianDev/PixelSuite):
+When reporting a problem, include your device, Android version, module/app versions and reproduction steps. Check logs for personal information before sharing them.
 
-```bash
-cd src
-bash build.sh
-```
+The source builds an unsigned APK. Release signing keys and local signing configuration are not distributed. See BUILD.md in the source package for build requirements and THIRD-PARTY-NOTICES.md for artwork credits.
 
-The APK will be in `src/out/PixelSuite.apk`.
+## Community and support
+[![Join RovianDev on Telegram](assets/telegram-card.png)](https://t.me/RovianDev)
 
-## Feedback
+[![Support RovianDev on Patreon](assets/patreon-card.png)](https://www.patreon.com/c/RovianDev)
 
-Found a bug or have an idea? Open an [issue](https://github.com/RovianDev/PixelSuite/issues). For bugs, include your device, Android version, root method, LSPosed version and an LSPosed log (Logs → Save).
+[![Buy RovianDev a Coffee](assets/coffee-card.png)](https://buymeacoffee.com/roviandev)
 
-## Support the project
+[Telegram](https://t.me/RovianDev) · [Patreon](https://www.patreon.com/c/RovianDev) · [Buy Me a Coffee](https://buymeacoffee.com/roviandev)
+## License and credits
 
-Free and open source. If it helps you, you can [buy me a coffee ☕](https://buymeacoffee.com/roviandev) or [support on Patreon](https://www.patreon.com/c/RovianDev). Starring the repo helps too.
-
-## Credits
-
-- [LSPosed](https://lsposed.org) and the libxposed module API
-
-## Disclaimer
-
-Modules that hook system components can cause instability. Use at your own risk and keep a backup. Pixel Suite is an independent project, not affiliated with or endorsed by Google LLC. "Pixel", "Pixel Launcher", "Google" and "Files by Google" are trademarks of Google LLC, used only to describe compatibility.
-
-## License
-
-Released under the [GPL-3.0 License](https://github.com/RovianDev/PixelSuite/blob/main/LICENSE).
-
----
-
-Made by **Rovian.Dev**
+GPL-3.0. Thanks to LSPosed and the libxposed API. Artwork credits are included in THIRD-PARTY-NOTICES.md. Pixel Suite is an independent project and is not affiliated with Google.
