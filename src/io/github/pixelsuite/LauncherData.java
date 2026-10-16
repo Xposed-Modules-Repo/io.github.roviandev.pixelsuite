@@ -12,6 +12,7 @@ final class LauncherData {
     LauncherData(Context context) { prefs = context.getSharedPreferences("pixelsuite_launcher", 0); }
     static final class Folder {
         int id; String name; int grid; long user;
+        int sort;
         final List<String> apps = new ArrayList<String>();
     }
     synchronized List<Folder> folders() {
@@ -21,7 +22,7 @@ final class LauncherData {
             for (int i = 0; i < array.length(); i++) {
                 JSONObject o = array.getJSONObject(i); Folder f = new Folder();
                 f.id = o.getInt("id"); f.name = o.getString("name");
-                f.grid = grid(o.optInt("grid", 4)); f.user = o.getLong("user");
+                f.grid = grid(o.optInt("grid", 4)); f.user = o.getLong("user"); f.sort = o.optInt("sort", 0) == 1 ? 1 : 0;
                 JSONArray apps = o.getJSONArray("apps");
                 for (int j = 0; j < apps.length(); j++) if (!f.apps.contains(apps.getString(j))) f.apps.add(apps.getString(j));
                 result.add(f);
@@ -34,7 +35,7 @@ final class LauncherData {
             JSONArray array = new JSONArray();
             for (Folder f : folders) {
                 JSONObject o = new JSONObject(); o.put("id", f.id); o.put("name", f.name);
-                o.put("grid", grid(f.grid)); o.put("user", f.user); o.put("apps", new JSONArray(f.apps)); array.put(o);
+                o.put("grid", grid(f.grid)); o.put("user", f.user); o.put("sort", f.sort == 1 ? 1 : 0); o.put("apps", new JSONArray(f.apps)); array.put(o);
             }
             return prefs.edit().putString("folders", array.toString()).commit();
         } catch (Exception error) { Module.log("Launcher folder save failed", error); return false; }

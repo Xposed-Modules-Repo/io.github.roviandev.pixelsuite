@@ -23,10 +23,12 @@ final class PreviewScenes {
     private static final int[] FILE_RANK={1,3,0,4,5,2};
     PreviewScenes(String key,int accent,int onAccent,int ink,int muted,int surface,boolean dark,PreviewIcons icons){this.key=key;this.accent=accent;this.onAccent=onAccent;this.ink=ink;this.muted=muted;this.surface=surface;this.dark=dark;this.icons=icons;}
     long duration(){
+        if(ScreenRecordTidy.KEY.equals(key)||"folder_sort".equals(key)||"folder_reorder".equals(key))return 4800;
         if(LauncherFeatures.ICONS.equals(key))return 5000;
         if(LauncherFeatures.DRAG_PILL.equals(key)||LauncherFeatures.GRID.equals(key)||Feature.SCREENSHOT_DOODLES.equals(key))return 4800;
         if(LauncherFeatures.DRAWER.equals(key)||Feature.SCREENSHOT_FREE_CROP.equals(key)||Feature.FILES_SORT.equals(key))return 4500;
-        if(LauncherFeatures.RENAME.equals(key))return 4300;
+        if(LauncherFeatures.RENAME.equals(key)||FolderDrag.TWO_FINGER.equals(key)||ScatterEffect.KEY.equals(key))return 4300;
+        if(MultiDrag.KEY.equals(key))return 5200;
         if(LauncherFeatures.HIDE_SHORTCUTS.equals(key))return 3800;
         if(Feature.THREE_FINGER.equals(key))return 3600;
         if(Feature.VOLDOWN_CAMERA.equals(key))return 3200;
@@ -152,7 +154,24 @@ final class PreviewScenes {
         }
     }
     private void scene(Canvas c,float t){
-        if(Feature.FLASHLIGHT.equals(key)){
+        if(ScreenRecordTidy.KEY.equals(key)){
+            home(c,true);float open=e(.08f,.22f,t);alpha(c,open);
+            box(c,12,134,216,220,22,tint(surface,ink,.07f));text(c,"Record your screen",120,167,17,ink);
+            text(c,"Entire screen",120,208,14,ink);text(c,"Device audio",120,249,14,ink);text(c,"Show touches",120,290,14,ink);
+            box(c,99,321,30,16,8,accent);circle(c,119,329,6,onAccent);
+            box(c,48,368,144,43,21,tint(surface,accent,.25f));text(c,"×",70,396,22,ink);text(c,"Start",143,395,15,ink);
+            touch(c,70,390,t,.72f,.09f);c.restore();pill(c,1);
+        }else if("folder_sort".equals(key)){
+            home(c,true);box(c,9,82,222,300,22,tint(surface,ink,.07f));
+            float sort=e(.5f,.78f,t);int[] rank={3,0,5,1,4,2};String[] labels={"Calendar","Chrome","Clock","Files","Keep","Photos"};int[] kinds={7,1,10,6,0,3};
+            for(int i=0;i<6;i++){int old=rank[i];float x=mix(46+(old%3)*74,46+(i%3)*74,sort),y=mix(135+(old/3)*82,135+(i/3)*82,sort);app(c,kinds[i],x,y,36,false);text(c,labels[i],x,y+31,10,ink);}
+            text(c,"Apps",45,353,16,ink);text(c,"⋮",209,353,22,ink);
+            float menu=e(.12f,.22f,t)*(1-e(.44f,.5f,t));popup(c,56,238,"Sort","Auto (A–Z)","Custom",menu);touch(c,140,292,t,.34f,.09f);pill(c,1);
+        }else if("folder_reorder".equals(key)){
+            drawer(c,0);box(c,9,74,222,320,22,tint(surface,ink,.07f));float move=e(.22f,.65f,t);
+            for(int i=1;i<9;i++){float target=i-1;float rank=mix(i,target,move);int from=i,to=i-1;float x=mix(46+(from%3)*74,46+(to%3)*74,move),y=mix(124+(from/3)*78,124+(to/3)*78,move);app(c,i,x,y,36,true);}
+            float x=mix(46,194,move),y=mix(124,280,move);app(c,0,x,y,40,false);touch(c,x,y,t,.12f,.1f);text(c,"Apps",44,366,16,ink);pill(c,1);
+        }else if(Feature.FLASHLIGHT.equals(key)){
             torch(c,e(.2f,.3f,t));
         }else if(Feature.VOLDOWN_CAMERA.equals(key)){
             box(c,0,0,240,500,0,0xff000000);float camera=e(.21f,.29f,t);if(camera>0){alpha(c,camera);photo(c,0,38,240,331);box(c,0,0,240,38,0,0xff15161b);box(c,0,369,240,131,0,0xff15161b);text(c,"PHOTO",120,400,12,0xfff5f5f5);text(c,"VIDEO",190,400,11,0xff9b9ca3);circle(c,120,446,29,0xfffafafa);circle(c,120,446,24,0xff25262c);circle(c,120,446,21,0xfffafafa);outline(c,40,438,18,18,5,0xff9b9ca3);circle(c,198,447,10,0xff60626a);c.restore();}
@@ -188,6 +207,25 @@ final class PreviewScenes {
             float old=opacity;opacity=1-dismiss;recentsActions(c);opacity=old;touch(c,198,439,t,.12f,.1f);pill(c,1);
         }else if(LauncherFeatures.HIDE_SHORTCUTS.equals(key)){
             drawer(c,0,11);app(c,11,33,104,34,true);app(c,0,207,246,34,true);touch(c,33,104,t,.03f,.1f);float show=e(.11f,.18f,t),hide=e(.33f,.59f,t);if(show>0){alpha(c,show);box(c,13,140,214,166-48*hide,18,tint(surface,ink,.08f));float old=opacity;opacity=1-hide;text(c,"Search",120,163,12,ink);text(c,"Voice search",120,187,12,ink);opacity=old;text(c,"App info",120,211-48*hide,12,ink);text(c,"Add to home screen",120,235-48*hide,12,ink);text(c,"Change icon",120,259-48*hide,12,ink);text(c,"Rename",120,283-48*hide,12,ink);c.restore();}pill(c,1);
+        }else if(MultiDrag.KEY.equals(key)){
+            background(c);for(int i=0;i<12;i++){int k=i;float x=60+60*(i%3),y=110+95*(i/3);boolean taken=(k==4&&t>.3f)||(k==8&&t>.48f);if(!taken)app(c,k,x,y,40,true);}
+            float hx=mix(60,150,e(.05f,.25f,t)),hy=mix(110,250,e(.05f,.25f,t));hx=mix(hx,90,e(.66f,.9f,t));hy=mix(hy,380,e(.66f,.9f,t));
+            float f1=e(.3f,.42f,t),f2=e(.48f,.6f,t);
+            if(f2>0)app(c,8,mix(120,hx+10,f2),mix(300,hy+9,f2),40,false);if(f1>0)app(c,4,mix(120,hx+6,f1),mix(205,hy+5,f1),40,false);
+            app(c,0,hx,hy,44,false);touch(c,hx,hy,t,.02f,.08f);touch(c,120,205,t,.28f,.07f);touch(c,120,300,t,.46f,.07f);
+            int count=t>.48f?3:t>.3f?2:0;if(count>0){float pop=1+.2f*(float)Math.sin(Math.PI*clamp((t-(count==3?.48f:.3f))/.08f));c.save();c.translate(hx+18,hy-18);c.scale(pop,pop);circle(c,0,0,11,accent);text(c,String.valueOf(count),0,4.5f,12,onAccent);c.restore();}
+            pill(c,1);
+        }else if(ScatterEffect.KEY.equals(key)){
+            drawer(c,0,1);float go=e(.3f,.75f,t);float old=opacity;opacity=1-e(.3f,.5f,t);box(c,91,252,60,60,18,tint(surface,accent,.35f));opacity=old;
+            for(int i=0;i<14;i++){float a=i*.449f,r=10+go*(36+(i%4)*10);float o=opacity;opacity=go>0?1-go:0;circle(c,121+(float)Math.cos(a)*r,282+(float)Math.sin(a)*r,3.2f*(1-go*.5f),i%3==0?accent:tint(surface,ink,.5f));opacity=o;}
+        }else if(FolderDrag.TWO_FINGER.equals(key)){
+            float swipe=e(.3f,.72f,t);background(c);c.save();c.translate(-240*swipe,0);
+            for(int i=0;i<6;i++)app(c,i,60+60*(i%3),110+95*(i/3),40,true);
+            for(int i=0;i<6;i++)app(c,i+6,300+60*(i%3),110+95*(i/3),40,true);
+            c.restore();circle(c,112+16*swipe,468,3.5f,swipe<.5f?ink:muted);circle(c,128-16*(1-swipe),468,3.5f,swipe<.5f?muted:ink);
+            float lift=e(.06f,.18f,t);app(c,9,120,330-8*lift,46+6*lift,true);touch(c,120,330,t,.04f,.1f);
+            float finger=e(.22f,.3f,t)*(1-e(.74f,.8f,t));if(finger>0){float old=opacity;opacity*=finger;circle(c,196-110*swipe,410,12,accent);opacity=old;}
+            pill(c,1);
         }else if(Feature.FILES_SORT.equals(key)){
             box(c,0,0,240,500,0,surface);text(c,"Files",43,35,23,ink);text(c,"Newest first",177,35,12,accent);
             box(c,12,57,216,35,10,tint(surface,accent,.12f));folderIcon(c,32,73);text(c,"Downloads",128,80,13,ink);

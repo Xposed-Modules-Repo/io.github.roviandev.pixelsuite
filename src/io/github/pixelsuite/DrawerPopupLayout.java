@@ -22,6 +22,15 @@ final class DrawerPopupLayout {
             int y=((Number)LauncherFeatures.get(pill.getLayoutParams(),"y")).intValue();
             return y+pill.getLayoutParams().height+FrostedSurface.dp(layer.getContext(),12);
         }
+        try{
+            android.app.Activity a=LauncherFeatures.activity.get();
+            View search=(View)LauncherFeatures.get(LauncherFeatures.call(a,"getAppsView"),"mSearchContainer");
+            if(search.getHeight()>0){
+                int[] at=new int[2],origin=new int[2];search.getLocationOnScreen(at);layer.getLocationOnScreen(origin);
+                int height=FrostedSurface.dp(layer.getContext(),54);
+                return at[1]-origin[1]+(search.getHeight()-height)/2+height+FrostedSurface.dp(layer.getContext(),12);
+            }
+        }catch(Throwable ignored){}
         Rect insets=(Rect)LauncherFeatures.call(layer,"getInsets");
         return insets.top+FrostedSurface.dp(layer.getContext(),12);
     }
@@ -36,21 +45,64 @@ final class DrawerPopupLayout {
         while(popup.getChildCount()>0){View child=popup.getChildAt(0);popup.removeViewAt(0);content.addView(child);}
         ScrollView scroll=new ScrollView(popup.getContext()){
             protected void onMeasure(int w,int h){
+                fitRows(content,FrostedSurface.dp(getContext(),ROW_DP));
                 super.onMeasure(w,View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));
-                int natural=getMeasuredHeight()+popup.getPaddingTop()+popup.getPaddingBottom();
+                int chrome=popup.getPaddingTop()+popup.getPaddingBottom();
+                int natural=getMeasuredHeight()+chrome;
+                int side=sideRoom(popup,layer,natural);
+                if(side>0&&natural>side){
+                    int rows=countRows(content);
+                    if(rows>0){
+                        int row=FrostedSurface.dp(getContext(),ROW_DP),fixed=getMeasuredHeight()-rows*row;
+                        int fit=Math.max(FrostedSurface.dp(getContext(),MIN_ROW_DP),(side-chrome-fixed)/rows);
+                        if(fit<row){
+                            fitRows(content,fit);
+                            super.onMeasure(w,View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));
+                            natural=getMeasuredHeight()+chrome;
+                        }
+                    }
+                }
                 int[] slot=slot(popup,layer,natural);
                 int available;
                 if(slot!=null)available=slot[1];
                 else{Rect insets=(Rect)LauncherFeatures.call(layer,"getInsets");available=layer.getHeight()-insets.bottom-floor(layer)-FrostedSurface.dp(getContext(),12);}
-                int room=Math.max(1,(int)(available/1.03f)-popup.getPaddingTop()-popup.getPaddingBottom());
+                int room=available>=natural?natural-chrome:Math.max(1,(int)(available/1.03f)-chrome);
                 super.onMeasure(w,View.MeasureSpec.makeMeasureSpec(room,View.MeasureSpec.AT_MOST));
             }
         };
+        scroll.setOutlineProvider(android.view.ViewOutlineProvider.BOUNDS);scroll.setClipToOutline(true);
         scroll.setTag(wrapper);scroll.setFillViewport(false);scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setVerticalScrollBarEnabled(false);scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         scroll.addView(content,new ScrollView.LayoutParams(width,-2));
         popup.addView(scroll,new LinearLayout.LayoutParams(width,-2));
         Xp.setAdditionalInstanceField(popup,"pixelsuite_compact_menu",Boolean.TRUE);
         popup.measure(0,0);place(popup);
+        popup.addOnLayoutChangeListener(new View.OnLayoutChangeListener(){
+            public void onLayoutChange(View v,int l,int t,int r,int b,int ol,int ot,int or,int ob){place(popup);}
+        });
+    }
+    private static final int ROW_DP=48,MIN_ROW_DP=38;
+    private static int countRows(View v){
+        if(LauncherFeatures.type("shortcuts.DeepShortcutView").isInstance(v))return v.getVisibility()==View.GONE?0:1;
+        int n=0;if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)n+=countRows(g.getChildAt(i));}
+        return n;
+    }
+    private static void fitRows(View v,int height){
+        if(LauncherFeatures.type("shortcuts.DeepShortcutView").isInstance(v)){
+            ViewGroup.LayoutParams p=v.getLayoutParams();if(p!=null&&p.height!=height)p.height=height;
+            if(v.getMinimumHeight()>height)v.setMinimumHeight(height);
+            return;
+        }
+        if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)fitRows(g.getChildAt(i),height);}
+    }
+    static int sideRoom(ViewGroup popup,ViewGroup layer,int menuHeight){
+        Rect icon=iconRect(popup,layer);if(icon==null)return -1;
+        Rect insets=(Rect)LauncherFeatures.call(layer,"getInsets");
+        int gap=FrostedSurface.dp(popup.getContext(),8),bottom=layer.getHeight()-insets.bottom-FrostedSurface.dp(popup.getContext(),12);
+        int ceiling=floor(layer);
+        int below=bottom-Math.max(icon.bottom+gap,ceiling);
+        int above=icon.top-gap-ceiling-(int)Math.ceil(menuHeight*.03f);
+        return Math.max(below,above);
     }
     static void compactRows(View view,int width){
         if(LauncherFeatures.type("shortcuts.DeepShortcutView").isInstance(view)){
@@ -65,6 +117,17 @@ final class DrawerPopupLayout {
     static Rect iconRect(ViewGroup popup,ViewGroup layer){
         try{
             View icon=(View)LauncherFeatures.get(popup,"originalView");
+            if(DrawerFolders.isDrawerMember(LauncherFeatures.get(popup,"itemInfo"))){
+                View held=DrawerFolders.heldView.get();
+                if(held!=null&&held.isAttachedToWindow()&&held.getWidth()>0){
+                    int[] a=new int[2],o=new int[2];held.getLocationOnScreen(a);layer.getLocationOnScreen(o);
+                    Rect r=new Rect(a[0]-o[0],a[1]-o[1],a[0]-o[0]+Math.round(held.getWidth()*held.getScaleX()*scaleOf(held)),a[1]-o[1]+Math.round(held.getHeight()*held.getScaleY()*scaleOf(held)));
+                    if(!r.isEmpty()){
+                        if(icon!=null&&icon!=held)LauncherFeatures.logOnce("Drawer folder menu: originalView differs from the held icon",new IllegalStateException(String.valueOf(icon.getClass().getName())));
+                        return r;
+                    }
+                }
+            }
             if(icon==null||!icon.isAttachedToWindow())return null;
             Rect r=new Rect();
             try{LauncherFeatures.call(layer,"getDescendantRectRelativeToSelf",icon,r);}
@@ -76,6 +139,12 @@ final class DrawerPopupLayout {
         }catch(Throwable t){return null;}
     }
 
+    private static float scaleOf(View v){
+        float s=1f;
+        for(android.view.ViewParent p=v.getParent();p instanceof View;p=p.getParent()){View pv=(View)p;if(pv.getScaleX()>0)s*=pv.getScaleX();}
+        return s;
+    }
+
     static int[] slot(ViewGroup popup,ViewGroup layer,int menuHeight){
         Rect icon=iconRect(popup,layer);if(icon==null)return null;
         Rect insets=(Rect)LauncherFeatures.call(layer,"getInsets");
@@ -83,13 +152,21 @@ final class DrawerPopupLayout {
         int ceiling=floor(layer);
         int below=Math.max(icon.bottom+gap,ceiling),roomBelow=bottom-below;
         int roomAbove=icon.top-gap-ceiling-(int)Math.ceil(menuHeight*.03f);
-        int threeRows=FrostedSurface.dp(popup.getContext(),12+48*3);
-        if(roomBelow>=Math.min(menuHeight,threeRows)||roomBelow>=roomAbove)return new int[]{below,roomBelow};
-        int h=Math.min(menuHeight,roomAbove);
-        return new int[]{icon.top-gap-h,roomAbove};
+        if(roomBelow>=menuHeight)return new int[]{below,roomBelow};
+        if(roomAbove>=menuHeight)return new int[]{icon.top-gap-menuHeight,roomAbove};
+        int overshoot=(int)Math.ceil(menuHeight*.03f);
+        if(bottom-ceiling-overshoot>=menuHeight){
+            int top=roomBelow>=roomAbove?bottom-menuHeight:ceiling+overshoot;
+            return new int[]{top,menuHeight};
+        }
+        if(roomBelow>=roomAbove)return new int[]{below,roomBelow};
+        return new int[]{icon.top-gap-roomAbove,roomAbove};
     }
 
     static void place(ViewGroup popup){
+        try{placeNow(popup);}catch(Throwable error){LauncherFeatures.logOnce("Drawer menu placement failed",error);}
+    }
+    private static void placeNow(ViewGroup popup){
         if(!eligible(popup)||!(popup.getParent() instanceof ViewGroup))return;
         ViewGroup layer=(ViewGroup)popup.getParent();Rect insets=(Rect)LauncherFeatures.call(layer,"getInsets");
         float y;

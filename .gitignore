@@ -1,0 +1,7 @@
+# Build output and signing material: never commit these.
+out/
+*.apk
+*.idsig
+*.jks
+*.keystore
+sign-tmp.sh

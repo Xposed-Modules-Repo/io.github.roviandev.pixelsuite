@@ -8,6 +8,14 @@ import android.graphics.drawable.Drawable;
 import android.util.TypedValue;
 final class LauncherGlyph extends Drawable {
     private final Paint paint = new Paint(3); private final int kind;
+    private float turn; private android.animation.ValueAnimator turning;
+    void flip(boolean up){
+        if(turning!=null)turning.cancel();
+        turning=android.animation.ValueAnimator.ofFloat(turn,up?1f:0f);
+        turning.setDuration(340);turning.setInterpolator(new android.view.animation.OvershootInterpolator(1.1f));
+        turning.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener(){public void onAnimationUpdate(android.animation.ValueAnimator a){turn=(Float)a.getAnimatedValue();invalidateSelf();}});
+        turning.start();
+    }
     LauncherGlyph(Context c, int kind) {
         this.kind=kind; TypedValue v=new TypedValue(); c.getTheme().resolveAttribute(android.R.attr.textColorPrimary,v,true);
         try { paint.setColor(c.getResources().getColorStateList(v.resourceId).getDefaultColor()); }
@@ -29,7 +37,16 @@ final class LauncherGlyph extends Drawable {
             c.drawLine(3,18,7.6f,18,paint);c.drawLine(12.4f,18,21,18,paint);c.drawCircle(10,18,2.4f,paint);}
         else if(kind==11){c.drawCircle(10.5f,10.5f,6.5f,paint);c.drawLine(15.3f,15.3f,20.5f,20.5f,paint);}
         else if(kind==12){c.drawLine(6,6,18,18,paint);c.drawLine(18,6,6,18,paint);}
-        else if(kind==9){c.drawLine(4,6,13,6,paint);c.drawLine(4,12,11,12,paint);c.drawLine(4,18,9,18,paint);c.drawLine(18,4,18,20,paint);c.drawLine(15,17,18,20,paint);c.drawLine(18,20,21,17,paint);}
+        else if(kind==9){
+            c.drawLine(4,6,13,6,paint);c.drawLine(4,12,11,12,paint);c.drawLine(4,18,9,18,paint);
+            c.save();c.rotate(180f*turn,18,12);c.drawLine(18,4,18,20,paint);c.drawLine(15,17,18,20,paint);c.drawLine(18,20,21,17,paint);c.restore();}
+        else if(kind==13){
+            c.drawLine(3.5f,10.5f,6.25f,3.5f,paint);c.drawLine(6.25f,3.5f,9f,10.5f,paint);c.drawLine(4.6f,7.8f,7.9f,7.8f,paint);
+            c.drawLine(3.5f,13.5f,9f,13.5f,paint);c.drawLine(9f,13.5f,3.5f,20.5f,paint);c.drawLine(3.5f,20.5f,9f,20.5f,paint);
+            c.drawLine(16.5f,4,16.5f,20,paint);c.drawLine(13.5f,17,16.5f,20,paint);c.drawLine(16.5f,20,19.5f,17,paint);}
+        else if(kind==14){
+            c.drawRoundRect(3.5f,3.5f,10f,10f,1.8f,1.8f,paint);c.drawRoundRect(14f,3.5f,20.5f,10f,1.8f,1.8f,paint);c.drawRoundRect(3.5f,14f,10f,20.5f,1.8f,1.8f,paint);
+            c.save();c.rotate(-16f,17.6f,17.6f);c.drawRoundRect(14.4f,14.4f,20.9f,20.9f,1.8f,1.8f,paint);c.restore();}
         else { c.drawLine(5,18,17,6,paint); c.drawLine(17,6,20,9,paint); c.drawLine(20,9,8,21,paint); c.drawLine(8,21,4,22,paint); c.drawLine(4,22,5,18,paint); c.drawLine(4,4,13,4,paint); c.drawLine(8,4,8,12,paint); }
         c.restore();
     }
