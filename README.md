@@ -44,7 +44,7 @@ Long-press an empty area of the home screen to return through **Pixel Suite sett
 
 ## Requirements and setup
 
-Testing has focused on **Pixel 11 Pro running Android 17 with LSPosed API 102**. Other devices, system releases and app versions are unverified. The APK's minimum Android API is 26; this does not imply feature compatibility with all Android versions.
+**Tested on a Pixel 11 Pro. It should also work on other Pixel devices. Feedback is welcome.** Testing has used Android 17 with LSPosed API 102; other Pixel models have not yet been confirmed. Compatibility still depends on the installed system and app versions. The APK's minimum Android API is 26; this does not imply feature compatibility with all Android versions.
 
 1. Use a rooted device with LSPosed API 102.
 2. Install **PixelSuite-v2.0.0.apk**, enable Pixel Suite in LSPosed and allow the module app root access to save settings.
