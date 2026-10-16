@@ -1,3 +1,46 @@
+## v2.0.1
+Pixel Suite 2.0.1 polishes the launcher with folder and drag improvements, a cleaner screen recording sheet and many fixes.
+
+Move several apps at once
+• While moving an app, tap other apps with a second finger to pick them up. They stack under your finger with a count badge and drop together, on the home screen, in folders and in the app drawer.
+• Picked apps follow the icon shape chosen in Wallpaper & style. Dropping several home apps on Remove removes all of them; with two or more apps held, Uninstall fades away and Remove moves to the center.
+• Selection never mixes sources: apps held from a folder only join with apps of that folder, and the top featured apps in the drawer cannot be picked, so no app is picked twice.
+
+Two-finger drag
+• Hold an app with one finger and swipe with a second to change home screen pages, turn folder pages or scroll the app drawer. The drawer flings like a normal swipe, and touching the screen stops it right away.
+• While holding apps from a drawer folder, the drawer behind the folder stays put.
+
+App drawer folders
+• Moving apps inside a drawer folder works like a home screen folder: the other apps make room under your finger and slide into place, including across pages, and several picked apps move together.
+• Holding an app out of a drawer folder shows a Remove pill next to Add to home screen; drop apps on it to take them out of the folder. The folder closes as soon as you leave it.
+• Folders fit the number of apps inside, and holding an app against a folder's left or right edge turns its page.
+• Removing a folder now includes a brief scatter animation as a built-in enhancement. System animation preferences are respected.
+
+Folder menus
+• The ⋮ menu inside every folder, in the drawer and on the home screen, has Sort under Add apps, with Auto (A–Z) and Custom. The choices fold open under Sort with their own icons.
+• Home folders get Rename and Sort in their long-press menu, as well as Remove.
+
+App menus
+• The home-screen long-press menu stays near where you hold and within the visible screen, keeping its stock appearance and animations.
+• An app's long-press menu opens next to the app, above it when it does not fit below, and every row stays inside the panel, including Rename on apps that offer Bubble.
+
+Screen recording
+• The X and Start buttons sit under the screen recording options, and the long "anything shown on your screen is recorded" warning and its empty space are gone. Switchable in Pixel Suite settings.
+
+Release updates
+• Optional update notifications check for a newer stable release published on both GitHub and Xposed with matching APK hashes. Download and install fetches the APK inside Pixel Suite with percentage progress, verifies it, then opens the Android installer for confirmation. No browser or file picker is needed.
+• New recorder, folder-sort and live-reorder previews share the existing device frame and stop when off screen.
+
+Icons and performance
+• App drawer icons follow the icon shape chosen in Wallpaper & style and update as soon as it changes.
+• Smoother app drawer scrolling: folders are built once and kept ready.
+
+Fixes
+• Reset icon restores the original app icon instead of keeping a discarded custom picture.
+• Fixed a launcher crash when several apps were moved out of a home folder together.
+• A dragged app no longer leaves a copy of itself behind when the drawer scrolls, and an app taken out of a folder no longer stays invisible in the drawer.
+• Drawer folders no longer get stuck or flash over the home screen when an app is dragged out to it.
+
 ## v2.0.0
 Pixel Suite 2.0.0 brings the work from 45 rounds of testing and refinement into one release.
 
@@ -93,6 +136,7 @@ What's new
 - "Tap or Double Tap to check phone" now sits above "Double tap to sleep" in the Gestures list.
 
 Fixes
+• Reset icon restores the original app icon instead of keeping a discarded custom picture.
 - Alarm and weather cards no longer launch apps after a double tap and unlock.
 - Double tap no longer gets disarmed by cancelled swipes or by long-pressing into Customize lock screen.
 - Stray vibrations on the lock screen after waking, swiping back or tapping repeatedly are gone.

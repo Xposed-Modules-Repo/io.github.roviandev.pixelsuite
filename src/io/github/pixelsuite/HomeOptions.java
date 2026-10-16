@@ -30,6 +30,7 @@ final class HomeOptions {
     private HomeOptions() {}
 
     static void install() {
+        installPositioning();
         Class<?> popup = LauncherFeatures.type("views.OptionsPopupView");
         int hooks = 0;
         for (Method m : popup.getDeclaredMethods()) {
@@ -87,6 +88,55 @@ final class HomeOptions {
         row.setOnClickListener(new View.OnClickListener(){public void onClick(View view){LauncherFeatures.call(builder,"d",view,option);}});
         row.setOnLongClickListener(new View.OnLongClickListener(){public boolean onLongClick(View view){return Boolean.TRUE.equals(LauncherFeatures.call(builder,"d",view,option));}});
         popup.addView(row,at+1);
+        watchPosition(popup);
+    }
+    /** Applies only to the native workspace popup containing our added settings row. */
+    private static boolean homePopup(Object value){
+        return value instanceof android.view.ViewGroup
+            && value.getClass().getName().equals("com.google.android.apps.nexuslauncher.customize.OptionsPopupDialog$PopupView")
+            && ((android.view.ViewGroup)value).findViewWithTag("pixelsuite_settings")!=null;
+    }
+    private static void installPositioning(){
+        try{
+            Xp.hookAllMethods(LauncherFeatures.type("popup.ArrowPopup"),"orientAboutObject",new Xp.Callback(){
+                protected void afterHookedMethod(Xp.Param p){
+                    if(!homePopup(p.thisObject))return;
+                    try{position((android.view.ViewGroup)p.thisObject,true);}catch(Throwable error){LauncherFeatures.logOnce("Home menu position unavailable",error);}
+                }
+            });
+        }catch(Throwable error){LauncherFeatures.logOnce("Home menu positioning hook unavailable",error);}
+    }
+    private static void watchPosition(final android.view.ViewGroup popup){
+        if(Xp.getAdditionalInstanceField(popup,"pixelsuite_home_position")!=null)return;
+        Xp.setAdditionalInstanceField(popup,"pixelsuite_home_position",Boolean.TRUE);
+        popup.addOnLayoutChangeListener(new View.OnLayoutChangeListener(){
+            public void onLayoutChange(View v,int l,int t,int r,int b,int ol,int ot,int or,int ob){
+                try{if(homePopup(popup))position(popup,false);}catch(Throwable error){LauncherFeatures.logOnce("Home menu position unavailable",error);}
+            }
+        });
+    }
+    private static void position(android.view.ViewGroup popup,boolean beforeLayout){
+        if(!(popup.getParent() instanceof View))return;
+        View layer=(View)popup.getParent();
+        android.graphics.RectF target=(android.graphics.RectF)LauncherFeatures.get(popup,"mTargetRect");
+        int height=popup.getMeasuredHeight();if(target==null||height<=0||layer.getHeight()<=0)return;
+        android.graphics.Rect frame=new android.graphics.Rect();layer.getWindowVisibleDisplayFrame(frame);
+        int[] origin=new int[2];layer.getLocationOnScreen(origin);
+        int gap=Math.round(8*popup.getResources().getDisplayMetrics().density);
+        int safeTop=Math.max(0,frame.top-origin[1])+gap;
+        int safeBottom=Math.min(layer.getHeight(),frame.bottom-origin[1])-gap;
+        if(safeBottom<=safeTop)return;
+        int y=HomeMenuPlacement.top(Math.round(target.top),height,safeTop,safeBottom,gap);
+        // Stock may choose below/center when the full menu cannot fit above the hold. Replace only that position;
+        // backgrounds, rows, scales, alpha, timings and native open/close animators stay with the launcher.
+        int gravity=((Number)LauncherFeatures.get(popup,"mGravity")).intValue();
+        LauncherFeatures.set(popup,"mGravity",gravity&~android.view.Gravity.VERTICAL_GRAVITY_MASK);
+        LauncherFeatures.set(popup,"mIsAboveIcon",true);
+        if(beforeLayout&&popup.getLayoutParams() instanceof android.widget.FrameLayout.LayoutParams){
+            android.widget.FrameLayout.LayoutParams lp=(android.widget.FrameLayout.LayoutParams)popup.getLayoutParams();
+            lp.gravity=(lp.gravity&~android.view.Gravity.VERTICAL_GRAVITY_MASK)|android.view.Gravity.TOP;
+            lp.topMargin=y;lp.bottomMargin=0;popup.setTranslationY(0f);
+        }else if(Math.abs(popup.getY()-y)>.5f)popup.setY(y);
     }
     static Object newOption(){
         Class<?> type=LauncherFeatures.type("views.OptionsPopupView$OptionItem");

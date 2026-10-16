@@ -69,7 +69,7 @@ final class LauncherFeatures {
     static boolean on(String key){return Boolean.TRUE.equals(enabled.get(key));}
     static void reload(Activity a){
         Map<String,Boolean> next=new java.util.HashMap<String,Boolean>();
-        for(String key:new String[]{GRID,DRAWER,RENAME,ICONS,DRAG_PILL,HIDE_SHORTCUTS,LABEL_SIZE})next.put(key,Feature.on(a,key));
+        for(String key:new String[]{GRID,DRAWER,RENAME,ICONS,DRAG_PILL,HIDE_SHORTCUTS,LABEL_SIZE,FolderDrag.TWO_FINGER,MultiDrag.KEY})next.put(key,Feature.on(a,key));
         labelLevel=IconLabelScale.level(Settings.Secure.getInt(a.getContentResolver(),LABEL_LEVEL,2));
         enabled=next;
     }
@@ -92,7 +92,7 @@ final class LauncherFeatures {
                             refresh();
                         }
                     };
-                    for(String key:new String[]{GRID,DRAWER,RENAME,ICONS,DRAG_PILL,HIDE_SHORTCUTS,LABEL_SIZE,LABEL_LEVEL,GRID_SIZE,DRAWER_GRID_SIZE})
+                    for(String key:new String[]{GRID,DRAWER,RENAME,ICONS,DRAG_PILL,HIDE_SHORTCUTS,LABEL_SIZE,LABEL_LEVEL,GRID_SIZE,DRAWER_GRID_SIZE,FolderDrag.TWO_FINGER,MultiDrag.KEY})
                         a.getContentResolver().registerContentObserver(Settings.Secure.getUriFor(key),false,observer);
                     Xp.setAdditionalInstanceField(a,"pixelsuite_settings_observer",observer);
                     GoogleAliases.publish();
@@ -103,7 +103,7 @@ final class LauncherFeatures {
                     Object observer=Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_settings_observer");
                     if(observer instanceof ContentObserver)((Activity)p.thisObject).getContentResolver().unregisterContentObserver((ContentObserver)observer);
                     if (activity.get() == p.thisObject) {
-                        DrawerDrag.cancel();
+                        MultiDrag.cancel(); DrawerDrag.cancel(); DrawerFolders.clearIconCache();
                         activity.clear(); DrawerFolders.known.clear(); DrawerFolders.cells.clear(); DrawerFolders.downs.clear();
                     }
                 }
@@ -113,7 +113,7 @@ final class LauncherFeatures {
                     Activity a=(Activity)p.thisObject;activity=new WeakReference<Activity>(a);data=new LauncherData(a);reload(a);
                 }
             });
-            Xp.hookAllMethods(type("Launcher"),"onPause",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){DrawerFolders.cancelHold();DrawerFolderMenu.dismiss();DrawerHomeTarget.hide();DrawerDrag.pause();}});
+            Xp.hookAllMethods(type("Launcher"),"onPause",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){MultiDrag.cancel();DrawerFolders.cancelHold();DrawerFolderMenu.dismiss();DrawerHomeTarget.hide();DrawerDrag.pause();}});
             Xp.hookAllMethods(type("views.ActivityContext"),"dispatchDeviceProfileChanged",new Xp.Callback(){
                 protected void afterHookedMethod(Xp.Param p){
                     final Activity a=activity.get();
@@ -128,11 +128,11 @@ final class LauncherFeatures {
             installGrid();
             installBackdropDrawing();
             DrawerFolders.install();
-            DrawerDrag.install();DrawerHomeTarget.install();
+            DrawerDrag.install();DrawerHomeTarget.install();FolderDrag.install();ScatterEffect.install();MultiDrag.install();ShapeWatch.install();
             ThemeFolderRestore.install();
             installMenus();
             try{HomeOptions.install();}catch(Throwable error){Module.log("Pixel Suite settings row unavailable",error);}
-            Module.log("Launcher customization hooks installed (Launcher 17, preview41)");
+            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.1)");
         } catch (Throwable error) { Module.log("Launcher customization unavailable", error); }
     }
     static Class<?> type(String name) { return Xp.findClass(ROOT + name, loader); }
@@ -217,6 +217,7 @@ final class LauncherFeatures {
     }
     static void refresh() {
         Activity a = activity.get(); if (a == null) return;
+        DrawerFolders.clearIconCache();
         try {
             View decor = a.getWindow().getDecorView(); refreshLabels(decor);
             Object ah = get(call(a, "getAppsView"), "mAH");
@@ -317,6 +318,19 @@ final class LauncherFeatures {
                 int n = gridFor(p.args[0]); if (n == 0) return;
                 set(p.thisObject, "mMaxCountX", n); set(p.thisObject, "mMaxCountY", n); set(p.thisObject, "mMaxItemsPerPage", n*n);
                 set(p.thisObject, "mNumItemsInFolder", -1);
+                Xp.setAdditionalInstanceField(p.thisObject, "pixelsuite_full_rows", Boolean.FALSE);
+            }
+        });
+        // preview46 (reverted in preview59: folders now fit their item count): every 4x4 drawer folder opens with all four rows, however few apps it holds, so
+        // its frame has the same height and bottom edge as the others (a folder of 11 apps was one
+        // row shorter and ended lower).
+        Xp.hookAllMethods(type("folder.FolderGridOrganizer"), "setContentSize", new Xp.Callback() {
+            protected void afterHookedMethod(Xp.Param p) {
+                try {
+                    if (!Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject, "pixelsuite_full_rows"))) return;
+                    int rows = ((Number) get(p.thisObject, "mMaxCountY")).intValue();
+                    if (rows >= 4 && ((Number) get(p.thisObject, "mCountY")).intValue() < rows) set(p.thisObject, "mCountY", rows);
+                } catch (Throwable error) { logOnce("Equal folder height unavailable", error); }
             }
         });
         // Scope a fitted profile only while stock content is being laid out. Restore even if stock throws.
@@ -860,7 +874,24 @@ final class LauncherFeatures {
             }
         });
     }
+    /** Popups that are opening: their frosted background must not fade in (see installMenus). */
+    static final Map<Object,Long> openingUntil = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Object,Long>());
     private static void installMenus() {
+        // The stock open animation fades the whole menu in, so for a moment the frosted background
+        // is half transparent and the sharp icons behind it show through, then the blur arrives
+        // (the "white, then blurred" shift). The menu keeps its reveal animation but is opaque from
+        // the first frame.
+        try {
+            Xp.hookAllMethods(View.class, "setAlpha", new Xp.Callback() {
+                protected void beforeHookedMethod(Xp.Param p) {
+                    if (openingUntil.isEmpty() || !(p.thisObject instanceof ViewGroup) || p.args.length != 1 || !(p.args[0] instanceof Float)) return;
+                    Long until = openingUntil.get(p.thisObject);
+                    if (until == null) return;
+                    if (android.os.SystemClock.uptimeMillis() > until) { openingUntil.remove(p.thisObject); return; }
+                    if (((Float) p.args[0]).floatValue() < 1f) p.args[0] = Float.valueOf(1f);
+                }
+            });
+        } catch (Throwable error) { logOnce("Menu open fade unavailable", error); }
         // Zero app-provided shortcut rows before native layout/population. Leave the
         // systemShortcut list intact, including App info, widgets and module actions.
         Xp.hookAllMethods(type("popup.PopupContainerWithArrow"),"populateAndShowRows",new Xp.Callback(){
@@ -888,6 +919,8 @@ final class LauncherFeatures {
             protected void beforeHookedMethod(Xp.Param p) {
                 if (!type("popup.PopupContainer").isInstance(p.thisObject)) return;
                 final Object popup = p.thisObject; final Object info = get(popup, "itemInfo");
+                if (frosted() && !privateItem(info)) openingUntil.put(popup, android.os.SystemClock.uptimeMillis() + 450);
+                if (info != null && type("model.data.FolderInfo").isInstance(info) && !DrawerFolders.isFolder(info)) { try { addHomeFolderRows(popup, info); } catch (Throwable error) { logOnce("Home folder menu unavailable", error); } return; }
                 if (identity(info) == null || privateItem(info)) return;
                 ViewGroup rows = (ViewGroup) get(popup, "systemShortcutContainer");
                 if (rows == null) {
@@ -908,6 +941,28 @@ final class LauncherFeatures {
                 }, false);
             }
         });
+    }
+    /** Home folder long-press menu: Rename and Sort above the stock Remove. */
+    static void addHomeFolderRows(final Object popup, final Object info) {
+        ViewGroup rows = (ViewGroup) get(popup, "systemShortcutContainer");
+        if (rows == null) return;
+        if (rows.findViewWithTag("pixelsuite_folder_rename") != null) return;
+        ScatterEffect.arm(info);
+        addFolderRow(rows, "Rename", "pixelsuite_folder_rename", 1, 0, new View.OnClickListener() {
+            public void onClick(View v) { call(popup, "close", true); FolderSort.homeRename(info); }
+        });
+        addFolderRow(rows, "Sort", "pixelsuite_folder_sort", 9, 1, new View.OnClickListener() {
+            public void onClick(View v) { call(popup, "close", true); FolderSort.showHomeMenu(info); }
+        });
+    }
+    static void addFolderRow(ViewGroup rows, String title, String tag, int glyph, int index, View.OnClickListener listener) {
+        Context context = rows.getContext();
+        int layout = context.getResources().getIdentifier("system_shortcut", "layout", context.getPackageName());
+        View row = LayoutInflater.from(context).inflate(layout, rows, false);
+        ((TextView)get(row,"mBubbleText")).setText(title);
+        ((View)get(row,"mIconView")).setBackground(new LauncherGlyph(context, glyph));
+        row.setTag(tag); row.setContentDescription(title); row.setOnClickListener(listener);
+        rows.addView(row, Math.min(index, rows.getChildCount()));
     }
     static void moveBubbleAboveHome(ViewGroup rows){
         View bubble=null,home=null;

@@ -37,6 +37,24 @@ final class Haptics {
         } catch (Throwable ignored) { }
     }
 
+    /**
+     * A light tick (VibrationEffect.EFFECT_TICK), straight from the vibrator so it plays even when
+     * a view's own haptic feedback is ignored. Falls back to a 12 ms pulse.
+     */
+    static void tick(Context ctx) {
+        try {
+            Vibrator v = (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
+            if (v == null || !v.hasVibrator()) return;
+            try {
+                Class<?> effect = Class.forName("android.os.VibrationEffect");
+                Object tick = effect.getMethod("createPredefined", int.class).invoke(null, 2);
+                Vibrator.class.getMethod("vibrate", effect).invoke(v, tick);
+                return;
+            } catch (Throwable ignored) { }
+            v.vibrate(12L);
+        } catch (Throwable ignored) { }
+    }
+
     private static void resolve() {
         if (sResolved) return;
         try {

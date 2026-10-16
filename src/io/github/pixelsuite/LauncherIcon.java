@@ -29,6 +29,14 @@ final class LauncherIcon {
     static final Map<String,Object> nativeIcons=new HashMap<String,Object>();
     static final Map<String,Object> cache=new HashMap<String,Object>();
     static final Set<String> missing=new HashSet<String>();
+    /**
+     * Custom icon bitmaps that were dropped (Reset icon, a new image, a shape change). Items can still hold one, and
+     * apply() must not mistake it for the app's own icon: it used to adopt it as the "original", so Reset icon kept the
+     * custom picture for good. Weak, so dropped bitmaps are not kept alive.
+     */
+    static final Set<Object> retired=Collections.newSetFromMap(new WeakHashMap<Object,Boolean>());
+    /** Drops the cached custom icon of {@code key} (caller holds the cache lock). */
+    static void retire(String key){Object old=cache.remove(key);if(old!=null)retired.add(old);missing.remove(key);}
     static final ExecutorService IO=new ThreadPoolExecutor(0,1,10,TimeUnit.SECONDS,new LinkedBlockingQueue<Runnable>());
     static final ThreadLocal<Object> oldTheme=new ThreadLocal<Object>();
     static Object get(Object o,String f){return LauncherFeatures.get(o,f);}
@@ -43,7 +51,7 @@ final class LauncherIcon {
             protected void beforeHookedMethod(Xp.Param p){oldTheme.set(get(p.thisObject,"iconState"));}
             protected void afterHookedMethod(Xp.Param p){
                 Object previous=oldTheme.get();oldTheme.remove();if(previous==get(p.thisObject,"iconState"))return;
-                synchronized(cache){cache.clear();missing.clear();}
+                synchronized(cache){retired.addAll(cache.values());cache.clear();missing.clear();}
                 final Activity a=LauncherFeatures.activity.get();if(a==null)return;
                 a.runOnUiThread(new Runnable(){public void run(){
                     try{
@@ -102,7 +110,7 @@ final class LauncherIcon {
             try{importImage(receiver,key,uri);success=true;}catch(Throwable error){Module.log("Custom icon import failed",error);}
             final boolean ok=success;
             receiver.runOnUiThread(new Runnable(){public void run(){
-                synchronized(cache){cache.remove(key);missing.remove(key);}
+                synchronized(cache){retire(key);}
                 LauncherFeatures.refresh();
                 if(!receiver.isDestroyed())Toast.makeText(receiver,ok?"Icon updated":"Could not read this image. Try another image.",Toast.LENGTH_SHORT).show();
                 finishReceiver(receiver,proxy);
@@ -136,7 +144,7 @@ final class LauncherIcon {
     static void reset(final Activity a,final String key){IO.execute(new Runnable(){public void run(){
         boolean success=false;try{File f=file(a,key);success=!f.exists()||f.delete();}catch(Exception ignored){}
         final boolean ok=success;a.runOnUiThread(new Runnable(){public void run(){
-            if(ok)synchronized(cache){cache.remove(key);missing.remove(key);}
+            if(ok)synchronized(cache){retire(key);}
             LauncherFeatures.refresh();Toast.makeText(a,ok?"Original icon restored":"Could not reset the icon",0).show();
         }});
     }});}
@@ -185,11 +193,15 @@ final class LauncherIcon {
     static void apply(Object info,String key){
         synchronized(cache){
             Object current=get(info,"bitmap");
+            boolean ours=cache.containsValue(current)||retired.contains(current);
+            // The launcher loads a new native icon after a shape or theme change: keep that one as the
+            // original, or the old shape would be written back over it (the drawer stayed in the old shape).
+            if(originals.containsKey(info)&&!ours&&current!=originals.get(info)){originals.put(info,current);nativeIcons.put(key,current);}
             if(!originals.containsKey(info)){
                 Object saved=nativeIcons.get(key);
                 // Workspace/folder copies may have inherited the replacement bitmap.
-                originals.put(info,current==cache.get(key)&&saved!=null?saved:current);
-                if(current!=cache.get(key))nativeIcons.put(key,current);
+                originals.put(info,(current==cache.get(key)||retired.contains(current))&&saved!=null?saved:current);
+                if(current!=cache.get(key)&&!retired.contains(current))nativeIcons.put(key,current);
             }
             if(!LauncherFeatures.on(LauncherFeatures.ICONS)){LauncherFeatures.set(info,"bitmap",originals.get(info));return;}
             Object replacement=cache.get(key);

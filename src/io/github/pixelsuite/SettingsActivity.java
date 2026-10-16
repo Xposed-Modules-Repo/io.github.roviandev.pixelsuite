@@ -64,6 +64,7 @@ public class SettingsActivity extends Activity {
     private TextView mLabelPreview;
     private final TextView[] mLabelStops=new TextView[5];
     private FeaturePreview mFeaturePreview;
+    private final java.util.List<FeaturePreview> mPreviews=new java.util.ArrayList<FeaturePreview>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,17 +92,20 @@ public class SettingsActivity extends Activity {
         }
         LinearLayout heading=page;
         if(pageId==null||"home".equals(pageId)){
-            LinearLayout header=new LinearLayout(this);header.setOrientation(LinearLayout.HORIZONTAL);header.setGravity(Gravity.TOP);
-            heading=new LinearLayout(this);heading.setOrientation(LinearLayout.VERTICAL);header.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
-            LinearLayout.LayoutParams links=new LinearLayout.LayoutParams(-2,-2);links.topMargin=dp(28);links.leftMargin=dp(8);header.addView(supportCorner(),links);page.addView(header,new LinearLayout.LayoutParams(-1,-2));
+            FrameLayout header=new FrameLayout(this);header.setClipChildren(false);header.setClipToPadding(false);
+            heading=new LinearLayout(this);heading.setOrientation(LinearLayout.VERTICAL);heading.setGravity(Gravity.CENTER_HORIZONTAL);
+            FrameLayout.LayoutParams titleParams=new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT);titleParams.rightMargin=dp(144);header.addView(heading,titleParams);
+            FrameLayout.LayoutParams links=new FrameLayout.LayoutParams(dp(120),-2,Gravity.TOP|Gravity.RIGHT);links.topMargin=dp(28);links.rightMargin=0;header.addView(supportCorner(),links);page.addView(header,new LinearLayout.LayoutParams(-1,-2));
         }
         TextView title = text(pageTitle(pageId), 36, mText, false);
         title.setPadding(dp(8), dp(32), dp(8), dp(8));
+        if(pageId==null||"home".equals(pageId))title.setGravity(Gravity.CENTER_HORIZONTAL);
         heading.addView(title);
 
         TextView subtitle = text(pageSubtitle(pageId), 17, mTextSecondary, false);
         subtitle.setPadding(dp(8), 0, dp(8), dp(12));
-        heading.addView(subtitle);
+        if(pageId==null||"home".equals(pageId))subtitle.setGravity(Gravity.CENTER_HORIZONTAL);
+        if(subtitle.length()>0)heading.addView(subtitle);
         TextView version = text("  " + versionName() + "  \u00b7  RovianDev  ", 12, mAccent, true);
         GradientDrawable chip = FrostedSurface.drawable(this,18);
         version.setBackground(chip); version.setPadding(dp(12),dp(8),dp(12),dp(8));
@@ -136,11 +140,12 @@ public class SettingsActivity extends Activity {
     protected void onResume() {
         super.onResume();
         load();
-        if(mFeaturePreview!=null)mFeaturePreview.setHostActive(true);
+        ReleaseUpdates.schedule(SettingsActivity.this); ReleaseUpdates.check(SettingsActivity.this,false,null);
+        for(FeaturePreview preview:mPreviews)preview.setHostActive(true);
     }
 
-    @Override protected void onPause(){if(mFeaturePreview!=null)mFeaturePreview.setHostActive(false);super.onPause();}
-    @Override protected void onDestroy(){if(mFeaturePreview!=null)mFeaturePreview.dispose();super.onDestroy();}
+    @Override protected void onPause(){for(FeaturePreview preview:mPreviews)preview.setHostActive(false);super.onPause();}
+    @Override protected void onDestroy(){for(AlertDialog dialog:new java.util.ArrayList<AlertDialog>(mSettingsDialogs))dialog.dismiss();for(FeaturePreview preview:mPreviews)preview.dispose();super.onDestroy();}
 
     private static final class FeaturePage {
         final String group,key,icon,title,summary;
@@ -150,19 +155,22 @@ public class SettingsActivity extends Activity {
         new FeaturePage("buttons",Feature.FLASHLIGHT,"ic_ps_flashlight","Power button flashlight","Double-press the power button to toggle the flashlight. Pixel Suite keeps the power gesture enabled and handles the flashlight action. Turning this off returns control to the phone's normal power gesture."),
         new FeaturePage("buttons",Feature.VOLDOWN_CAMERA,"ic_ps_camera","Volume-down camera","Double-press volume down while the Always On Display is showing to open the camera. The gesture stays inactive during calls and while media is playing."),
         new FeaturePage("gestures",Feature.THREE_FINGER,"ic_ps_threefinger","Three-finger screenshot","Swipe down with three fingers to capture a screenshot. The gesture works across apps, subject to Android's restrictions on protected content."),
+        new FeaturePage("gestures",ScreenRecordTidy.KEY,"ic_ps_screen_record","Screen recording sheet","Places the X and Start controls below the recording options and hides the long screen-content warning. Recording still starts only when you choose Start. Turn this off to keep the stock layout the next time the prompt opens. Currently targets the English System UI recording prompt."),
         new FeaturePage("gestures",Feature.SCREENSHOT_FREE_CROP,"ic_ps_crop_free","Free screenshot crop","Crop a screenshot to any size in the screenshot editor. The crop frame no longer stops at a minimum width or height, so you can cut a thin strip or a single line of text. Works with any screenshot opened in the editor, whether it came from the buttons, the three-finger gesture or recents."),
         new FeaturePage("gestures",Feature.SCREENSHOT_DOODLES,"ic_ps_doodles","Screenshot doodles","Adds a Doodles tool next to the pen in the screenshot editor. Draw arrows, lines, squares, circles and more in your choice of color and thickness. Drag a shape to move it, or use its handles to resize it before saving. Doodles are saved into the screenshot with the rest of your edits."),
         new FeaturePage("gestures",Feature.DOUBLE_TAP_SLEEP,"ic_ps_sleep","Double tap to sleep","Double-tap empty space on the home screen to lock your phone. Apps, folders and normal launcher interactions keep their usual actions."),
-        new FeaturePage("gestures",Feature.TAP_CHECK,"ic_ps_tapwake","Tap to wake","Choose a single tap or a double tap to wake the screen. Pocket protection prevents waking while the front sensor is covered. This also enables double-tap to sleep on the lock screen; choose its behavior below."),
-        new FeaturePage("launcher",LauncherFeatures.GRID,"ic_ps_folder_grid","Folder grid","Choose room for 9, 16 or 25 apps per folder page, with Pixel Launcher's own folder animations and frosted background. Each folder's three-dot menu can change its grid and has Add apps: search your apps and tick the ones this folder should hold. 4x4 folders open with their bottom edge just above the dock."),
-        new FeaturePage("drawer",LauncherFeatures.DRAWER,"ic_ps_drawer_folder","App drawer folders","Hold an app and choose Create folder, or drag one app onto the middle of another; a folder-colored highlight shows when the drop will make or fill a folder. Holding a folder opens Rename, Sort A–Z and Remove; holding for 1.5 seconds, or moving your finger, lets you move it. The three-dot menu inside a folder has Add apps (searchable) and the grid size. Drag above the top edge of the search bar to move to the home screen. Apps outside folders are always sorted A to Z, then Arabic, other languages, and names starting with numbers or symbols. Removing a folder returns its apps to the drawer, and drawer folders close when you leave the drawer or lock the phone. Private Space is excluded."),
+        new FeaturePage("gestures",Feature.TAP_CHECK,"ic_ps_tapwake","Tap to wake","Choose a single tap or a double tap to wake the screen. Pocket protection prevents waking while the front sensor is covered. This also enables double-tap to sleep on the lock screen. Choose how lock-screen taps behave below."),
+        new FeaturePage("launcher",LauncherFeatures.GRID,"ic_ps_folder_grid","Folder grid","Choose room for 9, 16 or 25 apps per folder page, with Pixel Launcher's own folder animations and frosted background. Use the three-dot menu in each folder to change its grid, sort its apps, or choose Add apps to search and select its contents. Folders fit their contents: a 4×4 folder with 11 apps uses three rows instead of an empty fourth row. Removing a folder includes a brief scatter animation; the apps stay installed. System settings that disable animations are respected."),
+        new FeaturePage("drawer",LauncherFeatures.DRAWER,"ic_ps_drawer_folder","App drawer folders","Hold an app and choose Create folder, or drag one app onto the middle of another; a folder-colored highlight shows when the drop will make or fill a folder. Holding a folder opens Rename, Sort and Remove. Sort has two choices with a check mark: Auto (A–Z) asks first, then keeps the folder in alphabetical order; Custom lets you arrange apps freely by dragging them inside the folder, and keeps that order across updates and restarts. Dragging an app against the left or right edge of an open folder switches its page, and an app leaves the folder after staying outside it for 250 ms. A Remove target beside Add to home screen takes selected apps out of a drawer folder without uninstalling them. Holding a folder for 1.5 seconds, or moving your finger, lets you move it. The three-dot menu inside a folder has Add apps (searchable), Sort (Auto A–Z or Custom), and the grid size. In Custom mode, drawer-folder apps make room as you drag, and apps selected together land as one group. Drag above the top edge of the search bar to move to the home screen. Apps outside folders are always sorted A to Z, then Arabic, other languages, and names starting with numbers or symbols. Removing a folder returns its apps to the drawer, and drawer folders close when you leave the drawer or lock the phone. Private Space is excluded."),
         new FeaturePage("drawer",LauncherFeatures.DRAG_PILL,"ic_ps_home_drop","Drag to home screen","Hold an app in the drawer to reveal a frosted Add to home screen target at the top. Drag onto the target to continue to the home screen; sideways and downward movement stays in the drawer, and scrolling the drawer never starts a drag. With App drawer folders enabled, dropping apps together creates folders."),
         new FeaturePage("launcher",LauncherFeatures.ICONS,"ic_ps_change_icon","Change icons","Hold an app and choose Change icon. Select an image through Photos or Files. It is cropped to a square, fitted to the normal launcher icon size and shaped by Pixel Launcher. Changes apply across home, drawer, folders, app search and the Google search app. Choose Change icon again to restore the original. Only the selected image is copied into launcher-private storage; it is not uploaded."),
+        new FeaturePage("launcher",FolderDrag.TWO_FINGER,"ic_ps_two_finger","Two-finger drag","While you hold an app with one finger, swipe with a second finger to change pages: on the home screen, inside any folder, or in the app drawer (up and down to scroll, with momentum when you lift the scrolling finger). Keep holding the app while you navigate, then drop it onto a valid destination. The held app stays under your first finger. Works with home-screen folders and app drawer folders. A second-finger touch stops a coasting drawer. When the held apps came from a drawer folder, the drawer behind it stays still; taps can still add apps from that folder."),
+        new FeaturePage("launcher",MultiDrag.KEY,"ic_ps_multi_drag","Move several apps","Hold an app and start moving it, then tap other apps with another finger to pick them up too. Each app flies to the one you are holding and joins a stack, with a badge counting how many apps you are moving. Works on the home screen, in folders and in the app drawer. Drop the selected apps together into a folder or onto a home-screen page, where they fill the free spaces nearest your finger. Use Remove to take selected apps out of a drawer folder. Apps from the drawer are added to the home screen as usual; home screen apps move. Picked icons follow your system icon shape. Drop several home-screen apps on Remove to remove their shortcuts together; the apps stay installed. During multi-app dragging, Uninstall is hidden and Remove moves to the center. When a drag starts inside a folder, you can select more apps from that same folder. In the main drawer, the suggested-app row and apps already inside folders are excluded to avoid duplicate selections. If you cancel, they fly back."),
         new FeaturePage("launcher",LauncherFeatures.RENAME,"ic_ps_rename","Rename apps","Hold an app and choose Rename. Saving updates its name immediately across home icons, folders, the drawer, launcher app search and the Google search app. Reset restores its original name. Names in other apps remain unchanged, and work-profile names are kept separate."),
         new FeaturePage("launcher",LauncherFeatures.LABEL_SIZE,"ic_ps_label_size","Icon label size","Choose one of five text sizes for home-screen and app-drawer labels, including closed folder names. Smaller text fits more letters in the same space. Medium is the default, with comfortably smaller text than stock. Icon sizes and labels inside opened folders stay unchanged. Disabled by default. Enable it to apply your chosen size immediately; turning it off restores stock text size."),
         new FeaturePage("launcher",Feature.CLEAR_ALL,"ic_ps_clearall","Clear all in recents","Moves the stock Clear all option from the far left of recents and keeps it always visible alongside Select and Screenshot. You can clear recent apps without scrolling to the end of the list. Changing this option restarts Pixel Launcher to rebuild the recents controls."),
-        new FeaturePage("drawer",LauncherFeatures.HIDE_SHORTCUTS,"ic_ps_shortcuts","Hide app shortcuts","Hide app-provided actions such as Amazon Search and View orders when holding an app in the app drawer. Google\'s basic actions and Pixel Suite options remain available. Home-screen shortcuts are unchanged. This takes effect the next time you hold an app, without restarting Pixel Launcher."),
-        new FeaturePage("files",Feature.FILES_SORT,"ic_ps_files","Newest first","Sort folders with folders first and files newest to oldest, in Files by Google and in Android's file picker (the Files screen other apps open when you attach a file). While enabled, this overrides each app's own Sort by choice. The file picker is a separate system app, also named Files: in LSPosed, open Pixel Suite's scope, show system apps, tick com.google.android.documentsui, then force stop it. Turn this off to use the apps' normal sorting.")
+        new FeaturePage("drawer",LauncherFeatures.HIDE_SHORTCUTS,"ic_ps_shortcuts","Hide app shortcuts","Hide app-provided actions such as Amazon Search and View orders when holding an app in the app drawer. The standard launcher actions and Pixel Suite options remain available. Home-screen shortcuts are unchanged. This takes effect the next time you hold an app, without restarting Pixel Launcher."),
+        new FeaturePage("files",Feature.FILES_SORT,"ic_ps_files","Newest first","Show folders first, followed by files from newest to oldest, in Files by Google and in Android's file picker (the Files screen other apps open when you attach a file). While enabled, this overrides each app's own Sort by choice. The file picker is a separate system app, also named Files: in LSPosed, open Pixel Suite's scope, show system apps, tick com.google.android.documentsui, then force stop it. Turn this off to use the apps' normal sorting.")
     };
     private final Map<String,TextView> mChoiceLabels=new LinkedHashMap<String,TextView>();
     private final Map<String,Integer> mChoiceOffsets=new LinkedHashMap<String,Integer>();
@@ -174,7 +182,7 @@ public class SettingsActivity extends Activity {
         if("buttons".equals(id))return "Buttons";if("gestures".equals(id))return "Gestures";
         if("drawer".equals(id))return "App drawer";if("launcher".equals(id))return "Pixel Launcher";if("files".equals(id))return "Files";
         if("changelog".equals(id))return "Changelog";
-        if("about".equals(id))return "About and support";return "Pixel Suite";
+        if("updates".equals(id))return "Updates";if("about".equals(id))return "About and support";return "Pixel Suite";
     }
     private String pageSubtitle(String id){
         if(feature(id)!=null)return "Make it work your way.";
@@ -182,8 +190,8 @@ public class SettingsActivity extends Activity {
         if("gestures".equals(id))return "Capture, mark up, lock and wake.";
         if("drawer".equals(id))return "Folders, dragging and app shortcuts.";if("launcher".equals(id))return "Folders, names, icons and recents.";
         if("files".equals(id))return "A better starting view for your files.";
-        if("changelog".equals(id))return "Whats change: ";
-        if("about".equals(id))return "Made by RovianDev";return "your pixel your way";
+        if("changelog".equals(id))return "What's new:";
+        if("updates".equals(id))return "";if("about".equals(id))return "Made by RovianDev";return "Your Pixel. Your Way.";
     }
     private void openPage(String id){startActivity(new Intent(this,SettingsActivity.class).putExtra("page",id));}
     private void buildPage(LinearLayout page){
@@ -192,8 +200,8 @@ public class SettingsActivity extends Activity {
             LinearLayout controls=group(page);row(controls,f.key,f.icon,mAccent,(LauncherFeatures.HIDE_SHORTCUTS.equals(f.key)?"Hide app shortcuts":LauncherFeatures.ICONS.equals(f.key)?"Use custom app icons":LauncherFeatures.LABEL_SIZE.equals(f.key)?"Customize icon labels":"Use "+f.title.toLowerCase(java.util.Locale.ROOT)),"Enable this feature.");finishGroup(controls);
             section(page,"How it works");explanation(page,f.summary);
             if(!LauncherFeatures.LABEL_SIZE.equals(f.key))featurePreview(page,f);
-            if(LauncherFeatures.GRID.equals(f.key)){section(page,"Default size");LinearLayout options=group(page);gridChoice(options);finishGroup(options);}
-            if(LauncherFeatures.DRAWER.equals(f.key)){section(page,"New drawer folders");LinearLayout options=group(page);gridChoice(options,LauncherFeatures.DRAWER_GRID_SIZE,"Default drawer folder grid");finishGroup(options);}
+            if(LauncherFeatures.DRAWER.equals(f.key))extraPreview(page,"folder_reorder","Live folder reordering");
+            if(LauncherFeatures.GRID.equals(f.key))extraPreview(page,"folder_sort","Folder sorting");
             if(LauncherFeatures.LABEL_SIZE.equals(f.key)){
                 section(page,"Text size");LinearLayout options=group(page);labelSize(options);finishGroup(options);
                 section(page,"Choose your size");
@@ -211,7 +219,7 @@ public class SettingsActivity extends Activity {
                 explanation(page,"Modded behavior lets you double-tap the alarm, weather or date area to sleep without opening those cards, and removes tap vibration. Stock behavior keeps those cards tappable and keeps vibration; a double tap on a card can open it instead of sleeping.");
             }
             if(LauncherFeatures.DRAWER.equals(f.key))explanation(page,"Folders need at least two available apps, and each app can be in only one drawer folder. Turning this feature off shows the ordinary drawer and keeps your folder definitions for when you enable it again.");
-            if(LauncherFeatures.GRID.equals(f.key))explanation(page,"Choose 3x3, 4x4 or 5x5. Home-screen and drawer folders keep separate grid choices. The larger 4x4 icons use one label line; long names may end with an ellipsis. 5x5 keeps its current icon size and sits lower in the drawer than on the home screen. Folder blur and tint keep their existing appearance.");
+            if(LauncherFeatures.GRID.equals(f.key))explanation(page,"Choose 3x3, 4x4 or 5x5. Home-screen and drawer folders keep separate grid choices. The 4×4 layout uses one line for labels; long names may end with an ellipsis. The 5×5 layout fits up to 25 apps per page with spacing adjusted for the available screen area. Folder blur and tint keep their existing appearance.");
             if(Feature.SCREENSHOT_FREE_CROP.equals(f.key)||Feature.SCREENSHOT_DOODLES.equals(f.key)){
                 section(page,"Pixel Studio setup");
                 explanation(page,"These tools work in Pixel Studio when it opens a screenshot for editing. In LSPosed > Pixel Suite > Scope, select Pixel Studio (com.google.android.apps.pixel.creativeassistant), then restart Pixel Studio. They do not modify other image editors. The hooks target Pixel Studio 2.3.001 (version code 192285); another version may not support these tools. Each feature starts enabled, and you can turn it off separately here.\n\nSave or discard your current edits before changing either toggle: changing it closes Pixel Studio, so its toolbar can rebuild when you open the editor again.");
@@ -221,14 +229,16 @@ public class SettingsActivity extends Activity {
             if(LauncherFeatures.ICONS.equals(f.key))explanation(page,"Turning this off restores the original icons while keeping your selected images for later. Private Space is excluded.");
             return;
         }
+        if("updates".equals(id)){buildUpdates(page);return;}
         if("about".equals(id)){
             explanation(page,"All Pixel Suite controls live in this app. New launcher options update immediately. To get back here from the home screen, long-press an empty spot and choose Pixel Suite settings. Android's own Settings keeps its stock menus.\n\nRoot access is required to save the module's settings. Enable Pixel Suite in LSPosed with its recommended scope.");
             section(page,"Community and support");communityActions(page,false);
             return;
         }
         if("changelog".equals(id)){
-            explanation(page,"Release notes are included with this build and work offline. Older notes describe the behavior at the time of that release.");
-            String[] entries=Changelog.read(this).split("(?m)^## ");
+            explanation(page,"The latest release notes are included with this build and work offline.");
+            LinearLayout history=group(page);navigation(history,"Full changelog on GitHub","Complete feature lists, fixes and release history","ic_ps_changelog",new Runnable(){public void run(){startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/RovianDev/PixelSuite/releases")));}});finishGroup(history);
+            String latest=Changelog.read(this);int next=latest.indexOf("\n## ");if(next>=0)latest=latest.substring(0,next);String[] entries=latest.split("(?m)^## ");
             for(String entry:entries){if(entry.trim().isEmpty())continue;int end=entry.indexOf('\n');String heading=end<0?entry.trim():entry.substring(0,end).trim();String body=end<0?"":entry.substring(end+1).trim();section(page,heading);TextView notes=text(body,15,mText,false);notes.setTextIsSelectable(true);notes.setLineSpacing(dp(4),1);notes.setPadding(dp(18),dp(16),dp(18),dp(18));notes.setBackground(FrostedSurface.drawable(this,20));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(12);page.addView(notes,lp);}
             return;
         }
@@ -241,22 +251,22 @@ public class SettingsActivity extends Activity {
         navigation(categories,"Gestures","Screenshots, doodles, sleep and wake","ic_ps_gestures",new Runnable(){public void run(){openPage("gestures");}});
         navigation(categories,"Pixel Launcher","Folder grids, drawer folders, icons and names","ic_ps_launcher",new Runnable(){public void run(){openPage("launcher");}});
         navigation(categories,"Files","Files and the file picker, newest first","ic_ps_files_category",new Runnable(){public void run(){openPage("files");}});finishGroup(categories);
-        section(page,"Pixel Suite");LinearLayout about=group(page);navigation(about,"Changelog","Release notes, available offline","ic_ps_changelog",new Runnable(){public void run(){openPage("changelog");}});navigation(about,"About and support","Setup, community and support links","ic_ps_info",new Runnable(){public void run(){openPage("about");}});finishGroup(about);
+        section(page,"Pixel Suite");LinearLayout about=group(page);navigation(about,"Changelog","Release notes, available offline","ic_ps_changelog",new Runnable(){public void run(){openPage("changelog");}});navigation(about,"Updates","Check official releases and manage notifications","ic_ps_update",new Runnable(){public void run(){openPage("updates");}});navigation(about,"About and support","Setup, community and support links","ic_ps_info",new Runnable(){public void run(){openPage("about");}});finishGroup(about);
     }
     private LinearLayout supportCorner(){
         LinearLayout stack=new LinearLayout(this);stack.setOrientation(LinearLayout.VERTICAL);stack.setGravity(Gravity.RIGHT);
         int[] order={0,2,1};
         for(int position=0;position<order.length;position++){
-            final int index=order[position];LinearLayout button=new LinearLayout(this);button.setOrientation(LinearLayout.HORIZONTAL);button.setGravity(Gravity.CENTER_VERTICAL);button.setPadding(dp(10),dp(6),dp(10),dp(6));button.setMinimumHeight(dp(48));
+            final int index=order[position];LinearLayout button=new LinearLayout(this);button.setOrientation(LinearLayout.HORIZONTAL);button.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);button.setPadding(dp(10),dp(6),dp(10),dp(6));button.setMinimumHeight(dp(48));
             ImageView icon=new ImageView(this);Drawable mark=drawable(index==0?"brand_telegram_glyph":CommunityLinks.ICONS[index]);
             if(mark!=null){mark=mark.mutate();if(index==2)mark.setTint(mDark?Color.WHITE:Color.BLACK);icon.setImageDrawable(mark);}
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             LinearLayout.LayoutParams imageParams=new LinearLayout.LayoutParams(dp(20),dp(20));imageParams.rightMargin=dp(7);button.addView(icon,imageParams);
-            TextView label=text(CommunityLinks.NAMES[index],12,mText,true);label.setMaxLines(2);label.setMaxWidth(dp(100));label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);button.addView(label,new LinearLayout.LayoutParams(-2,-2));
+            TextView label=text(CommunityLinks.NAMES[index],12,mText,true);label.setSingleLine(true);label.setEllipsize(android.text.TextUtils.TruncateAt.END);label.setMaxWidth(dp(100));label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);button.addView(label,new LinearLayout.LayoutParams(dp(68),-2));
             supportSurface(button);button.setElevation(dp(1));
             button.setClickable(true);button.setFocusable(true);button.setContentDescription(CommunityLinks.NAMES[index]+". "+CommunityLinks.CAPTIONS[index]+". Opens an external app.");
             button.setOnClickListener(new View.OnClickListener(){public void onClick(View v){CommunityLinks.open(SettingsActivity.this,index);}});
-            LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-2,-2);if(position>0)params.topMargin=dp(6);stack.addView(button,params);
+            LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(48));params.gravity=Gravity.RIGHT;if(position>0)params.topMargin=dp(6);stack.addView(button,params);
         }return stack;
     }
     /** A local rounded blur region: no full-window blur and no background animation. */
@@ -281,7 +291,7 @@ public class SettingsActivity extends Activity {
         GradientDrawable tint=new GradientDrawable();tint.setColor((mCard & 0x00ffffff)|(blur==null?0xff000000:0xcc000000));tint.setCornerRadius(dp(24));
         Drawable fill=blur==null?tint:new android.graphics.drawable.LayerDrawable(new Drawable[]{blur,tint});
         GradientDrawable mask=new GradientDrawable();mask.setColor(Color.WHITE);mask.setCornerRadius(dp(24));
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(mDark?0x33FFFFFF:0x22000000),fill,mask));
+        button.setBackground(new android.graphics.drawable.InsetDrawable(new RippleDrawable(ColorStateList.valueOf(mDark?0x33FFFFFF:0x22000000),fill,mask),0,dp(2),0,dp(2)));
     }
     private ImageView brandIcon(int index){
         ImageView icon=new ImageView(this);icon.setImageDrawable(drawable(CommunityLinks.ICONS[index]));icon.setScaleType(ImageView.ScaleType.FIT_CENTER);icon.setPadding(dp(10),dp(10),dp(10),dp(10));GradientDrawable bg=new GradientDrawable();bg.setColor(CommunityLinks.BADGES[index]);bg.setCornerRadius(dp(16));icon.setBackground(bg);icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);return icon;
@@ -292,7 +302,7 @@ public class SettingsActivity extends Activity {
         int[] order={0,2,1};for(int position=0;position<order.length;position++){
             final int index=order[position];int i=index;LinearLayout button=new LinearLayout(this);button.setOrientation(compact?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);button.setGravity(compact?Gravity.CENTER:Gravity.CENTER_VERTICAL);button.setPadding(dp(compact?8:18),dp(16),dp(compact?8:18),dp(16));button.setMinimumHeight(dp(compact?104:80));button.setBackground(rowBackground(dp(24),dp(24)));
             LinearLayout.LayoutParams iconParams=new LinearLayout.LayoutParams(dp(48),dp(48));if(compact)iconParams.bottomMargin=dp(10);else iconParams.rightMargin=dp(16);button.addView(brandIcon(i),iconParams);
-            LinearLayout labels=new LinearLayout(this);labels.setOrientation(1);TextView name=text(compact&&i==1?"Buy Me\na Coffee":CommunityLinks.NAMES[i],compact?13:18,mText,false);if(compact){name.setGravity(Gravity.CENTER);name.setMinLines(2);}labels.addView(name);
+            LinearLayout labels=new LinearLayout(this);labels.setOrientation(1);TextView name=text(CommunityLinks.NAMES[i],compact?13:18,mText,false);if(compact){name.setGravity(Gravity.CENTER);name.setMinLines(2);}labels.addView(name);
             if(!compact){TextView caption=text(CommunityLinks.CAPTIONS[i],14,mTextSecondary,false);caption.setPadding(0,dp(4),0,0);labels.addView(caption);}button.addView(labels,new LinearLayout.LayoutParams(compact?-1:0,-2,compact?0:1));
             button.setClickable(true);button.setFocusable(true);button.setContentDescription(CommunityLinks.NAMES[i]+". "+CommunityLinks.CAPTIONS[i]+". Opens an external app.");button.setOnClickListener(new View.OnClickListener(){public void onClick(View v){CommunityLinks.open(SettingsActivity.this,index);}});
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(compact?0:-1,-2,compact?1:0);if(compact){if(position>0)bp.leftMargin=dp(4);if(position<2)bp.rightMargin=dp(4);}else if(position>0)bp.topMargin=dp(8);actions.addView(button,bp);
@@ -300,7 +310,54 @@ public class SettingsActivity extends Activity {
     }
     private void featurePreview(LinearLayout page,FeaturePage feature){
         section(page,"Feature preview");LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setPadding(dp(12),dp(12),dp(12),dp(12));card.setBackground(FrostedSurface.drawable(this,24));LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.bottomMargin=dp(16);page.addView(card,cp);
-        mFeaturePreview=new FeaturePreview(this,feature.key,mAccent,mOnAccent,mText,mTextSecondary,mCard,mDark);mFeaturePreview.setContentDescription(feature.title+". Looping demonstration with a pause between actions. Does not change your settings.");card.addView(mFeaturePreview,new LinearLayout.LayoutParams(-1,dp(300)));
+        mFeaturePreview=new FeaturePreview(this,feature.key,mAccent,mOnAccent,mText,mTextSecondary,mCard,mDark);mFeaturePreview.setContentDescription(feature.title+". Looping demonstration with a pause between actions. Does not change your settings.");card.addView(mFeaturePreview,new LinearLayout.LayoutParams(-1,dp(300)));mPreviews.add(mFeaturePreview);
+    }
+    private void extraPreview(LinearLayout page,String key,String title){featurePreview(page,new FeaturePage("launcher",key,"ic_ps_folder_grid",title,""));}
+    private TextView mUpdateStatus;
+    private android.widget.ProgressBar mUpdateProgress;
+    private void beginUpdateInstall(){
+        UpdateInstaller.start(this,new UpdateInstaller.Progress(){public void show(String message,int percent){
+            if(isDestroyed()||isFinishing())return;
+            if(mUpdateStatus!=null)mUpdateStatus.setText(message);
+            if(mUpdateProgress!=null){mUpdateProgress.setVisibility(View.VISIBLE);mUpdateProgress.setIndeterminate(percent<0&&message.contains("Verifying"));if(percent>=0){mUpdateProgress.setIndeterminate(false);mUpdateProgress.setProgress(percent);}else if(!message.contains("Verifying"))mUpdateProgress.setVisibility(View.GONE);}
+        }});
+    }
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==202&&getIntent().getBooleanExtra("resume_update_install",false)){getIntent().removeExtra("resume_update_install");try{if((Boolean)getPackageManager().getClass().getMethod("canRequestPackageInstalls").invoke(getPackageManager()))beginUpdateInstall();else if(mUpdateStatus!=null)mUpdateStatus.setText("Installation permission was not enabled. Tap Download and install when ready.");}catch(Exception unavailable){}}}
+    private void buildUpdates(LinearLayout page){
+        explanation(page,"Automatic checks run about once a day when Android allows network work, and when you open Pixel Suite (at most once every six hours). They are not instant push messages. No account, GitHub token, root access or device information is sent; GitHub receives the normal network request.");
+        final android.widget.Switch automatic=new android.widget.Switch(this);automatic.setText("Automatic release checks");android.graphics.drawable.Drawable updateIcon=drawable("ic_ps_update");if(updateIcon!=null){updateIcon=updateIcon.mutate();updateIcon.setTint(mAccent);updateIcon.setBounds(0,0,dp(24),dp(24));automatic.setCompoundDrawables(updateIcon,null,null,null);automatic.setCompoundDrawablePadding(dp(12));}automatic.setTextColor(mText);automatic.setChecked(ReleaseUpdates.enabled(this));automatic.setPadding(dp(18),dp(16),dp(18),dp(16));page.addView(automatic);
+        automatic.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener(){public void onCheckedChanged(android.widget.CompoundButton v,boolean checked){ReleaseUpdates.prefs(SettingsActivity.this).edit().putBoolean("enabled",checked).apply();ReleaseUpdates.schedule(SettingsActivity.this);if(checked)ReleaseUpdates.check(SettingsActivity.this,false,null);}});
+        final TextView status=text(ReleaseUpdates.status(this),15,mTextSecondary,false);mUpdateStatus=status;status.setPadding(dp(18),dp(12),dp(18),dp(16));page.addView(status);mUpdateProgress=new android.widget.ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);mUpdateProgress.setMax(100);mUpdateProgress.setVisibility(View.GONE);page.addView(mUpdateProgress,new LinearLayout.LayoutParams(-1,dp(8)));
+        LinearLayout actions=group(page);
+        navigation(actions,"Check now","Verify both repositories","ic_ps_update",new Runnable(){public void run(){status.setText("Checking both repositories…");ReleaseUpdates.check(SettingsActivity.this,true,new ReleaseUpdates.Result(){public void done(String message){if(!isDestroyed())status.setText(message);}});}});
+        navigation(actions,"Allow update notifications","Enable notifications in Android","ic_ps_update",new Runnable(){public void run(){if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=0)requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},201);else{Intent settings=new Intent("android.settings.APP_NOTIFICATION_SETTINGS");settings.putExtra("android.provider.extra.APP_PACKAGE",getPackageName());try{startActivity(settings);}catch(Exception unavailable){android.widget.Toast.makeText(SettingsActivity.this,"Open Android app settings to manage notifications.",0).show();}}}});
+        navigation(actions,"Download and install","Get the verified update directly in Pixel Suite","ic_ps_update",new Runnable(){public void run(){beginUpdateInstall();}});
+        finishGroup(actions);
+    }
+    /** All module-owned settings choices use the exact page palette, not launcher folder frost. */
+    private final java.util.List<AlertDialog> mSettingsDialogs=new java.util.ArrayList<AlertDialog>();
+    private void showSettingsDialog(final AlertDialog dialog){
+        dialog.setCancelable(true);dialog.setCanceledOnTouchOutside(true);dialog.show();mSettingsDialogs.add(dialog);dialog.setOnDismissListener(new DialogInterface.OnDismissListener(){public void onDismiss(DialogInterface d){mSettingsDialogs.remove(dialog);}});
+        Window window=dialog.getWindow();if(window==null)return;
+        Drawable background=window.getDecorView().getBackground();
+        if(background!=null){background=background.mutate();background.setColorFilter(mBg,android.graphics.PorterDuff.Mode.SRC_IN);window.setBackgroundDrawable(background);}
+        else{GradientDrawable fill=new GradientDrawable();fill.setColor(mBg);fill.setCornerRadius(dp(28));window.setBackgroundDrawable(fill);}
+        // Keep the page itself at its existing color while the equal-colored popup is open.
+        window.setDimAmount(0f);
+        for(String name:new String[]{"parentPanel","topPanel","contentPanel","buttonPanel"}){
+            int id=getResources().getIdentifier(name,"id","android");View panel=window.getDecorView().findViewById(id);if(panel!=null)panel.setBackgroundColor(Color.TRANSPARENT);
+        }
+        colorSettingsDialog(window.getDecorView());
+        if(dialog.getListView()!=null)dialog.getListView().setOnHierarchyChangeListener(new ViewGroup.OnHierarchyChangeListener(){public void onChildViewAdded(View parent,View child){colorSettingsDialog(child);}public void onChildViewRemoved(View parent,View child){}});
+        for(int which:new int[]{AlertDialog.BUTTON_POSITIVE,AlertDialog.BUTTON_NEGATIVE,AlertDialog.BUTTON_NEUTRAL})if(dialog.getButton(which)!=null)dialog.getButton(which).setTextColor(mAccent);
+    }
+    private void colorSettingsDialog(View view){
+        if(view instanceof TextView)((TextView)view).setTextColor(mText);
+        if(view instanceof android.widget.CheckedTextView){
+            ColorStateList checks=new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{mAccent,mTextSecondary});
+            ((android.widget.CheckedTextView)view).setCheckMarkTintList(checks);
+        }
+        if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++)colorSettingsDialog(group.getChildAt(i));}
     }
     private void explanation(LinearLayout page,String value){
         TextView t=text(value,15,mTextSecondary,false);t.setPadding(dp(18),dp(16),dp(18),dp(18));t.setLineSpacing(dp(3),1);
@@ -369,7 +426,7 @@ public class SettingsActivity extends Activity {
         row.setClickable(true);row.setFocusable(true);row.setOnClickListener(new View.OnClickListener(){public void onClick(View v){
             IO.execute(new Runnable(){public void run(){final int[] current=Root.readSecure(new String[]{key});mMain.post(new Runnable(){public void run(){
                 if(isFinishing()||isDestroyed())return;if(current==null){showRootBanner(true);return;}
-                FrostedSurface.show(new AlertDialog.Builder(SettingsActivity.this).setTitle(title).setSingleChoiceItems(items,Math.max(0,Math.min(items.length-1,current[0]-offset)),new DialogInterface.OnClickListener(){public void onClick(DialogInterface dialog,final int which){
+                showSettingsDialog(new AlertDialog.Builder(SettingsActivity.this).setTitle(title).setSingleChoiceItems(items,Math.max(0,Math.min(items.length-1,current[0]-offset)),new DialogInterface.OnClickListener(){public void onClick(DialogInterface dialog,final int which){
                     dialog.dismiss();mSaves++;IO.execute(new Runnable(){public void run(){
                         String command="settings put secure "+key+" "+(which+offset);
                         if(Feature.DOUBLE_TAP_WAKE.equals(key))command+="; settings put secure doze_tap_gesture 1";
@@ -543,12 +600,8 @@ public class SettingsActivity extends Activity {
         return b;
     }
 
-    private void gridChoice(LinearLayout group){
-        gridChoice(group,LauncherFeatures.GRID_SIZE,"Default home folder grid");
-    }
     private static String gridIcon(String key){return LauncherFeatures.DRAWER_GRID_SIZE.equals(key)?"ic_ps_drawer_grid":"ic_ps_home_grid";}
     private static boolean folderGridKey(String key){return LauncherFeatures.GRID_SIZE.equals(key)||LauncherFeatures.DRAWER_GRID_SIZE.equals(key);}
-    private void gridChoice(LinearLayout group,String key,String title){choice(group,key,title,new String[]{"3\u00d73 (Stock) \u00b7 9 apps per page","4\u00d74 \u00b7 16 apps per page","5\u00d75 \u00b7 25 apps per page"},3);}
     private void showRootBanner(boolean show) {
         mBanner.setVisibility(show ? View.VISIBLE : View.GONE);
     }

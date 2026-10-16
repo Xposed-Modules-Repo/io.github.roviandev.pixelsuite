@@ -135,10 +135,11 @@ final class DrawerFolders {
                 p.setResult(null);
                 FrameLayout frame=(FrameLayout)get(p.args[0],"itemView");
                 Context context=(Context)get(p.thisObject,"mActivityContext");
-                bindFolder(frame,context,(vt&~BASE)>>>10);
+                bindFolder(frame,context,(vt&~BASE)>>>10);warm(context);
             }
             protected void afterHookedMethod(Xp.Param p){
                 View view=(View)get(p.args[0],"itemView");
+                try{MultiDrag.rebound(view);}catch(Throwable ignored){}
                 if(LauncherFeatures.on(LauncherFeatures.DRAWER) && type("model.data.AppInfo").isInstance(view.getTag()) && !LauncherFeatures.privateItem(view.getTag()))attachDrop(view);
             }
         });
@@ -199,7 +200,11 @@ final class DrawerFolders {
         Xp.hookAllMethods(type("folder.Folder"),"startDrag",new Xp.Callback(){
             protected void beforeHookedMethod(Xp.Param p){
                 if(!isFolder(get(p.thisObject,"mInfo")))return;
-                View v=(View)p.args[0]; p.setResult(null);Xp.setAdditionalInstanceField(v,"pixelsuite_drag_armed",true);lockScroll(v);DrawerHomeTarget.arm(v);showPopup(v);
+                View v=(View)p.args[0]; p.setResult(null);Xp.setAdditionalInstanceField(v,"pixelsuite_drag_armed",true);lockScroll(v);DrawerHomeTarget.arm(v);
+                // preview46: a light tick the moment the hold registers (the second, stronger buzz
+                // still comes when the icon lifts into the drag).
+                Haptics.tick(v.getContext());
+                showPopup(v);
             }
         });
         // Intercept only the normal all-apps long press, leaving home-screen dragging stock.
@@ -301,7 +306,10 @@ final class DrawerFolders {
         Object top=Xp.callStaticMethod(type("AbstractFloatingView"),"getTopOpenView",a);
         if(top!=null&&type("folder.Folder").isInstance(top)){call(top,"close",false);Module.log("Folder closed: screen locked");}
     }
+    /** The member icon whose menu is open (its screen position places the menu; see DrawerPopupLayout.iconRect). */
+    static java.lang.ref.WeakReference<View> heldView=new java.lang.ref.WeakReference<View>(null);
     static void showPopup(View view){
+        heldView=new java.lang.ref.WeakReference<View>(view);
         Activity a=LauncherFeatures.activity.get();if(a!=null)call(get(a,"mPopupControllerForAppIcons"),"show",view);
     }
     static void closePopup(){
@@ -313,7 +321,7 @@ final class DrawerFolders {
         Object info=Xp.newInstance(type("model.data.FolderInfo"));folderIds.put(info,f.id);
         int id=CONTAINER-f.id;set(info,"id",id);set(info,"container",CONTAINER);set(info,"title",f.name);
         List<Object> contents=(List<Object>)get(info,"contents");
-        for(String key:f.apps){Object app=known.get(key);if(app==null)continue;
+        for(String key:FolderSort.shownOrder(f)){Object app=known.get(key);if(app==null)continue;
             Object member=call(app,"makeWorkspaceItem",context);set(member,"id",CONTAINER-100000-contents.size());
             set(member,"container",id);set(member,"rank",contents.size());
             synchronized(LauncherFeatures.originals){
@@ -324,6 +332,18 @@ final class DrawerFolders {
             set(info,"user",get(app,"user"));
         }return info;
     }
+    /** Built folder icons by folder id: {signature, icon, info}. Inflating a folder is the expensive part of binding one, and it used to run while the list scrolled. */
+    private static final Map<Integer,Object[]> iconCache=new HashMap<Integer,Object[]>();
+    private static int cacheGeneration;
+    static void clearIconCache(){iconCache.clear();cacheGeneration++;warming=false;}
+    private static String signature(LauncherData.Folder f,Context context){
+        StringBuilder b=new StringBuilder();
+        b.append(f.id).append('|').append(f.name).append('|').append(f.grid).append('|').append(f.sort).append('|').append(System.identityHashCode(context)).append('|').append(context.getResources().getConfiguration().uiMode);
+        for(String key:f.apps){b.append('|').append(key);Object app=known.get(key);b.append('#').append(app==null?0:System.identityHashCode(app));}
+        try{b.append('|').append(android.provider.Settings.Secure.getString(context.getContentResolver(),"theme_customization_overlay_packages"));}catch(Throwable ignored){}
+        b.append('|').append(ShapeWatch.token(context));
+        return b.toString();
+    }
     static void bindFolder(final FrameLayout frame,Context context,int id){
         Object profile=call(context,"getDeviceProfile");
         int height=((Number)get(get(profile,"mAllAppsProfile"),"cellHeightPx")).intValue();
@@ -331,18 +351,55 @@ final class DrawerFolders {
         if(params!=null && params.height!=height){params.height=height;frame.setLayoutParams(params);}
         LauncherData.Folder f=null;for(LauncherData.Folder item:LauncherFeatures.data.folders())if(item.id==id){f=item;break;}
         frame.removeAllViews();if(f==null)return;
-        // The launcher context this cell is bound with (the list's own views may carry a themed
-        // wrapper context, which has no device profile): reused when the preview is rebound.
         Xp.setAdditionalInstanceField(frame,"pixelsuite_bind_context",context);
+        String sig=signature(f,context);Object[] hit=iconCache.get(id);
+        final View icon;final Object info;
+        if(hit!=null&&sig.equals(hit[0])){
+            icon=(View)hit[1];info=hit[2];
+            if(icon.getParent() instanceof ViewGroup)((ViewGroup)icon.getParent()).removeView(icon);
+        }else{
+            Object[] built=build(frame,context,f);icon=(View)built[0];info=built[1];iconCache.put(id,new Object[]{sig,icon,info});
+        }
+        frame.addView(icon,new FrameLayout.LayoutParams(-1,-1));frame.setTag(info);
+        try{styleLabel(icon,frame);}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder label style unavailable",error);}
+        DrawerFolderAlignment.schedule(icon);
+        attachDrop(frame);cells.put("folder:"+id,frame);
+        if(reopenId==id){reopenId=0;icon.post(new Runnable(){public void run(){call(get(icon,"mFolder"),"animateOpen",0,new ArrayList<Object>((List<?>)get(info,"contents")));}});}
+        if(animateId==id){animateId=0;icon.post(new Runnable(){public void run(){
+            try{Object manager=get(icon,"mPreviewItemManager");List<?> params=(List<?>)get(manager,"mFirstPageParams");
+                if(params.size()>0){Object animation=Xp.newInstance(type("folder.FolderPreviewItemAnim"),manager,params.get(0),-1,-1,0,2,350,null);call(get(animation,"mAnimator"),"start");}
+            }catch(Throwable error){Module.log("Drawer folder creation animation unavailable",error);}
+        }});}
+    }
+    private static boolean warming;
+    /** Builds the folders that are not built yet, one per idle moment, so scrolling to them finds them ready. */
+    static void warm(final Context context){
+        if(warming)return;warming=true;
+        final int generation=cacheGeneration;
+        android.os.Looper.myQueue().addIdleHandler(new android.os.MessageQueue.IdleHandler(){
+            private final ArrayList<LauncherData.Folder> todo=new ArrayList<LauncherData.Folder>(LauncherFeatures.data.folders());
+            public boolean queueIdle(){
+                if(generation!=cacheGeneration)return false;
+                try{
+                    while(!todo.isEmpty()){
+                        LauncherData.Folder f=todo.remove(0);Object[] hit=iconCache.get(f.id);String sig=signature(f,context);
+                        if(hit!=null&&sig.equals(hit[0]))continue;
+                        Object[] built=build(new FrameLayout(context),context,f);iconCache.put(f.id,new Object[]{sig,built[0],built[1]});
+                        return true;
+                    }
+                }catch(Throwable error){LauncherFeatures.logOnce("Drawer folder warm-up unavailable",error);}
+                warming=false;return false;
+            }
+        });
+    }
+    private static Object[] build(final ViewGroup frame,Context context,LauncherData.Folder f){
         final Object info=nativeInfo(f,context);
         int layout=context.getResources().getIdentifier("folder_icon","layout",context.getPackageName());
         final View icon=(View)Xp.callStaticMethod(type("folder.FolderIcon"),"inflateFolderAndIcon",layout,context,frame,info);
         Xp.setAdditionalInstanceField(icon,"pixelsuite_drawer_folder_cell",true);
         Xp.setAdditionalInstanceField(get(icon,"mFolderName"),"pixelsuite_drawer_folder_label",true);
         Xp.setAdditionalInstanceField(get(get(icon,"mFolder"),"mLauncherDelegate"),"pixelsuite_drawer_delegate",true);
-        frame.addView(icon,new FrameLayout.LayoutParams(-1,-1));frame.setTag(info);
         DrawerFolderAlignment.attach(icon);
-        try{styleLabel(icon,frame);}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder label style unavailable",error);}
         icon.setOnClickListener(new View.OnClickListener(){public void onClick(View v){
             Object folder=get(v,"mFolder");ArrayList<Object> content=new ArrayList<Object>((List<?>)get(info,"contents"));
             if(content.size()<2){chooseApps(info);return;}
@@ -356,13 +413,7 @@ final class DrawerFolders {
             Xp.setAdditionalInstanceField(v,"pixelsuite_drag_armed",true);lockScroll(v);DrawerHomeTarget.arm(v);DrawerFolderMenu.show(v);
             return true;
         }});
-        attachDrop(frame);cells.put("folder:"+id,frame);
-        if(reopenId==id){reopenId=0;icon.post(new Runnable(){public void run(){call(get(icon,"mFolder"),"animateOpen",0,new ArrayList<Object>((List<?>)get(info,"contents")));}});}
-        if(animateId==id){animateId=0;icon.post(new Runnable(){public void run(){
-            try{Object manager=get(icon,"mPreviewItemManager");List<?> params=(List<?>)get(manager,"mFirstPageParams");
-                if(params.size()>0){Object animation=Xp.newInstance(type("folder.FolderPreviewItemAnim"),manager,params.get(0),-1,-1,0,2,350,null);call(get(animation,"mAnimator"),"start");}
-            }catch(Throwable error){Module.log("Drawer folder creation animation unavailable",error);}
-        }});}
+        return new Object[]{icon,info};
     }
     static boolean startDrag(View source){
         return DrawerDrag.start(source);
@@ -587,6 +638,13 @@ final class DrawerFolders {
         boolean ok=LauncherFeatures.data.save(folders);
         if(ok)LauncherFeatures.refresh();return ok;
     }
+    /** Takes these apps out of their drawer folders (a folder left empty goes away). */
+    static boolean takeOut(List<String> keys){
+        List<LauncherData.Folder> folders=LauncherFeatures.data.folders();boolean changed=false;
+        for(int i=folders.size()-1;i>=0;i--){LauncherData.Folder f=folders.get(i);if(f.apps.removeAll(keys))changed=true;if(f.apps.isEmpty())folders.remove(i);}
+        if(!changed)return false;
+        boolean ok=LauncherFeatures.data.save(folders);if(ok)LauncherFeatures.refresh();return ok;
+    }
     /** Folder menu: Rename. Applies immediately and persists. */
     static boolean renameTo(int id,String name){
         List<LauncherData.Folder> list=LauncherFeatures.data.folders();boolean found=false;
@@ -602,13 +660,29 @@ final class DrawerFolders {
         List<String> apps=new ArrayList<String>(target.apps);
         final Map<String,String> names=new HashMap<String,String>();for(String key:apps)names.put(key,displayName(key));
         Collections.sort(apps,new Comparator<String>(){public int compare(String a,String b){return DrawerOrder.compare(names.get(a),a,names.get(b),b);}});
-        target.apps.clear();target.apps.addAll(apps);
+        target.apps.clear();target.apps.addAll(apps);target.sort=FolderSort.AUTO;
         if(!LauncherFeatures.data.save(list))return false;
         LauncherFeatures.refresh();return true;
     }
     static void removeFolder(Object info){
-        LauncherData.Folder f=record(info);if(f==null)return;List<LauncherData.Folder> list=LauncherFeatures.data.folders();for(int i=list.size()-1;i>=0;i--)if(list.get(i).id==f.id)list.remove(i);
+        LauncherData.Folder f=record(info);if(f==null)return;List<LauncherData.Folder> list=LauncherFeatures.data.folders();
+        try{ScatterEffect.play(shownCell(f.id));}catch(Throwable error){LauncherFeatures.logOnce("Folder remove animation unavailable",error);}
+        for(int i=list.size()-1;i>=0;i--)if(list.get(i).id==f.id)list.remove(i);
         if(LauncherFeatures.data.save(list)){try{Object icon=cells.get("folder:"+f.id);if(icon instanceof FrameLayout){View child=((FrameLayout)icon).getChildAt(0);call(get(child,"mFolder"),"close",true);}}catch(Throwable ignored){}LauncherFeatures.refresh();}
+    }
+    /** The drawer folder's cell that is on screen now (the remembered one can be a recycled, detached cell). */
+    static View shownCell(int id){
+        View cell=cells.get("folder:"+id);
+        if(cell!=null&&cell.isAttachedToWindow()&&cell.isShown()&&cell.getWidth()>0)return cell;
+        Activity a=LauncherFeatures.activity.get();if(a==null)return cell;
+        View found=findCell(a.getWindow().getDecorView(),id);
+        return found!=null?found:cell;
+    }
+    private static View findCell(View v,int id){
+        Object tag=v.getTag();
+        if(v instanceof FrameLayout&&tag!=null&&isFolder(tag)&&Integer.valueOf(id).equals(folderIds.get(tag))&&v.isShown()&&v.getWidth()>0)return v;
+        if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++){View r=findCell(g.getChildAt(i),id);if(r!=null)return r;}}
+        return null;
     }
     static boolean drop(DragSource source,Object target){
         if(target==null)return false;String targetKey=isFolder(target)?"folder:"+folderIds.get(target):LauncherFeatures.identity(target);

@@ -1,6 +1,6 @@
-[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.0)
+[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.1)
 
-# Pixel Suite 2.0.0
+# Pixel Suite 2.0.1
 
 Your Pixel. Your Way.
 
@@ -8,14 +8,18 @@ Your Pixel. Your Way.
 
 Made by **RovianDev**. Pixel Suite adds launcher customization, gestures, screenshot tools and file-sorting controls through LSPosed.
 
-After **45 preview updates**, v2.0.0 brings the work together into one release: a redesigned settings app, more capable folders and drawer interactions, immediate app customization, and refined menus and transitions.
+**New in v2.0.1:** Move several apps together, navigate with a second finger while dragging, reorder drawer folders live, choose automatic or custom folder sorting, and simplify the screen-recording prompt. This release also fixes icon resets, popup placement and drag cleanup, and adds verified in-app release downloads.
 
-[Download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.0) · [Release notes](https://github.com/RovianDev/PixelSuite/blob/main/RELEASE-NOTES-v2.0.0.md) · [Xposed listing](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite) · [Telegram](https://t.me/RovianDev)
+[See everything new in v2.0.1](RELEASE-NOTES-v2.0.1.md) · [Full changelog](CHANGELOG.md)
+
+[Download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.1) · [Release notes](https://github.com/RovianDev/PixelSuite/blob/main/RELEASE-NOTES-v2.0.1.md) · [Xposed listing](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite) · [Telegram](https://t.me/RovianDev)
 
 ## 📱 Launcher and app drawer
 
-- 📁 **Drawer folders:** Create folders inside the drawer. Rename folders, add apps, sort their contents A–Z, or remove them to return their apps to the alphabetical drawer. Sorting and removal ask for confirmation.
-- 🔲 **Folder grids:** Choose **3×3, 4×4 or 5×5** folder grids. Home-screen and drawer choices are separate. Menus use local frosted backgrounds, confined to their frames.
+- 📁 **Drawer folders:** Create folders inside the drawer. Rename folders, add apps, choose Auto (A–Z) or Custom ordering, or remove them to return their apps to the alphabetical drawer. Sorting and removal ask for confirmation.
+- 🔲 **Folder grids:** Choose **3×3, 4×4 or 5×5** folder grids. Choose the grid inside each folder; home-screen and drawer choices are separate. Folder frames fit their contents. Menus use local frosted backgrounds, confined to their frames.
+- ✌️ **Move several apps:** Hold and drag an app, then tap others with a second finger to build a counted stack. Move the group to a folder or home screen, or remove home shortcuts together without uninstalling apps.
+- 🖐️ **Two-finger navigation:** While holding an app, swipe with another finger to change home/folder pages or scroll the drawer. Custom drawer-folder ordering makes room under your finger as you move apps.
 - ↗️ **Drag to home:** Move apps within the drawer. Drag to the **Add to home screen** target to continue onto the home screen.
 - ✏️ **Rename apps** and 🖼️ **change icons** using images from Photos or Files. Changes update across home, folders, drawer, drawer search and Google app search without a manual refresh. Restore the original name or icon when needed. Google must be in the module scope for its search integration.
 - 🔤 Optional **five-level icon label sizing** changes text beneath icons without resizing icons. Smaller text fits more letters; long labels can still truncate. System fonts and Bold text remain respected. This option starts disabled.
@@ -40,18 +44,26 @@ Wake behavior adapts to whether the phone is held or resting still. Movement, so
 
 **Newest first:** keeps folders above files and sorts files newest-to-oldest in Files by Google and supported Android file pickers. This overrides their normal sort choice while enabled; turn it off to restore native sorting.
 
+🎥 **Screen recording sheet:** An optional cleaner prompt places X and Start below the options and removes the long warning row. Recording still requires Start. Disable it to restore the stock prompt; supported System UI versions are required.
+
 ## 🎨 Settings that stay together
 
-All controls now live in **Pixel Suite**, with separate feature pages, explanations, themed icons and an offline changelog. Light and dark modes follow the system. Animated demonstrations pause between loops and stop when the page or app is inactive; system animation settings, Battery Saver and accessibility preferences are respected.
+All controls now live in **Pixel Suite**, with separate feature pages, explanations, themed icons and an offline changelog showing the latest update and a link to the full release history. Light and dark modes follow the system. Animated demonstrations pause between loops and stop when the page or app is inactive; system animation settings, Battery Saver and accessibility preferences are respected.
 
 Long-press an empty area of the home screen to return through **Pixel Suite settings**. Android Settings > System > Gestures keeps its stock menus.
+
+## 🔔 In-app updates
+
+Pixel Suite checks for newer stable releases published on **both GitHub and Xposed** with a matching APK. Optional notifications let you know when one is available. Open **Updates → Download and install** for an in-app download with percentage progress, APK verification and Android’s installation prompt.
+
+Checks run periodically when Android allows them; they are not instant push notifications. You can also use **Check now**. Android requires notification permission for alerts and may require allowing installs from Pixel Suite. You confirm installation yourself. No GitHub account or root installer is needed for this flow.
 
 ## 📥 Requirements and setup
 
 **Tested on a Pixel 11 Pro. It should also work on other Pixel devices. Feedback is welcome.** Testing has used Android 17 with LSPosed API 102; other Pixel models have not yet been confirmed. Compatibility still depends on the installed system and app versions. The APK's minimum Android API is 26; this does not imply feature compatibility with all Android versions.
 
 1. Use a rooted device with LSPosed API 102.
-2. Install **PixelSuite-v2.0.0.apk**, enable Pixel Suite in LSPosed and allow the module app root access to save settings.
+2. Install **PixelSuite-v2.0.1.apk**, enable Pixel Suite in LSPosed and allow the module app root access to save settings.
 3. Select the recommended scope: **System Framework**, **System UI**, **Pixel Launcher**, **Files by Google**, the installed **Files / DocumentsUI** picker, **Google**, and **Pixel Studio** for screenshot tools.
 4. Reboot, then open Pixel Suite and choose your features.
 

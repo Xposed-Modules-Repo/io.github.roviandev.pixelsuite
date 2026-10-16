@@ -51,6 +51,7 @@ public class Module extends XposedModule {
         String pkg = param.getPackageName();
         if (SYSTEMUI.equals(pkg)) {
             VolumeCamera.installSystemUi(cl);
+            ScreenRecordTidy.install(cl);
         } else if (LAUNCHER.equals(pkg)) {
             ClearAll.installLauncher(cl);
             LauncherFeatures.install(cl);

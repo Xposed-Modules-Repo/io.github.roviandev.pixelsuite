@@ -8,7 +8,7 @@ import android.widget.Toast;
 
 /** One allowlisted destination per action, shared by the home and About pages. */
 final class CommunityLinks {
-    static final String[] NAMES = {"Telegram", "Buy Me a Coffee", "Patreon"};
+    static final String[] NAMES = {"Telegram", "Coffee", "Patreon"};
     static final String[] CAPTIONS = {"Join the community", "Support development", "Become a patron"};
     static final String[] ICONS = {"brand_telegram", "brand_coffee", "brand_patreon"};
     static final String[] URLS = {"https://t.me/RovianDev", "https://buymeacoffee.com/roviandev", "https://www.patreon.com/c/RovianDev"};

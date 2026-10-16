@@ -33,7 +33,10 @@ final class DrawerDrag {
             protected void beforeHookedMethod(Xp.Param p)throws Throwable{
                 Session s=session;if(s==null||s.exited)return;
                 int x=((Number)p.args[0]).intValue(),y=((Number)p.args[1]).intValue();
-                if(DrawerHomeTarget.update(x,y,s.layer)||y<s.exitY){s.exitToHome();}
+                s.lastX=x;s.lastY=y;
+                if(s.stay!=null)s.stay.update(x,y);
+                boolean remove=DrawerHomeTarget.updateRemove(x,y,s.layer);
+                if((!remove&&DrawerHomeTarget.update(x,y,s.layer))||(!remove&&y<s.exitY)){s.exitToHome();}
             }
         });
         Xp.hookAllMethods(type("dragndrop.DragController"),"callOnDragEnd",new Xp.Callback(){
@@ -41,6 +44,18 @@ final class DrawerDrag {
         });
     }
     static boolean active(){return session!=null;}
+    /** The held app came out of an open drawer folder. */
+    static boolean fromFolder(){Session s=session;return s!=null&&s.stay!=null;}
+    /** The view is inside the folder the held app came out of. */
+    static boolean inHeldFolder(View v){
+        Session s=session;if(s==null||s.stay==null)return false;
+        for(android.view.ViewParent p=v.getParent();p!=null;p=p.getParent())if(p==s.stay.folder)return true;
+        return false;
+    }
+    /** The key of the held drawer app, or null. */
+    static String heldKey(){Session s=session;return s==null?null:s.key;}
+    /** Re-runs the hover logic at the last finger position (the list moved under a held finger). */
+    static void refreshHover(){Session s=session;if(s==null||s.exited)return;try{call(s.controller,"handleMoveEvent",s.lastX,s.lastY);}catch(Throwable ignored){}}
     static void pause(){if(session!=null&&!session.exited)cancel();}
     static boolean start(final View source){
         Activity a=LauncherFeatures.activity.get();if(a==null||session!=null)return false;
@@ -77,7 +92,7 @@ final class DrawerDrag {
     }
     private static void finish(){
         Session s=session;session=null;DrawerHomeTarget.hide();if(s==null)return;
-        s.source.setVisibility(View.VISIBLE);s.clearHover();
+        if(s.reorder!=null)s.reorder.restore();s.source.setVisibility(View.VISIBLE);s.clearHover();s.setMember(null);if(s.stay!=null)s.stay.stop();
         try{call(s.controller,"removeDropTarget",s.target);}catch(Throwable ignored){}
         if(!s.exited)LauncherFeatures.refresh();
     }
@@ -85,12 +100,15 @@ final class DrawerDrag {
         final Activity activity;final View source;final Object info;final String key;
         final ViewGroup layer;final Object controller;final Object target;final Object dragSource;
         final int exitY;boolean exited,indicating,lifted;View hovered;int localX,localY;
+        /** Set when the held app came out of an open drawer folder: it then stays in it (see FolderDrag.Stay). */
+        FolderDrag.Stay stay;FolderReorder reorder;View hoverMember;int lastX,lastY;
         Session(Activity a,View v,Object i,String k){
             activity=a;source=v;info=i;key=k;layer=(ViewGroup)call(a,"getDragLayer");controller=get(a,"mDragController");
             Object appsView=call(a,"getAppsView");View search=(View)get(appsView,"mSearchContainer");
             int[] top=new int[2],origin=new int[2];search.getLocationOnScreen(top);layer.getLocationOnScreen(origin);
             exitY=top[1]-origin[1];
             if(exitY<=0)throw new IllegalStateException("Search bar boundary is not laid out");
+            if(!k.startsWith("folder:")&&DrawerFolders.isDrawerMember(i)){View open=FolderDrag.openFolder(a);if(open!=null){stay=new FolderDrag.Stay(open,layer);reorder=FolderReorder.start(open,v);}}
             target=Proxy.newProxyInstance(LauncherFeatures.loader,new Class<?>[]{type("DropTarget")},this);
             dragSource=Proxy.newProxyInstance(LauncherFeatures.loader,new Class<?>[]{type("DragSource")},new InvocationHandler(){
                 public Object invoke(Object self,Method method,Object[] args){
@@ -110,6 +128,15 @@ final class DrawerDrag {
             if(name.equals("getHitRectRelativeToDragLayer")){((Rect)args[0]).set(0,exitY,layer.getWidth(),layer.getHeight());return null;}
             if(name.equals("onDragOver")||name.equals("onDragEnter")){
                 int x=((Number)get(args[0],"x")).intValue(),y=((Number)get(args[0],"y")).intValue();
+                if(DrawerHomeTarget.overRemove){clearHover();setMember(null);return null;}
+                if(stay!=null&&!stay.left){
+                    clearHover();
+                    // preview68: the other apps make room live, like a home-screen folder (FolderReorder).
+                    if(reorder!=null){setMember(null);reorder.over(args[0],x,y);return null;}
+                    View m=stay.memberAt(x,y);setMember(m==source?null:m);return null;
+                }
+                if(stay!=null&&reorder!=null)reorder.leave();
+                setMember(null);
                 View candidate=findCell((View)call(activity,"getAppsView"),x,y,layer);
                 if(candidate==source)candidate=null;
                 if(candidate!=hovered){clearHover();hovered=candidate;}
@@ -123,15 +150,27 @@ final class DrawerDrag {
                 return null;
             }
             if(name.equals("onDragExit")){if(!Boolean.TRUE.equals(get(args[0],"dragComplete")))clearHover();return null;}
+            if(name.equals("acceptDrop")&&DrawerHomeTarget.overRemove&&stay!=null)return true;
+            if(name.equals("acceptDrop")&&stay!=null&&!stay.left)return true;
             if(name.equals("acceptDrop"))return LauncherFeatures.on(LauncherFeatures.DRAWER)&&hovered!=null && hovered!=source;
             if(name.equals("prepareAccessibilityDrop"))return null;
+            if(name.equals("onDrop")&&DrawerHomeTarget.overRemove&&stay!=null){
+                clearHover();setMember(null);set(args[0],"deferDragViewCleanupPostAnimation",false);takeOut();return null;
+            }
+            if(name.equals("onDrop")&&stay!=null&&!stay.left){
+                View m=hoverMember;setMember(null);set(args[0],"deferDragViewCleanupPostAnimation",false);
+                if(reorder!=null){reorder.commit(args[0]);MultiDrag.handledInFolder();return null;}   // picked apps land with the held one
+                dropInside(m);MultiDrag.drawerDrop();return null;
+            }
             if(name.equals("onDrop")){
+                if(reorder!=null)reorder.restore();
                 View destination=hovered;clearHover();set(args[0],"deferDragViewCleanupPostAnimation",false);
                 if(destination==null||destination==source)return null;
                 DrawerFolders.DragSource origin=new DrawerFolders.DragSource(key,info,source);
                 Object targetInfo=destination.getTag();
                 if(!DrawerFolders.isFolder(targetInfo)&&!key.startsWith("folder:")&&!inCenter(destination))DrawerFolders.reorder(origin,targetInfo);
                 else DrawerFolders.drop(origin,targetInfo);
+                MultiDrag.drawerDrop();   // apps picked up with a second finger follow the held one
                 return null;
             }
             return objectMethod(self,method,args);
@@ -146,6 +185,31 @@ final class DrawerDrag {
             float cx=target.getWidth()/2f,cy=target.getPaddingTop()+LauncherFeatures.dp(activity,28),radius=LauncherFeatures.dp(activity,25);
             return Math.abs(localX-cx)<=radius&&Math.abs(localY-cy)<=radius;
         }
+        void setMember(View m){
+            if(m==hoverMember)return;
+            if(hoverMember!=null)hoverMember.animate().scaleX(1).scaleY(1).setDuration(120).start();
+            hoverMember=m;
+            if(m!=null)m.animate().scaleX(1.08f).scaleY(1.08f).setDuration(120).start();
+        }
+        /** Dropped inside its folder: in Custom order it takes the place of the app under it. */
+        void dropInside(View target){
+            try{
+                Object folderInfo=get(stay.folder,"mInfo");Integer id=DrawerFolders.folderIds.get(folderInfo);
+                LauncherData.Folder f=DrawerFolders.record(folderInfo);
+                if(id==null||f==null||target==null||target==source||f.sort==FolderSort.AUTO)return;
+                String targetKey=LauncherFeatures.identity(target.getTag());if(targetKey==null)return;
+                int to=f.apps.indexOf(targetKey);if(to<0)return;
+                if(FolderSort.drawerMove(id,key,to)){DrawerFolders.reopenId=id;try{call(stay.folder,"close",false);}catch(Throwable ignored){}}
+            }catch(Throwable error){Module.log("Drawer folder reorder failed",error);}
+        }
+        /** Dropped on the Remove pill: the held app and every app picked from the same folder leave it. */
+        void takeOut(){
+            try{
+                if(reorder!=null)reorder.restore();
+                DrawerFolders.closeDrawerFolder(false);   // close first, while the folder still has its apps
+                MultiDrag.takeOut(key);
+            }catch(Throwable error){Module.log("Drawer folder remove failed",error);}
+        }
         void clearHover(){
             if(hovered!=null){
                 if(indicating)try{DropIndicator.hide(hovered);}catch(Throwable ignored){}
@@ -157,6 +221,18 @@ final class DrawerDrag {
         void exitToHome()throws Exception{
             // Crossing above the search bar is a one-way handoff to the existing home drag.
             exited=true;DrawerHomeTarget.hide();clearHover();call(controller,"removeDropTarget",target);
+            // The held app leaves for the home screen: its folder must not stay open over it.
+            if(reorder!=null)reorder.restore();
+            if(stay!=null){
+                // Fade it out and close it without its shrink animation: that animation aimed at the drawer icon and
+                // showed up for a moment over the home screen.
+                stay.stop();final View open=stay.folder;
+                open.animate().cancel();
+                open.animate().alpha(0f).setDuration(90).withEndAction(new Runnable(){public void run(){
+                    try{DrawerFolders.closeDrawerFolder(false);}catch(Throwable ignored){}
+                    open.setAlpha(1f);
+                }}).start();
+            }
             Object drag=get(controller,"mDragObject");
             if(DrawerFolders.isFolder(info)){
                 LauncherData.Folder f=DrawerFolders.record(info);Object copy=Xp.newInstance(type("model.data.FolderInfo"));
@@ -177,7 +253,7 @@ final class DrawerDrag {
         if(m.getName().equals("toString"))return "PixelSuiteDrawerDrag";return null;
     }
     private static View findCell(View root,int x,int y,ViewGroup layer){
-        if(root.getVisibility()!=View.VISIBLE)return null;
+        if(root.getVisibility()!=View.VISIBLE||Xp.getAdditionalInstanceField(root,"pixelsuite_picked")!=null)return null;   // picked-up apps (MultiDrag) are hidden
         int[] base=new int[2];layer.getLocationOnScreen(base);Rect bounds=new Rect();if(!root.getGlobalVisibleRect(bounds)||!bounds.contains(x+base[0],y+base[1]))return null;
         Object tag=root.getTag();if(tag!=null&&(DrawerFolders.isFolder(tag)||type("model.data.AppInfo").isInstance(tag))&&!LauncherFeatures.privateItem(tag))return root;
         if(root instanceof ViewGroup){ViewGroup group=(ViewGroup)root;for(int i=group.getChildCount()-1;i>=0;i--){View result=findCell(group.getChildAt(i),x,y,layer);if(result!=null)return result;}}
