@@ -21,78 +21,37 @@ final class FolderOptions {
         Activity a=LauncherFeatures.activity.get();if(a==null)return;
         final Context c=anchor.getContext();final Object info=LauncherFeatures.get(folder,"mInfo");
         final LinearLayout card=new LinearLayout(c);card.setOrientation(1);card.setPadding(0,FrostedSurface.dp(c,6),0,FrostedSurface.dp(c,6));
-        final View panel=(View)folder;final float originalY=panel.getTranslationY();
         final ScrollView dropdown=new ScrollView(c);dropdown.addView(card);dropdown.setVerticalScrollBarEnabled(false);dropdown.setOverScrollMode(View.OVER_SCROLL_NEVER);dropdown.setBackground(FrostedSurface.windowDrawable(c,20));dropdown.setClipToOutline(true);
-        // preview69: the window is sized for the open Sort choices from the start and the card grows inside it, so opening
-        // Sort never resizes or moves the window (that made it jump up over the folder). The empty part is see-through and
-        // dismisses like a tap outside.
+        dropdown.setElevation(FrostedSurface.dp(c,8));
+        // The window is sized for the open Sort choices from the start and the card grows inside it, so opening Sort never
+        // resizes or moves the window. Its see-through part dismisses like a tap outside.
         final FrameLayout root=new FrameLayout(c);root.addView(dropdown,new FrameLayout.LayoutParams(-1,-2,Gravity.TOP));
-        final boolean[] closingAction=new boolean[]{false};
         final PopupWindow window=new PopupWindow(root,FrostedSurface.dp(c,164),-2,true);
         root.setOnClickListener(new View.OnClickListener(){public void onClick(View v){window.dismiss();}});
         window.setBackgroundDrawable(new ColorDrawable(0));window.setOutsideTouchable(true);window.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
-        dropdown.setElevation(FrostedSurface.dp(c,8));
         final View.OnAttachStateChangeListener lifecycle=new View.OnAttachStateChangeListener(){public void onViewAttachedToWindow(View v){}public void onViewDetachedFromWindow(View v){window.dismiss();}};
-        anchor.addOnAttachStateChangeListener(lifecycle);window.setOnDismissListener(new PopupWindow.OnDismissListener(){public void onDismiss(){
-            anchor.removeOnAttachStateChangeListener(lifecycle);panel.animate().cancel();
-            if(closingAction[0]||!panel.isAttachedToWindow()||panel.getTranslationY()==originalY){panel.setTranslationY(originalY);panel.animate().setUpdateListener(null);}
-            // The listener that redraws behind the lifted folder is dropped when it is back: left on the panel's animator it
-            // kept invalidating the whole drag layer during later animations of the folder (the small stutter on exit).
-            else panel.animate().translationY(originalY).setDuration(150).withEndAction(new Runnable(){public void run(){panel.animate().setUpdateListener(null);}}).start();
-        }});
-        // Add apps: drawer folders and (from preview28) home screen folders, with the searchable picker.
-        row(card,"Add apps",7,false,new Runnable(){public void run(){closingAction[0]=true;window.dismiss();LauncherFeatures.afterClose(folder,new Runnable(){public void run(){if(DrawerFolders.isFolder(info))DrawerFolders.chooseApps(info);else HomeFolderApps.choose(folder);}});}});
-        // Sort: the same Auto (A-Z) / Custom choice as the held folder's menu, for drawer and home folders. The two choices
-        // are built once and fold open under Sort; the arrow of the Sort icon turns up while they are open.
+        anchor.addOnAttachStateChangeListener(lifecycle);
+        window.setOnDismissListener(new PopupWindow.OnDismissListener(){public void onDismiss(){anchor.removeOnAttachStateChangeListener(lifecycle);}});
+        // Add apps: drawer folders and home screen folders, with the searchable picker.
+        row(card,"Add apps",7,false,new Runnable(){public void run(){window.dismiss();LauncherFeatures.afterClose(folder,new Runnable(){public void run(){if(DrawerFolders.isFolder(info))DrawerFolders.chooseApps(info);else HomeFolderApps.choose(folder);}});}});
+        // Sort: the same Auto (A-Z) / Custom choice as the held folder's menu, for drawer and home folders.
         final boolean drawer=DrawerFolders.isFolder(info);
         LauncherData.Folder f=drawer?DrawerFolders.record(info):null;
         final boolean auto=drawer?(f!=null&&f.sort==FolderSort.AUTO):FolderSort.homeMode(info)==FolderSort.AUTO;
         final int id=f==null?0:f.id;
-        final boolean[] sortOpen=new boolean[]{false};
-        final View[] choices=new View[2];final LauncherGlyph[] arrow=new LauncherGlyph[1];
-        final android.animation.ValueAnimator[] fold=new android.animation.ValueAnimator[1];
-        row(card,"Sort",9,false,new Runnable(){public void run(){
-            sortOpen[0]=!sortOpen[0];
-            if(arrow[0]!=null)arrow[0].flip(sortOpen[0]);
-            final int full=FrostedSurface.dp(c,48);
-            float from=choices[0].getLayoutParams().height/(float)full;
-            if(fold[0]!=null)fold[0].cancel();
-            android.animation.ValueAnimator anim=android.animation.ValueAnimator.ofFloat(from,sortOpen[0]?1f:0f);
-            anim.setDuration(sortOpen[0]?260:200);anim.setInterpolator(new android.view.animation.PathInterpolator(.2f,0f,0f,1f));
-            anim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener(){public void onAnimationUpdate(android.animation.ValueAnimator va){
-                float t=(Float)va.getAnimatedValue();
-                for(int i=0;i<2;i++){
-                    View r=choices[i];r.getLayoutParams().height=Math.max(0,Math.round(full*t));
-                    // The second choice follows a little behind the first.
-                    float shown=Math.max(0f,Math.min(1f,(t-.15f*i)/(1f-.15f*i)));
-                    r.setAlpha(shown);r.setTranslationY(-FrostedSurface.dp(c,6)*(1f-shown));
-                }
-                card.requestLayout();
-            }});
-            fold[0]=anim;anim.start();
-        }});
-        try{arrow[0]=(LauncherGlyph)((ImageView)((ViewGroup)card.getChildAt(card.getChildCount()-1)).getChildAt(0)).getDrawable();}catch(Throwable ignored){}
-        row(card,"Auto (A\u2013Z)",13,auto,new Runnable(){public void run(){
-            closingAction[0]=!drawer;window.dismiss();if(auto)return;
+        sortGroup(card,auto,new Runnable(){public void run(){
+            window.dismiss();if(auto)return;
             if(drawer)DrawerFolderMenu.confirm("Sort apps?","Sort the apps in this folder from A to Z?",new Runnable(){public void run(){
                 DrawerFolders.reopenId=id;LauncherFeatures.afterClose(folder,new Runnable(){public void run(){DrawerFolders.sortFolder(id);}});
             }});
             else DrawerFolderMenu.confirm("Sort apps?","Sort the apps in this folder from A to Z?",new Runnable(){public void run(){FolderSort.sortHome(info);}});
-        }});
-        choices[0]=card.getChildAt(card.getChildCount()-1);
-        row(card,"Custom",14,!auto,new Runnable(){public void run(){
+        }},new Runnable(){public void run(){
             window.dismiss();if(!auto)return;
             if(drawer){DrawerFolders.reopenId=id;LauncherFeatures.afterClose(folder,new Runnable(){public void run(){FolderSort.drawerCustom(id);}});}
             else FolderSort.setHomeMode(info,FolderSort.CUSTOM);
         }});
-        choices[1]=card.getChildAt(card.getChildCount()-1);
-        for(View r:choices){
-            r.getLayoutParams().height=0;r.setAlpha(0f);
-            // Indented under Sort: icon and text move in together.
-            ViewGroup g=(ViewGroup)r;for(int i=0;i<g.getChildCount();i++){View part=g.getChildAt(i);FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)part.getLayoutParams();if(lp.gravity!=(Gravity.RIGHT|Gravity.CENTER_VERTICAL))lp.leftMargin+=FrostedSurface.dp(c,14);}
-        }
         for(final int n:new int[]{5,4,3})row(card,n==3?"3\u00d73 (Stock)":n+"\u00d7"+n,50+n,LauncherFeatures.gridFor(info)==n,new Runnable(){public void run(){
-            closingAction[0]=true;window.dismiss();LauncherFeatures.afterClose(folder,new Runnable(){public void run(){
+            window.dismiss();LauncherFeatures.afterClose(folder,new Runnable(){public void run(){
                 if(DrawerFolders.isFolder(info))DrawerFolders.changeGrid(info,n);else LauncherFeatures.data.prefs.edit().putInt("grid:"+LauncherFeatures.get(info,"id"),n).apply();
                 LauncherFeatures.call(LauncherFeatures.get(folder,"mFolderIcon"),"updatePreviewItems",false);
                 LauncherFeatures.call(folder,"animateOpen",0,new java.util.ArrayList<Object>((java.util.List<?>)LauncherFeatures.get(info,"contents")));
@@ -100,21 +59,74 @@ final class FolderOptions {
         }});
         // No "Remove folder" here: removal is only in the held folder's menu, with a Yes/No confirmation.
         Rect frame=new Rect();anchor.getWindowVisibleDisplayFrame(frame);int[] xy=new int[2];anchor.getLocationOnScreen(xy);
-        // Room for every row, the Sort choices included, plus the shadow below the card.
-        int width=Math.min(frame.width()-2*FrostedSurface.dp(c,12),FrostedSurface.dp(c,164*Math.max(1f,c.getResources().getConfiguration().fontScale))),height=FrostedSurface.dp(c,12+48*card.getChildCount()+12),gap=FrostedSurface.dp(c,12);
-        window.setWidth(width);
+        int gap=FrostedSurface.dp(c,12);
+        int width=fitWidth(card,FrostedSurface.dp(c,164*Math.max(1f,c.getResources().getConfiguration().fontScale)),frame.width()-2*gap);
+        // Every row, the Sort choices included, plus room for the card's shadow.
+        int height=Math.min(FrostedSurface.dp(c,12+48*card.getChildCount()+12),frame.height()-2*gap);
+        window.setWidth(width);window.setHeight(height);
         int left=Math.max(frame.left+gap,Math.min(xy[0]+anchor.getWidth()-width,frame.right-width-gap));
-        int below=xy[1]+anchor.getHeight()+gap;int[] folderXY=new int[2];panel.getLocationOnScreen(folderXY);
-        int needed=Math.max(0,below+height-frame.bottom),room=Math.max(0,folderXY[1]-frame.top-gap);
-        int lift=Math.min(needed,room),top=below-lift;
-        window.setHeight(Math.min(height,Math.max(FrostedSurface.dp(c,48),frame.bottom-top)));
-        if(lift>0){
-            panel.animate().setUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener(){public void onAnimationUpdate(android.animation.ValueAnimator animator){if(panel.getParent() instanceof View)((View)panel.getParent()).invalidate();}});
-            panel.animate().translationY(originalY-lift).setDuration(150).start();
-        }
+        // preview70: the folder no longer moves up to make room. Its slide back while the menu closed redrew the whole
+        // launcher behind it every frame (the stutter after Sort). When the menu does not fit under the footer it overlaps
+        // the bottom of the folder instead, like any overflow menu.
+        int top=Math.max(frame.top+gap,Math.min(xy[1]+anchor.getHeight()+gap,frame.bottom-height));
         window.showAtLocation(anchor.getRootView(),Gravity.TOP|Gravity.LEFT,left,top);
         FrostedSurface.popupWindow(dropdown,20);
         dropdown.setAlpha(0);dropdown.setTranslationY(-FrostedSurface.dp(c,8));dropdown.animate().alpha(1).translationY(0).setDuration(150).start();
+    }
+
+    /**
+     * Appends Sort and its two choices to a folder menu card. The choices fold open under Sort (height, staggered fade and
+     * slide) and the arrow of the Sort icon turns up while they are open. Used by the folder's ⋮ menu and by the held
+     * drawer folder's menu.
+     */
+    static void sortGroup(final LinearLayout card,boolean auto,Runnable onAuto,Runnable onCustom){
+        final Context c=card.getContext();
+        final View[] choices=new View[2];final LauncherGlyph[] arrow=new LauncherGlyph[1];
+        final boolean[] open=new boolean[]{false};final android.animation.ValueAnimator[] fold=new android.animation.ValueAnimator[1];
+        row(card,"Sort",9,false,new Runnable(){public void run(){
+            open[0]=!open[0];
+            if(arrow[0]!=null)arrow[0].flip(open[0]);
+            final int full=FrostedSurface.dp(c,48);
+            float from=choices[0].getLayoutParams().height/(float)full;
+            if(fold[0]!=null)fold[0].cancel();
+            android.animation.ValueAnimator anim=android.animation.ValueAnimator.ofFloat(from,open[0]?1f:0f);
+            anim.setDuration(open[0]?260:200);anim.setInterpolator(new android.view.animation.PathInterpolator(.2f,0f,0f,1f));
+            anim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener(){public void onAnimationUpdate(android.animation.ValueAnimator va){
+                float t=(Float)va.getAnimatedValue();
+                for(int i=0;i<2;i++){
+                    View r=choices[i];r.getLayoutParams().height=Math.max(0,Math.round(full*t));
+                    float shown=Math.max(0f,Math.min(1f,(t-.15f*i)/(1f-.15f*i)));   // the second choice follows a little behind
+                    r.setAlpha(shown);r.setTranslationY(-FrostedSurface.dp(c,6)*(1f-shown));
+                }
+                card.requestLayout();
+            }});
+            fold[0]=anim;anim.start();
+        }});
+        try{arrow[0]=(LauncherGlyph)((ImageView)((ViewGroup)card.getChildAt(card.getChildCount()-1)).getChildAt(0)).getDrawable();}catch(Throwable ignored){}
+        row(card,"Auto (A\u2013Z)",13,auto,onAuto);choices[0]=card.getChildAt(card.getChildCount()-1);
+        row(card,"Custom",14,!auto,onCustom);choices[1]=card.getChildAt(card.getChildCount()-1);
+        for(View r:choices){
+            r.getLayoutParams().height=0;r.setAlpha(0f);
+            // Indented under Sort: icon and text move in together; the check mark stays at the edge.
+            ViewGroup g=(ViewGroup)r;for(int i=0;i<g.getChildCount();i++){View part=g.getChildAt(i);FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)part.getLayoutParams();if(lp.gravity!=(Gravity.RIGHT|Gravity.CENTER_VERTICAL))lp.leftMargin+=FrostedSurface.dp(c,14);}
+        }
+    }
+
+    /**
+     * Width that shows every label in full, between {@code min} and {@code max}. The menus used a fixed 164dp that only
+     * just fitted "Auto (A–Z)" next to its check mark: with a wider system font (Wallpaper & style) the label was cut.
+     */
+    static int fitWidth(LinearLayout card,int min,int max){
+        int need=min;
+        for(int i=0;i<card.getChildCount();i++){
+            View r=card.getChildAt(i);if(!(r instanceof ViewGroup))continue;ViewGroup g=(ViewGroup)r;
+            for(int j=0;j<g.getChildCount();j++){
+                View part=g.getChildAt(j);if(!(part instanceof TextView))continue;
+                FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)part.getLayoutParams();if(lp.width!=-1)continue;   // the label, not the check mark
+                TextView t=(TextView)part;need=Math.max(need,(int)Math.ceil(t.getPaint().measureText(String.valueOf(t.getText())))+lp.leftMargin+lp.rightMargin+FrostedSurface.dp(card.getContext(),4));
+            }
+        }
+        return Math.max(1,Math.min(need,max));
     }
     static void row(LinearLayout card,String label,int glyph,boolean checked,final Runnable action){
         Context c=card.getContext();FrameLayout row=new FrameLayout(c);

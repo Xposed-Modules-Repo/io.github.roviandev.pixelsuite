@@ -11,8 +11,8 @@ import java.util.concurrent.TimeUnit;
 
 /** Known demo apps only; local icons load once off the UI thread, never during a frame. */
 final class PreviewIcons {
-    static final String[] PACKAGES={"com.google.android.keep","com.android.chrome","com.google.android.apps.maps","com.google.android.apps.photos","com.google.android.gm","com.google.android.apps.messaging","com.google.android.apps.nbu.files","com.google.android.calendar","com.google.android.youtube","com.google.android.apps.docs","com.google.android.deskclock","com.google.android.googlequicksearchbox","com.google.android.GoogleCamera"};
-    static final String[] NAMES={"Keep","Chrome","Maps","Photos","Gmail","Messages","Files","Calendar","YouTube","Drive","Clock","Google","Camera"};
+    static final String[] PACKAGES={"com.google.android.keep","com.android.chrome","com.google.android.apps.maps","com.google.android.apps.photos","com.google.android.gm","com.google.android.apps.messaging","com.google.android.apps.nbu.files","com.google.android.calendar","com.google.android.youtube","com.google.android.apps.docs","com.google.android.deskclock","com.google.android.googlequicksearchbox","com.google.android.GoogleCamera","com.google.android.calculator","com.google.android.contacts","com.android.settings","com.android.vending","org.telegram.messenger","com.whatsapp","com.spotify.music","com.brave.browser","org.mozilla.firefox","com.amazon.mShop.android.shopping","com.reddit.frontpage","com.google.android.apps.authenticator2"};
+    static final String[] NAMES={"Keep","Chrome","Maps","Photos","Gmail","Messages","Files","Calendar","YouTube","Drive","Clock","Google","Camera","Calculator","Contacts","Settings","Play Store","Telegram","WhatsApp","Spotify","Brave","Firefox","Amazon","Reddit","Authenticator"};
     private static final Drawable.ConstantState[] CACHE=new Drawable.ConstantState[PACKAGES.length];
     private static final ArrayList<WeakReference<FeaturePreview>> WAITERS=new ArrayList<WeakReference<FeaturePreview>>();
     private static boolean loading,loaded;

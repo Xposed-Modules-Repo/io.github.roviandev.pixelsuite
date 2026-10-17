@@ -64,6 +64,7 @@ public class SettingsActivity extends Activity {
     private TextView mLabelPreview;
     private final TextView[] mLabelStops=new TextView[5];
     private FeaturePreview mFeaturePreview;
+    private RestartPill mRestart;
     private final java.util.List<FeaturePreview> mPreviews=new java.util.ArrayList<FeaturePreview>();
 
     @Override
@@ -81,7 +82,7 @@ public class SettingsActivity extends Activity {
 
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(16), dp(8), dp(16), dp(32));
+        page.setPadding(dp(16), dp(8), dp(16), dp(96));
 
         String pageId = getIntent().getStringExtra("page");
         if (pageId != null && !pageId.equals("home")) {
@@ -132,20 +133,30 @@ public class SettingsActivity extends Activity {
                 return insets;
             }
         });
-        setContentView(scroll);
+        FrameLayout root = new FrameLayout(this);
+        root.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        mRestart = new RestartPill(this, root, mAccent, mOnAccent);
+        setContentView(root);
         scroll.requestApplyInsets();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        if (mRestart != null) mRestart.refresh();
         load();
         ReleaseUpdates.schedule(SettingsActivity.this); ReleaseUpdates.check(SettingsActivity.this,false,null);
         for(FeaturePreview preview:mPreviews)preview.setHostActive(true);
+        // Super Dark switched on before preview91 has no boot property yet; write it once so the next boot is dark from the start.
+        if(!sPropChecked&&Feature.on(this,SuperDark.KEY)){sPropChecked=true;
+            IO.execute(new Runnable(){public void run(){Root.run("[ \"$(getprop "+SuperDark.PROP+")\" = 1 ] || setprop "+SuperDark.PROP+" 1");}});}
+
     }
 
     @Override protected void onPause(){for(FeaturePreview preview:mPreviews)preview.setHostActive(false);super.onPause();}
     @Override protected void onDestroy(){for(AlertDialog dialog:new java.util.ArrayList<AlertDialog>(mSettingsDialogs))dialog.dismiss();for(FeaturePreview preview:mPreviews)preview.dispose();super.onDestroy();}
+
+    private static boolean sPropChecked;
 
     private static final class FeaturePage {
         final String group,key,icon,title,summary;
@@ -161,7 +172,7 @@ public class SettingsActivity extends Activity {
         new FeaturePage("gestures",Feature.DOUBLE_TAP_SLEEP,"ic_ps_sleep","Double tap to sleep","Double-tap empty space on the home screen to lock your phone. Apps, folders and normal launcher interactions keep their usual actions."),
         new FeaturePage("gestures",Feature.TAP_CHECK,"ic_ps_tapwake","Tap to wake","Choose a single tap or a double tap to wake the screen. Pocket protection prevents waking while the front sensor is covered. This also enables double-tap to sleep on the lock screen. Choose how lock-screen taps behave below."),
         new FeaturePage("launcher",LauncherFeatures.GRID,"ic_ps_folder_grid","Folder grid","Choose room for 9, 16 or 25 apps per folder page, with Pixel Launcher's own folder animations and frosted background. Use the three-dot menu in each folder to change its grid, sort its apps, or choose Add apps to search and select its contents. Folders fit their contents: a 4×4 folder with 11 apps uses three rows instead of an empty fourth row. Removing a folder includes a brief scatter animation; the apps stay installed. System settings that disable animations are respected."),
-        new FeaturePage("drawer",LauncherFeatures.DRAWER,"ic_ps_drawer_folder","App drawer folders","Hold an app and choose Create folder, or drag one app onto the middle of another; a folder-colored highlight shows when the drop will make or fill a folder. Holding a folder opens Rename, Sort and Remove. Sort has two choices with a check mark: Auto (A–Z) asks first, then keeps the folder in alphabetical order; Custom lets you arrange apps freely by dragging them inside the folder, and keeps that order across updates and restarts. Dragging an app against the left or right edge of an open folder switches its page, and an app leaves the folder after staying outside it for 250 ms. A Remove target beside Add to home screen takes selected apps out of a drawer folder without uninstalling them. Holding a folder for 1.5 seconds, or moving your finger, lets you move it. The three-dot menu inside a folder has Add apps (searchable), Sort (Auto A–Z or Custom), and the grid size. In Custom mode, drawer-folder apps make room as you drag, and apps selected together land as one group. Drag above the top edge of the search bar to move to the home screen. Apps outside folders are always sorted A to Z, then Arabic, other languages, and names starting with numbers or symbols. Removing a folder returns its apps to the drawer, and drawer folders close when you leave the drawer or lock the phone. Private Space is excluded."),
+        new FeaturePage("drawer",LauncherFeatures.DRAWER,"ic_ps_drawer_folder","App drawer folders","Hold an app and choose Create folder, or drag one app onto the middle of another; a folder-colored highlight shows when the drop will make or fill a folder. Holding a folder opens Rename, Sort and Remove. Sort has two choices with a check mark: Auto (A–Z) asks first, then keeps the folder in alphabetical order; Custom lets you arrange apps freely by dragging them inside the folder, and keeps that order across updates and restarts. Dragging an app against the left or right edge of an open folder switches its page, and an app leaves the folder after staying outside it for 250 ms. A Remove target beside Add to home screen takes selected apps out of a drawer folder without uninstalling them. Holding a folder for 1.5 seconds, or moving your finger, lets you move it among the other drawer folders; nearby folders slide aside to show its new position. The three-dot menu inside a folder has Add apps (searchable), Sort (Auto A–Z or Custom), and the grid size. In Custom mode, drawer-folder apps make room as you drag, and apps selected together land as one group. Drag above the top edge of the search bar to move to the home screen. Apps outside folders are always sorted A to Z, then Arabic, other languages, and names starting with numbers or symbols. Removing a folder returns its apps to the drawer, and drawer folders close when you leave the drawer or lock the phone. Private Space is excluded."),
         new FeaturePage("drawer",LauncherFeatures.DRAG_PILL,"ic_ps_home_drop","Drag to home screen","Hold an app in the drawer to reveal a frosted Add to home screen target at the top. Drag onto the target to continue to the home screen; sideways and downward movement stays in the drawer, and scrolling the drawer never starts a drag. With App drawer folders enabled, dropping apps together creates folders."),
         new FeaturePage("launcher",LauncherFeatures.ICONS,"ic_ps_change_icon","Change icons","Hold an app and choose Change icon. Select an image through Photos or Files. It is cropped to a square, fitted to the normal launcher icon size and shaped by Pixel Launcher. Changes apply across home, drawer, folders, app search and the Google search app. Choose Change icon again to restore the original. Only the selected image is copied into launcher-private storage; it is not uploaded."),
         new FeaturePage("launcher",FolderDrag.TWO_FINGER,"ic_ps_two_finger","Two-finger drag","While you hold an app with one finger, swipe with a second finger to change pages: on the home screen, inside any folder, or in the app drawer (up and down to scroll, with momentum when you lift the scrolling finger). Keep holding the app while you navigate, then drop it onto a valid destination. The held app stays under your first finger. Works with home-screen folders and app drawer folders. A second-finger touch stops a coasting drawer. When the held apps came from a drawer folder, the drawer behind it stays still; taps can still add apps from that folder."),
@@ -170,6 +181,7 @@ public class SettingsActivity extends Activity {
         new FeaturePage("launcher",LauncherFeatures.LABEL_SIZE,"ic_ps_label_size","Icon label size","Choose one of five text sizes for home-screen and app-drawer labels, including closed folder names. Smaller text fits more letters in the same space. Medium is the default, with comfortably smaller text than stock. Icon sizes and labels inside opened folders stay unchanged. Disabled by default. Enable it to apply your chosen size immediately; turning it off restores stock text size."),
         new FeaturePage("launcher",Feature.CLEAR_ALL,"ic_ps_clearall","Clear all in recents","Moves the stock Clear all option from the far left of recents and keeps it always visible alongside Select and Screenshot. You can clear recent apps without scrolling to the end of the list. Changing this option restarts Pixel Launcher to rebuild the recents controls."),
         new FeaturePage("drawer",LauncherFeatures.HIDE_SHORTCUTS,"ic_ps_shortcuts","Hide app shortcuts","Hide app-provided actions such as Amazon Search and View orders when holding an app in the app drawer. The standard launcher actions and Pixel Suite options remain available. Home-screen shortcuts are unchanged. This takes effect the next time you hold an app, without restarting Pixel Launcher."),
+        new FeaturePage("themes",SuperDark.KEY,"ic_ps_super_dark","Super Dark-Mode","Use black backgrounds and darker surfaces in the system dark theme. Supported screens and apps that use Android system colors follow the change; apps with their own palettes may look different. Turn it off to remove the Super Dark overlays. Disabled by default."),
         new FeaturePage("files",Feature.FILES_SORT,"ic_ps_files","Newest first","Show folders first, followed by files from newest to oldest, in Files by Google and in Android's file picker (the Files screen other apps open when you attach a file). While enabled, this overrides each app's own Sort by choice. The file picker is a separate system app, also named Files: in LSPosed, open Pixel Suite's scope, show system apps, tick com.google.android.documentsui, then force stop it. Turn this off to use the apps' normal sorting.")
     };
     private final Map<String,TextView> mChoiceLabels=new LinkedHashMap<String,TextView>();
@@ -180,7 +192,7 @@ public class SettingsActivity extends Activity {
     private String pageTitle(String id){
         FeaturePage f=feature(id);if(f!=null)return f.title;
         if("buttons".equals(id))return "Buttons";if("gestures".equals(id))return "Gestures";
-        if("drawer".equals(id))return "App drawer";if("launcher".equals(id))return "Pixel Launcher";if("files".equals(id))return "Files";
+        if("drawer".equals(id))return "App drawer";if("launcher".equals(id))return "Pixel Launcher";if("files".equals(id))return "Files";if("themes".equals(id))return "Themes";
         if("changelog".equals(id))return "Changelog";
         if("updates".equals(id))return "Updates";if("about".equals(id))return "About and support";return "Pixel Suite";
     }
@@ -189,7 +201,7 @@ public class SettingsActivity extends Activity {
         if("buttons".equals(id))return "Quick actions from your phone's buttons.";
         if("gestures".equals(id))return "Capture, mark up, lock and wake.";
         if("drawer".equals(id))return "Folders, dragging and app shortcuts.";if("launcher".equals(id))return "Folders, names, icons and recents.";
-        if("files".equals(id))return "A better starting view for your files.";
+        if("files".equals(id))return "A better starting view for your files.";if("themes".equals(id))return "System colors, your way.";
         if("changelog".equals(id))return "What's new:";
         if("updates".equals(id))return "";if("about".equals(id))return "Made by RovianDev";return "Your Pixel. Your Way.";
     }
@@ -197,10 +209,27 @@ public class SettingsActivity extends Activity {
     private void buildPage(LinearLayout page){
         String id=getIntent().getStringExtra("page");FeaturePage f=feature(id);
         if(f!=null){
-            LinearLayout controls=group(page);row(controls,f.key,f.icon,mAccent,(LauncherFeatures.HIDE_SHORTCUTS.equals(f.key)?"Hide app shortcuts":LauncherFeatures.ICONS.equals(f.key)?"Use custom app icons":LauncherFeatures.LABEL_SIZE.equals(f.key)?"Customize icon labels":"Use "+f.title.toLowerCase(java.util.Locale.ROOT)),"Enable this feature.");finishGroup(controls);
-            section(page,"How it works");explanation(page,f.summary);
-            if(!LauncherFeatures.LABEL_SIZE.equals(f.key))featurePreview(page,f);
-            if(LauncherFeatures.DRAWER.equals(f.key))extraPreview(page,"folder_reorder","Live folder reordering");
+            LinearLayout controls=group(page);row(controls,f.key,f.icon,mAccent,(LauncherFeatures.HIDE_SHORTCUTS.equals(f.key)?"Hide app shortcuts":LauncherFeatures.ICONS.equals(f.key)?"Use custom app icons":LauncherFeatures.LABEL_SIZE.equals(f.key)?"Customize icon labels":SuperDark.KEY.equals(f.key)?"Use Super Dark-Mode":"Use "+f.title.toLowerCase(java.util.Locale.ROOT)),"Enable this feature.");finishGroup(controls);
+            section(page,"How it works");
+            if(LauncherFeatures.DRAWER.equals(f.key)){
+                explanation(page,"Create folders in the drawer by holding an app and choosing Create folder, or drag one app onto another. Rename a folder or search and select its contents through Add apps. Drag folders among the folder rows to reorder them; nearby folders slide aside. Moving down among ordinary apps restores their positions.");
+                featurePreview(page,f);
+                section(page,"Sort from the three-dot menu");
+                explanation(page,"Open a folder, tap its three-dot menu, then Sort. Auto (A–Z) asks Yes or No before arranging the apps alphabetically and keeps that order as contents change. Custom lets you drag apps into your own order; nearby apps make room, including across pages. A check mark shows the active mode. The preview demonstrates Auto and Custom on separate loops so each step is easier to follow. The same Sort choices are available when you hold a drawer folder.");
+                extraPreview(page,"folder_sort","Sorting and custom order");
+                explanation(page,"Each folder has its own 3×3, 4×4 or 5×5 grid. Dragging an app against an open folder’s left or right edge switches pages. Use Remove to return selected apps to the drawer without uninstalling them. Holding a folder also offers Rename and Remove; removal asks for confirmation. Apps outside folders stay alphabetically sorted. Folders close when you leave the drawer or lock the phone. Private Space is excluded.");
+            }else{
+                explanation(page,f.summary);
+                if(!LauncherFeatures.LABEL_SIZE.equals(f.key))featurePreview(page,f);
+            }
+            if(SuperDark.KEY.equals(f.key)){
+                section(page,"Dark theme and schedules");
+                explanation(page,"If the phone is using a fixed light theme, enabling this option also switches it to dark. An existing automatic or custom dark-theme schedule stays in charge. The darker surfaces apply when dark theme is active. Turning this off removes the overlays; it also returns to light mode if this feature originally switched it on.");
+                section(page,"Black surfaces, readable layers");
+                explanation(page,"Main dark backgrounds become black. Cards, menus and dialogs keep slightly lighter shades so their edges remain visible. Text and accent colors keep their system values. Power savings depend on the display and content; no battery percentage is promised.");
+                section(page,"Where it applies");
+                explanation(page,"Uses System UI hooks to change supported Android color resources, with root used to apply the setting. System screens and apps that use those colors can follow the change, including supported Settings, System UI and Material You app surfaces. Apps with their own colors are unaffected. Results depend on the installed Android and app versions. Keep System UI selected in the LSPosed module scope. Reboot once after installing this build so the color hooks load. While enabled and the phone is in dark theme, Super Dark turns off window-level blur across the system. Affected panels use solid fallback surfaces. Switching to light theme, including on a schedule, restores blur only if this feature disabled it; an already-disabled blur setting stays disabled. Switching back to dark theme reapplies Super Dark automatically. After reboot, System UI reapplies it a few seconds after startup. Gboard, Google and Settings have extra dark-theme color hooks. Select Gboard, Google and Settings in the LSPosed module scope, alongside System UI, then reboot once after installing. Changing this option restarts Gboard and the Google app to reload their colors; they open again when next used. A Restart Pixel Launcher shortcut appears after changing this option so folders and the drawer can reload their colors when you choose. Folder menus use solid surfaces when window blur is off, so apps and text do not show through them. In Super Dark, folder and app shortcut menus match the folder background, even when other launcher customizations are disabled. Supported PIN and pattern screen backgrounds also follow Super Dark through targeted color hooks. Changing this option no longer restarts System UI or sends you to the lock screen. Colors follow the current system theme. The setting also responds to light/dark theme changes; it adds no continuously running animation or background service.");
+            }
             if(LauncherFeatures.GRID.equals(f.key))extraPreview(page,"folder_sort","Folder sorting");
             if(LauncherFeatures.LABEL_SIZE.equals(f.key)){
                 section(page,"Text size");LinearLayout options=group(page);labelSize(options);finishGroup(options);
@@ -242,7 +271,7 @@ public class SettingsActivity extends Activity {
             for(String entry:entries){if(entry.trim().isEmpty())continue;int end=entry.indexOf('\n');String heading=end<0?entry.trim():entry.substring(0,end).trim();String body=end<0?"":entry.substring(end+1).trim();section(page,heading);TextView notes=text(body,15,mText,false);notes.setTextIsSelectable(true);notes.setLineSpacing(dp(4),1);notes.setPadding(dp(18),dp(16),dp(18),dp(18));notes.setBackground(FrostedSurface.drawable(this,20));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(12);page.addView(notes,lp);}
             return;
         }
-        boolean category="buttons".equals(id)||"gestures".equals(id)||"launcher".equals(id)||"drawer".equals(id)||"files".equals(id);
+        boolean category="buttons".equals(id)||"gestures".equals(id)||"launcher".equals(id)||"drawer".equals(id)||"files".equals(id)||"themes".equals(id);
         if(category){
             LinearLayout features=group(page);if("launcher".equals(id))navigation(features,"App drawer","Folders, drag target and app shortcuts","ic_ps_drawer",new Runnable(){public void run(){openPage("drawer");}});for(final FeaturePage item:PAGES)if(item.group.equals(id))navigation(features,item.title,item.summary,item.icon,new Runnable(){public void run(){openPage(item.key);}});finishGroup(features);return;
         }
@@ -250,6 +279,7 @@ public class SettingsActivity extends Activity {
         navigation(categories,"Buttons","Flashlight and camera shortcuts","ic_ps_buttons",new Runnable(){public void run(){openPage("buttons");}});
         navigation(categories,"Gestures","Screenshots, doodles, sleep and wake","ic_ps_gestures",new Runnable(){public void run(){openPage("gestures");}});
         navigation(categories,"Pixel Launcher","Folder grids, drawer folders, icons and names","ic_ps_launcher",new Runnable(){public void run(){openPage("launcher");}});
+        navigation(categories,"Themes","Super Dark-Mode and system colors","ic_ps_themes",new Runnable(){public void run(){openPage("themes");}});
         navigation(categories,"Files","Files and the file picker, newest first","ic_ps_files_category",new Runnable(){public void run(){openPage("files");}});finishGroup(categories);
         section(page,"Pixel Suite");LinearLayout about=group(page);navigation(about,"Changelog","Release notes, available offline","ic_ps_changelog",new Runnable(){public void run(){openPage("changelog");}});navigation(about,"Updates","Check official releases and manage notifications","ic_ps_update",new Runnable(){public void run(){openPage("updates");}});navigation(about,"About and support","Setup, community and support links","ic_ps_info",new Runnable(){public void run(){openPage("about");}});finishGroup(about);
     }
@@ -310,7 +340,7 @@ public class SettingsActivity extends Activity {
     }
     private void featurePreview(LinearLayout page,FeaturePage feature){
         section(page,"Feature preview");LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setPadding(dp(12),dp(12),dp(12),dp(12));card.setBackground(FrostedSurface.drawable(this,24));LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.bottomMargin=dp(16);page.addView(card,cp);
-        mFeaturePreview=new FeaturePreview(this,feature.key,mAccent,mOnAccent,mText,mTextSecondary,mCard,mDark);mFeaturePreview.setContentDescription(feature.title+". Looping demonstration with a pause between actions. Does not change your settings.");card.addView(mFeaturePreview,new LinearLayout.LayoutParams(-1,dp(300)));mPreviews.add(mFeaturePreview);
+        mFeaturePreview=new FeaturePreview(this,feature.key,mAccent,mOnAccent,mText,mTextSecondary,mCard,mDark);mFeaturePreview.setContentDescription(feature.title+". Looping demonstration with a pause between actions. Does not change your settings.");card.addView(mFeaturePreview,new LinearLayout.LayoutParams(-1,dp((SuperDark.KEY.equals(feature.key)||LauncherFeatures.DRAWER.equals(feature.key)||LauncherFeatures.GRID.equals(feature.key)||"folder_sort".equals(feature.key)||FolderDrag.TWO_FINGER.equals(feature.key)||MultiDrag.KEY.equals(feature.key))?330:300)));mPreviews.add(mFeaturePreview);
     }
     private void extraPreview(LinearLayout page,String key,String title){featurePreview(page,new FeaturePage("launcher",key,"ic_ps_folder_grid",title,""));}
     private TextView mUpdateStatus;
@@ -412,7 +442,7 @@ public class SettingsActivity extends Activity {
     }
     private void saveLabelSize(final int value){
         showLabelSize(value);mSaves++;
-        IO.execute(new Runnable(){public void run(){final boolean ok=Root.run("settings put secure "+LauncherFeatures.LABEL_LEVEL+" "+IconLabelScale.level(value))!=null;mMain.post(new Runnable(){public void run(){if(isFinishing()||isDestroyed())return;if(!ok){showRootBanner(true);Toast.makeText(SettingsActivity.this,"Could not save text size",Toast.LENGTH_SHORT).show();load();}}});}});
+        IO.execute(new Runnable(){public void run(){final boolean ok=Root.run("settings put secure "+LauncherFeatures.LABEL_LEVEL+" "+IconLabelScale.level(value))!=null;mMain.post(new Runnable(){public void run(){if(isFinishing()||isDestroyed())return;if(ok){RestartPill.changed(LauncherFeatures.LABEL_LEVEL);if(mRestart!=null)mRestart.refresh();}if(!ok){showRootBanner(true);Toast.makeText(SettingsActivity.this,"Could not save text size",Toast.LENGTH_SHORT).show();load();}}});}});
     }
     private void choice(LinearLayout group,String key,String title,String[] items){choice(group,key,title,items,0);}
     private void choice(LinearLayout group,final String key,final String title,final String[] items,final int offset){
@@ -430,7 +460,7 @@ public class SettingsActivity extends Activity {
                     dialog.dismiss();mSaves++;IO.execute(new Runnable(){public void run(){
                         String command="settings put secure "+key+" "+(which+offset);
                         if(Feature.DOUBLE_TAP_WAKE.equals(key))command+="; settings put secure doze_tap_gesture 1";
-                        final boolean ok=Root.run(command)!=null;mMain.post(new Runnable(){public void run(){if(isFinishing()||isDestroyed())return;if(ok)updateChoiceLabel(key,which+offset);else{showRootBanner(true);Toast.makeText(SettingsActivity.this,"Could not save this option",0).show();}}});
+                        final boolean ok=Root.run(command)!=null;mMain.post(new Runnable(){public void run(){if(isFinishing()||isDestroyed())return;if(ok){updateChoiceLabel(key,which+offset);RestartPill.changed(key);if(mRestart!=null)mRestart.refresh();}else{showRootBanner(true);Toast.makeText(SettingsActivity.this,"Could not save this option",0).show();}}});
                     }});
                 }}).setNegativeButton("Cancel",null).create());
             }});}});
@@ -488,7 +518,8 @@ public class SettingsActivity extends Activity {
                 mMain.post(new Runnable() {
                     @Override
                     public void run() {
-                        if (ok || isFinishing() || isDestroyed()) return;
+                        if (isFinishing() || isDestroyed()) return;
+                        if (ok) { RestartPill.changed(key); if (mRestart != null) mRestart.refresh(); return; }
                         mUpdating = true;
                         sw.setChecked(!on);   // put the switch back
                         mUpdating = false;
@@ -513,6 +544,7 @@ public class SettingsActivity extends Activity {
         if (Feature.CLEAR_ALL.equals(key)) {
             return put + "; am force-stop " + LAUNCHER;   // the button is built with recents
         }
+        if (SuperDark.KEY.equals(key)) return put + "; " + SuperDark.commands(on);
         if (Feature.TAP_CHECK.equals(key) && on) return put + "; settings put secure doze_tap_gesture 1";
         if (Feature.SCREENSHOT_DOODLES.equals(key) || Feature.SCREENSHOT_FREE_CROP.equals(key)) {
             return put + "; am force-stop " + ScreenshotEditor.PACKAGE;   // the editor builds its toolbar once

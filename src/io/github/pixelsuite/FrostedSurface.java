@@ -22,7 +22,10 @@ final class FrostedSurface {
         if(reduce!=0&&launcher.getResources().getBoolean(reduce))return false;
         try{Object manager=c.getSystemService(Context.WINDOW_SERVICE);return (Boolean)manager.getClass().getMethod("isCrossWindowBlurEnabled").invoke(manager);}catch(Throwable ignored){return android.provider.Settings.Global.getInt(c.getContentResolver(),"disable_window_blurs",0)==0;}
     }
-    static int fallback(Context c){return LauncherFeatures.surface(c,dark(c)?"system_accent2_800":"system_accent2_200",dark(c)?0xff2f3036:0xffc6c5cc);}
+    static int fallback(Context c){
+        // Super Dark-Mode turns blur off; folders and menus then use its near-black raised surface instead of the tinted grey.
+        if(dark(c)&&Feature.on(c,SuperDark.KEY))return SUPER_DARK_PANEL;
+        return LauncherFeatures.surface(c,dark(c)?"system_accent2_800":"system_accent2_200",dark(c)?0xff2f3036:0xffc6c5cc);}
     static int composite(int fg,int bg){int fa=Color.alpha(fg),ba=Color.alpha(bg),a=255-((255-fa)*(255-ba)/255);if(a==0)return 0;return Color.argb(a,channel(Color.red(fg),fa,Color.red(bg),ba,a),channel(Color.green(fg),fa,Color.green(bg),ba,a),channel(Color.blue(fg),fa,Color.blue(bg),ba,a));}
     static int channel(int f,int fa,int b,int ba,int a){return ((255-fa)*(b*ba)+(f*255)*fa)/(a*255);}
     static int tone(Context c){
@@ -30,10 +33,20 @@ final class FrostedSurface {
         return composite(resourceColor(c,"blur_shade_panel_fg",dark(c)?0x522c303d:0x66dedee8),resourceColor(c,"blur_shade_panel_bg",dark(c)?0x520e0e0f:0x66f9f9fe));
     }
     static int blend(int color,int amount){int r=(Color.red(color)*(255-amount)+255*amount)/255,g=(Color.green(color)*(255-amount)+255*amount)/255,b=(Color.blue(color)*(255-amount)+255*amount)/255;return Color.rgb(r,g,b);}
-    static int[] colors(Context c){int base=(tone(c)&0xffffff)|0xcc000000;if(!c.getPackageName().equals("com.google.android.apps.nexuslauncher"))base=LauncherFeatures.surface(c,dark(c)?"system_surface_container_high_dark":"system_surface_container_high_light",fallback(c));return new int[]{base,base};}
+    static int[] colors(Context c){int base=(tone(c)&0xffffff)|(blurEnabled(c)?0xcc000000:0xff000000);/* no blur behind: opaque, or it shows through */if(!c.getPackageName().equals("com.google.android.apps.nexuslauncher"))base=LauncherFeatures.surface(c,dark(c)?"system_surface_container_high_dark":"system_surface_container_high_light",fallback(c));return new int[]{base,base};}
     static int[] folderColors(Context c){return colors(c);}
-    static int closedFolderColor(Context c){return (blend(tone(c),dark(c)?44:8)&0xffffff)|0xeb000000;}
+    /** Super Dark-Mode: open folders and menus just off black, the closed folder icon's disc one step above. */
+    static final int SUPER_DARK_PANEL=0xff0a0a0a,SUPER_DARK_CLOSED_FOLDER=0xff161616;
+    static int closedFolderColor(Context c){if(dark(c)&&Feature.on(c,SuperDark.KEY))return SUPER_DARK_CLOSED_FOLDER;return (blend(tone(c),dark(c)?44:8)&0xffffff)|0xeb000000;}
     static void popupWindow(View content,float radius){frost(content,radius,"Dropdown");}
+    /**
+     * Menus with window blur off (Super Dark-Mode turns it off): solid, the same colour as the folder panel (owner's
+     * choice: every menu, folder and app shortcut popup matches). The frosted 80% tint was see-through with nothing
+     * blurred behind it.
+     */
+    static final int SUPER_DARK_MENU=SUPER_DARK_PANEL;
+    static int menuColor(Context c){return dark(c)&&Feature.on(c,SuperDark.KEY)?SUPER_DARK_MENU:tone(c)|0xff000000;}
+    static GradientDrawable solidMenu(Context c,float radius){GradientDrawable d=new GradientDrawable();d.setColor(menuColor(c));d.setCornerRadius(dp(c,radius));return d;}
     /**
      * The approved dropdown frost on any view of its own window: a framework
      * BackgroundBlurDrawable from that window (it blurs only what is behind this view's rounded
@@ -46,6 +59,7 @@ final class FrostedSurface {
             content.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener(){public void onViewDetachedFromWindow(View v){}public void onViewAttachedToWindow(final View v){v.removeOnAttachStateChangeListener(this);v.post(new Runnable(){public void run(){if(v.isAttachedToWindow())frost(v,corners,what);}});}});
             return;
         }
+        if(!blurEnabled(content.getContext())){content.setBackground(solidMenu(content.getContext(),radius));return;}
         try{
             Object root=LauncherFeatures.call(content,"getViewRootImpl");
             Drawable blur=(Drawable)LauncherFeatures.call(root,"createBackgroundBlurDrawable");
@@ -129,7 +143,7 @@ final class FrostedSurface {
     static void style(AlertDialog dialog){
         Window window=dialog.getWindow();if(window==null)return;Context c=dialog.getContext();window.setDimAmount(dark(c)?.18f:.10f);
         View panel=window.getDecorView().findViewById(android.R.id.content);
-        if(!blurEnabled(c)||panel==null){GradientDrawable tint=windowDrawable(c,28);tint.setColor(tone(c)|0xff000000);window.setBackgroundDrawable(tint);return;}
+        if(!blurEnabled(c)||panel==null){window.setBackgroundDrawable(solidMenu(c,28));return;}
         window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         final float corners=dp(c,28);
         panel.setOutlineProvider(new android.view.ViewOutlineProvider(){public void getOutline(View v,android.graphics.Outline outline){outline.setRoundRect(0,0,v.getWidth(),v.getHeight(),corners);}});
@@ -137,8 +151,9 @@ final class FrostedSurface {
         frost(panel,28,"Dialog");
     }
     static void popup(ViewGroup popup){
-        if(!LauncherFeatures.frosted())return;
-        BackdropSurface background=new BackdropSurface(popup.getContext(),24);background.bind(popup);popup.setBackground(background);
+        if(!LauncherFeatures.frosted()&&!(dark(popup.getContext())&&Feature.on(popup.getContext(),SuperDark.KEY)))return;
+        if(!blurEnabled(popup.getContext()))popup.setBackground(solidMenu(popup.getContext(),24));
+        else{BackdropSurface background=new BackdropSurface(popup.getContext(),24);background.bind(popup);popup.setBackground(background);}
         clearRows(popup,LauncherFeatures.get(popup,"mIterateChildrenTag"));
         try{View arrow=(View)LauncherFeatures.get(popup,"mArrow");if(arrow.getBackground()!=null)arrow.getBackground().setColorFilter(colors(popup.getContext())[0],PorterDuff.Mode.SRC_IN);}catch(Throwable ignored){}
     }

@@ -1,9 +1,9 @@
 id=io.github.roviandev.pixelsuite
 name=Pixel Suite
-version=2.0.1
-versionCode=92
+version=2.0.2
+versionCode=117
 author=RovianDev
-description=Pixel gestures, launcher folders and customization, file sorting, and Pixel Studio screenshot tools. Configure features inside Pixel Suite.
+description=Pixel gestures, launcher folders and customization, file sorting, Pixel Studio screenshot tools, and Super Dark-Mode. Configure features inside Pixel Suite.
 minApiVersion=102
 targetApiVersion=102
 staticScope=false

@@ -170,11 +170,11 @@ final class FolderSort {
         window.setBackgroundDrawable(new ColorDrawable(0)); window.setOutsideTouchable(true);
         window.setElevation(FrostedSurface.dp(c, 8));
         int mode = homeMode(info);
-        FolderOptions.row(card, "Auto (A–Z)", 9, mode == AUTO, new Runnable() { public void run() {
+        FolderOptions.row(card, "Auto (A–Z)", 13, mode == AUTO, new Runnable() { public void run() {
             dismiss(); if (homeMode(info) == AUTO) return;
             DrawerFolderMenu.confirm("Sort apps?", "Sort the apps in this folder from A to Z?", new Runnable() { public void run() { sortHome(info); } });
         }});
-        FolderOptions.row(card, "Custom", 9, mode == CUSTOM, new Runnable() { public void run() { dismiss(); setHomeMode(info, CUSTOM); } });
+        FolderOptions.row(card, "Custom", 14, mode == CUSTOM, new Runnable() { public void run() { dismiss(); setHomeMode(info, CUSTOM); } });
         Rect r = new Rect(); if (!icon.getGlobalVisibleRect(r)) return;
         Rect frame = new Rect(); icon.getWindowVisibleDisplayFrame(frame);
         int w = FrostedSurface.dp(c, 180), h = FrostedSurface.dp(c, 12 + 96), m = FrostedSurface.dp(c, 12);

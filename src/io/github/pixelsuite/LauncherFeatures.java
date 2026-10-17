@@ -132,7 +132,7 @@ final class LauncherFeatures {
             ThemeFolderRestore.install();
             installMenus();
             try{HomeOptions.install();}catch(Throwable error){Module.log("Pixel Suite settings row unavailable",error);}
-            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.1)");
+            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.2)");
         } catch (Throwable error) { Module.log("Launcher customization unavailable", error); }
     }
     static Class<?> type(String name) { return Xp.findClass(ROOT + name, loader); }
@@ -215,8 +215,11 @@ final class LauncherFeatures {
         for (Object app : array) if (!privateItem(app)) { label(app); list.add(app); }
         return list;
     }
+    /** How many times the drawer was refreshed (preview80: DrawerDrag skips a second refresh at the end of a drag). */
+    static volatile int refreshes;
     static void refresh() {
         Activity a = activity.get(); if (a == null) return;
+        refreshes++;
         DrawerFolders.clearIconCache();
         try {
             View decor = a.getWindow().getDecorView(); refreshLabels(decor);
@@ -225,6 +228,18 @@ final class LauncherFeatures {
         } catch (Throwable e) { Module.log("Launcher refresh failed", e); }
         DrawerFolders.scheduleRebind();
         GoogleAliases.publish();
+    }
+    /**
+     * Rebinds the drawer list after an order-only change (drawer folders moved). Unlike refresh() it keeps the built
+     * folder icons: rebuilding them made every folder in the row jump while the new icons were aligned a frame later.
+     */
+    static void refreshOrder() {
+        Activity a = activity.get(); if (a == null) return;
+        refreshes++;
+        try {
+            Object ah = get(call(a, "getAppsView"), "mAH");
+            for (Object holder : (List<?>) ah) if (holder != null) call(get(holder, "mAppsList"), "onAppsUpdated");
+        } catch (Throwable e) { Module.log("Launcher refresh failed", e); refresh(); }
     }
     static void refreshLabels(View v) {
         if(type("BubbleTextView").isInstance(v)){
