@@ -4,7 +4,7 @@ This update brings Super Dark-Mode, better drawer-folder movement, and the folde
 
 ## 🌑 Super Dark-Mode
 
-- **New Themes section:** Find Super Dark-Mode under Pixel Launcher in Pixel Suite. It starts disabled.
+- **New Themes section:** Find Super Dark-Mode under Themes in Pixel Suite. It starts disabled.
 - **Black backgrounds:** Supported Settings, notification shade, quick settings, lock-screen PIN/pattern backgrounds, launcher, Google search and Gboard surfaces use black or near-black colors. Cards remain distinct from the background; apps with their own palettes can look different.
 - **Follows your theme:** Switching to light mode restores the normal light theme. Switching back to dark reapplies Super Dark, including with a dark-theme schedule.
 - **Solid folder menus:** Folder panels, their three-dot menus and app shortcut menus share the same near-black tone under Super Dark. With blur disabled, menu backgrounds are opaque so text and icons behind them do not show through. App shortcut menus also follow Super Dark when other launcher customizations are off.

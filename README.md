@@ -28,7 +28,7 @@ Made by **RovianDev**. Pixel Suite adds launcher customization, gestures, screen
 
 ## 🌑 Themes: Super Dark-Mode
 
-An optional true-black take on the system dark theme, found under **Pixel Launcher → Themes** in Pixel Suite. Supported Settings, System UI, launcher, Google and Gboard surfaces follow it; apps with independent palettes may look different.
+An optional true-black take on the system dark theme, found under **Themes** in Pixel Suite. Supported Settings, System UI, launcher, Google and Gboard surfaces follow it; apps with independent palettes may look different.
 
 - **Automatic light/dark changes:** follows the quick settings theme tile and dark-theme schedules, restoring stock light colors when the phone switches to light mode.
 - **Matching folder and menu surfaces:** near-black folder frames, three-dot menus and app shortcut menus share the same tone. When blur is off, solid backgrounds keep the text and icons behind them hidden.
