@@ -9,6 +9,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ScrollView;
@@ -24,27 +25,29 @@ final class DrawerFolderMenu {
         final Object info = icon.getTag();
         if (!DrawerFolders.isFolder(info) || DrawerFolders.record(info) == null) return;
         Context c = icon.getContext();
-        LinearLayout card = new LinearLayout(c); card.setOrientation(LinearLayout.VERTICAL);
+        final LinearLayout card = new LinearLayout(c); card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(0, FrostedSurface.dp(c, 6), 0, FrostedSurface.dp(c, 6));
         ScrollView menu = new ScrollView(c); menu.addView(card);
         menu.setBackground(FrostedSurface.windowDrawable(c, 20)); menu.setClipToOutline(true);
-        final PopupWindow window = new PopupWindow(menu, FrostedSurface.dp(c, 164), -2, false);
+        menu.setVerticalScrollBarEnabled(false); menu.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        menu.setElevation(FrostedSurface.dp(c, 8));
+        fill(card, info);
+        final FrameLayout root = new FrameLayout(c); root.addView(menu, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+        final PopupWindow window = new PopupWindow(root, FrostedSurface.dp(c, 164), -2, false);
         window.setBackgroundDrawable(new ColorDrawable(0)); window.setOutsideTouchable(true);
-        window.setElevation(FrostedSurface.dp(c, 8)); window.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
-        fill(card, info, false);
+        window.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
+        root.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { dismiss(); } });
 
         Rect frame = new Rect(); icon.getWindowVisibleDisplayFrame(frame);
         Rect visible = new Rect();
         if (!icon.getGlobalVisibleRect(visible)) return;
         int margin = FrostedSurface.dp(c, 12), gap = FrostedSurface.dp(c, 6);
-        int width = Math.min(frame.width() - 2 * margin, FrostedSurface.dp(c, 164 * Math.max(1f, c.getResources().getConfiguration().fontScale)));
-        int height = FrostedSurface.dp(c, 12 + 48 * 5);
-        window.setWidth(width);
+        int width = FolderOptions.fitWidth(card, FrostedSurface.dp(c, 164 * Math.max(1f, c.getResources().getConfiguration().fontScale)), frame.width() - 2 * margin);
+        int height = FrostedSurface.dp(c, 12 + 48 * card.getChildCount() + 12);
+        window.setWidth(width); window.setHeight(height);
         int left = Math.max(frame.left + margin, Math.min(visible.centerX() - width / 2, frame.right - width - margin));
         int top = visible.bottom + gap;
         if (top + height > frame.bottom - margin && visible.top - gap - height >= frame.top + margin) top = visible.top - gap - height;
-        window.setHeight(-2);
-        menu.setVerticalScrollBarEnabled(false); menu.setOverScrollMode(View.OVER_SCROLL_NEVER);
         final View.OnAttachStateChangeListener lifecycle = new View.OnAttachStateChangeListener() {
             public void onViewAttachedToWindow(View v) { }
             public void onViewDetachedFromWindow(View v) { if (open == window) dismiss(); }
@@ -59,22 +62,18 @@ final class DrawerFolderMenu {
         open = window;
     }
 
-    private static void fill(final LinearLayout card, final Object info, final boolean sortOpen) {
+    private static void fill(final LinearLayout card, final Object info) {
         card.removeAllViews();
         final LauncherData.Folder f = DrawerFolders.record(info);
+        final int id = f == null ? 0 : f.id;
         FolderOptions.row(card, "Rename", 1, false, new Runnable() { public void run() { dismiss(); rename(info); } });
-        FolderOptions.row(card, "Sort", 9, false, new Runnable() { public void run() { fill(card, info, !sortOpen); PopupWindow w = open; if (w != null) try { w.update(w.getWidth(), -2); } catch (Throwable ignored) { } } });
-        if (sortOpen && f != null) {
-            final int id = f.id;
-            FolderOptions.row(card, "   Auto (A\u2013Z)", 9, f.sort == FolderSort.AUTO, new Runnable() { public void run() {
-                dismiss(); LauncherData.Folder now = DrawerFolders.record(info);
-                if (now != null && now.sort != FolderSort.AUTO) sort(info);
-            }});
-            FolderOptions.row(card, "   Custom", 9, f.sort != FolderSort.AUTO, new Runnable() { public void run() {
-                dismiss(); LauncherData.Folder now = DrawerFolders.record(info);
-                if (now != null && now.sort == FolderSort.AUTO) FolderSort.drawerCustom(id);
-            }});
-        }
+        FolderOptions.sortGroup(card, f != null && f.sort == FolderSort.AUTO, new Runnable() { public void run() {
+            dismiss(); LauncherData.Folder now = DrawerFolders.record(info);
+            if (now != null && now.sort != FolderSort.AUTO) sort(info);
+        }}, new Runnable() { public void run() {
+            dismiss(); LauncherData.Folder now = DrawerFolders.record(info);
+            if (now != null && now.sort == FolderSort.AUTO) FolderSort.drawerCustom(id);
+        }});
         FolderOptions.row(card, "Remove", 8, false, new Runnable() { public void run() { dismiss(); remove(info); } });
     }
 

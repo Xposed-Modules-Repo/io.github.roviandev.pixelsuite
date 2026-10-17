@@ -38,6 +38,23 @@ final class DrawerDrag {
                 if((!remove&&DrawerHomeTarget.update(x,y,s.layer))||(!remove&&y<s.exitY)){s.exitToHome();}
             }
         });
+        try{
+            final ThreadLocal<Object[]> hidden=new ThreadLocal<Object[]>();
+            Xp.hookAllMethods(type("DeleteDropTarget"),"onDragStart",new Xp.Callback(){
+                protected void beforeHookedMethod(Xp.Param p){
+                    try{Object item=get(p.args[0],"dragInfo");if(item!=null&&DrawerFolders.isFolder(item)){hidden.set(new Object[]{item,get(item,"id")});set(item,"id",-1);}}catch(Throwable ignored){}
+                }
+                protected void afterHookedMethod(Xp.Param p){
+                    Object[] h=hidden.get();hidden.remove();if(h!=null)try{set(h[0],"id",h[1]);}catch(Throwable ignored){}
+                }
+            });
+        }catch(Throwable error){LauncherFeatures.logOnce("Drawer folder Cancel label unavailable",error);}
+        Xp.hookAllMethods(type("DropTargetBar"),"onDragStart",new Xp.Callback(){
+            protected void afterHookedMethod(Xp.Param p){
+                Session s=session;if(s!=null&&!s.exited)return;
+                try{easeIn((ViewGroup)p.thisObject);}catch(Throwable error){LauncherFeatures.logOnce("Drop target fade-in unavailable",error);}
+            }
+        });
         Xp.hookAllMethods(type("dragndrop.DragController"),"callOnDragEnd",new Xp.Callback(){
             protected void afterHookedMethod(Xp.Param p){if(session!=null)finish();}
         });
@@ -84,15 +101,16 @@ final class DrawerDrag {
     }
     private static void finish(){
         Session s=session;session=null;DrawerHomeTarget.hide();if(s==null)return;
-        if(s.reorder!=null)s.reorder.restore();s.source.setVisibility(View.VISIBLE);s.clearHover();s.setMember(null);if(s.stay!=null)s.stay.stop();
+        if(s.reorder!=null)s.reorder.restore();if(s.push!=null)s.push.restore();s.source.setVisibility(View.VISIBLE);s.clearHover();s.setMember(null);if(s.stay!=null)s.stay.stop();
         try{call(s.controller,"removeDropTarget",s.target);}catch(Throwable ignored){}
-        if(!s.exited)LauncherFeatures.refresh();
+        if(!s.exited&&LauncherData.saves!=s.savesAtStart&&LauncherFeatures.refreshes==s.refreshesAtStart)LauncherFeatures.refresh();
     }
     private static final class Session implements InvocationHandler {
         final Activity activity;final View source;final Object info;final String key;
         final ViewGroup layer;final Object controller;final Object target;final Object dragSource;
         final int exitY;boolean exited,indicating,lifted;View hovered;int localX,localY;
-        FolderDrag.Stay stay;FolderReorder reorder;View hoverMember;int lastX,lastY;
+        final int savesAtStart=LauncherData.saves,refreshesAtStart=LauncherFeatures.refreshes;
+        FolderDrag.Stay stay;FolderReorder reorder;FolderPush push;View hoverMember;int lastX,lastY;
         Session(Activity a,View v,Object i,String k){
             activity=a;source=v;info=i;key=k;layer=(ViewGroup)call(a,"getDragLayer");controller=get(a,"mDragController");
             Object appsView=call(a,"getAppsView");View search=(View)get(appsView,"mSearchContainer");
@@ -100,6 +118,7 @@ final class DrawerDrag {
             exitY=top[1]-origin[1];
             if(exitY<=0)throw new IllegalStateException("Search bar boundary is not laid out");
             if(!k.startsWith("folder:")&&DrawerFolders.isDrawerMember(i)){View open=FolderDrag.openFolder(a);if(open!=null){stay=new FolderDrag.Stay(open,layer);reorder=FolderReorder.start(open,v);}}
+            if(k.startsWith("folder:"))push=new FolderPush(v,layer);
             target=Proxy.newProxyInstance(LauncherFeatures.loader,new Class<?>[]{type("DropTarget")},this);
             dragSource=Proxy.newProxyInstance(LauncherFeatures.loader,new Class<?>[]{type("DragSource")},new InvocationHandler(){
                 public Object invoke(Object self,Method method,Object[] args){
@@ -126,6 +145,7 @@ final class DrawerDrag {
                     View m=stay.memberAt(x,y);setMember(m==source?null:m);return null;
                 }
                 if(stay!=null&&reorder!=null)reorder.leave();
+                if(push!=null){clearHover();setMember(null);push.over(x,y);return null;}
                 setMember(null);
                 View candidate=findCell((View)call(activity,"getAppsView"),x,y,layer);
                 if(candidate==source)candidate=null;
@@ -140,6 +160,7 @@ final class DrawerDrag {
             if(name.equals("onDragExit")){if(!Boolean.TRUE.equals(get(args[0],"dragComplete")))clearHover();return null;}
             if(name.equals("acceptDrop")&&DrawerHomeTarget.overRemove&&stay!=null)return true;
             if(name.equals("acceptDrop")&&stay!=null&&!stay.left)return true;
+            if(name.equals("acceptDrop")&&push!=null)return push.active();
             if(name.equals("acceptDrop"))return LauncherFeatures.on(LauncherFeatures.DRAWER)&&hovered!=null && hovered!=source;
             if(name.equals("prepareAccessibilityDrop"))return null;
             if(name.equals("onDrop")&&DrawerHomeTarget.overRemove&&stay!=null){
@@ -150,6 +171,7 @@ final class DrawerDrag {
                 if(reorder!=null){reorder.commit(args[0]);MultiDrag.handledInFolder();return null;}
                 dropInside(m);MultiDrag.drawerDrop();return null;
             }
+            if(name.equals("onDrop")&&push!=null){clearHover();set(args[0],"deferDragViewCleanupPostAnimation",false);push.commit();return null;}
             if(name.equals("onDrop")){
                 if(reorder!=null)reorder.restore();
                 View destination=hovered;clearHover();set(args[0],"deferDragViewCleanupPostAnimation",false);
@@ -205,6 +227,7 @@ final class DrawerDrag {
         void exitToHome()throws Exception{
             exited=true;DrawerHomeTarget.hide();clearHover();call(controller,"removeDropTarget",target);
             if(reorder!=null)reorder.restore();
+            if(push!=null)push.restore();
             if(stay!=null){
                 stay.stop();final View open=stay.folder;
                 open.animate().cancel();
@@ -217,6 +240,7 @@ final class DrawerDrag {
             if(DrawerFolders.isFolder(info)){
                 LauncherData.Folder f=DrawerFolders.record(info);Object copy=Xp.newInstance(type("model.data.FolderInfo"));
                 set(copy,"title",get(info,"title"));set(copy,"user",get(info,"user"));
+                try{set(copy,"id",-1);}catch(Throwable ignored){}
                 List<Object> content=(List<Object>)get(copy,"contents");
                 if(f!=null)for(String appKey:f.apps){Object app=DrawerFolders.known.get(appKey);if(app!=null)content.add(call(app,"makeWorkspaceItem",activity));}
                 set(drag,"dragInfo",copy);set(drag,"originalDragInfo",call(copy,"makeShallowCopy"));
@@ -225,6 +249,19 @@ final class DrawerDrag {
             call(workspace,"onDragStart",drag,get(controller,"mOptions"));
             call(get(activity,"mDropTargetBar"),"onDragStart",drag,get(controller,"mOptions"));
             Module.log("Drawer drag handed off above search bar");
+        }
+    }
+    static void easeIn(ViewGroup bar){
+        for(int i=0;i<bar.getChildCount();i++){
+            final View child=bar.getChildAt(i);
+            if(type("ButtonDropTarget").isInstance(child)){
+                final android.graphics.drawable.Drawable bg=child.getBackground();
+                final android.graphics.drawable.Drawable blur=bg instanceof android.graphics.drawable.LayerDrawable&&((android.graphics.drawable.LayerDrawable)bg).getNumberOfLayers()>0?((android.graphics.drawable.LayerDrawable)bg).getDrawable(0):null;
+                child.animate().cancel();child.setAlpha(0f);if(blur!=null)blur.setAlpha(0);
+                child.animate().alpha(1f).setStartDelay(220).setDuration(200).setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .setUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener(){public void onAnimationUpdate(android.animation.ValueAnimator a){if(blur!=null)blur.setAlpha(Math.round(255*child.getAlpha()));}})
+                    .withEndAction(new Runnable(){public void run(){if(blur!=null)blur.setAlpha(255);child.animate().setUpdateListener(null);}}).start();
+            }else if(child instanceof ViewGroup)easeIn((ViewGroup)child);
         }
     }
     static Object objectMethod(Object self,Method m,Object[] args){

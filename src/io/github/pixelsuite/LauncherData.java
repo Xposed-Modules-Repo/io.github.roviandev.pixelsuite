@@ -30,6 +30,7 @@ final class LauncherData {
         } catch (Exception error) { Module.log("Launcher folder storage cannot be read", error); }
         return result;
     }
+    static volatile int saves;
     synchronized boolean save(List<Folder> folders) {
         try {
             JSONArray array = new JSONArray();
@@ -37,7 +38,9 @@ final class LauncherData {
                 JSONObject o = new JSONObject(); o.put("id", f.id); o.put("name", f.name);
                 o.put("grid", grid(f.grid)); o.put("user", f.user); o.put("sort", f.sort == 1 ? 1 : 0); o.put("apps", new JSONArray(f.apps)); array.put(o);
             }
-            return prefs.edit().putString("folders", array.toString()).commit();
+            boolean ok = prefs.edit().putString("folders", array.toString()).commit();
+            if (ok) saves++;
+            return ok;
         } catch (Exception error) { Module.log("Launcher folder save failed", error); return false; }
     }
     String alias(String identity) { return prefs.getString("alias:" + identity, ""); }

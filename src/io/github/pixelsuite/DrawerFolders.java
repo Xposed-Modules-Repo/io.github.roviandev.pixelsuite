@@ -455,7 +455,8 @@ final class DrawerFolders {
     static boolean stale(Object info,LauncherData.Folder f){
         if(!String.valueOf(get(info,"title")).equals(f.name))return true;
         List<?> contents=(List<?>)get(info,"contents");
-        List<String> saved=new ArrayList<String>();for(String key:f.apps)if(known.containsKey(key))saved.add(key);
+        List<String> saved=new ArrayList<String>();
+        for(String key:FolderSort.shownOrder(f))if(known.containsKey(key))saved.add(key);
         if(contents.size()!=saved.size())return true;
         for(int i=0;i<saved.size();i++)if(!saved.get(i).equals(LauncherFeatures.identity(contents.get(i))))return true;
         return false;
@@ -607,6 +608,15 @@ final class DrawerFolders {
             for(int i=folders.size()-1;i>=0;i--)if(folders.get(i).apps.isEmpty())folders.remove(i);
         }
         if(!LauncherFeatures.data.save(folders))return false;LauncherFeatures.refresh();return true;
+    }
+    static boolean moveFolder(int from,int to,boolean after){
+        List<LauncherData.Folder> folders=LauncherFeatures.data.folders();
+        LauncherData.Folder moved=null;for(LauncherData.Folder f:folders)if(f.id==from)moved=f;
+        if(moved==null||from==to)return false;
+        folders.remove(moved);int at=-1;for(int i=0;i<folders.size();i++)if(folders.get(i).id==to)at=i;
+        if(at<0)return false;
+        folders.add(after?at+1:at,moved);
+        if(!LauncherFeatures.data.save(folders))return false;LauncherFeatures.refreshOrder();return true;
     }
     static int nextId(List<LauncherData.Folder> list){int id=1;for(LauncherData.Folder f:list)id=Math.max(id,f.id+1);if(id>=16000)throw new IllegalStateException("Folder limit reached");return id;}
     static List<String> readOrder(long user){

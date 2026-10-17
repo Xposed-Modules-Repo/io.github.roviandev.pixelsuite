@@ -63,7 +63,7 @@ final class FeaturePreview extends View implements ViewTreeObserver.OnPreDrawLis
             @Override public void onAnimationCancel(Animator a){cancelled=true;}
             @Override public void onAnimationEnd(Animator a){
                 animator=null;if(cancelled)return;
-                if(transition){phase=START;progress=0;reset=0;}else{phase=HOLD;progress=1;}
+                if(transition){scenes.nextCycle();phase=START;progress=0;reset=0;}else{phase=HOLD;progress=1;}
                 invalidate();check();
             }
         });animator.start();

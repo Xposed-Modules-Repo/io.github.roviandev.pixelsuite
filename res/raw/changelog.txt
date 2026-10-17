@@ -1,3 +1,28 @@
+## v2.0.2
+Pixel Suite 2.0.2 adds Themes with Super Dark-Mode, smarter folder moving in the app drawer and a restart prompt in the app.
+
+Themes: Super Dark-Mode
+• New Themes section in the Pixel Suite app, under Pixel Launcher, with Super Dark-Mode: a true-black dark theme for OLED screens.
+• Settings, the shade, quick settings tiles, notifications, the lock screen PIN/pattern screen, the app drawer, folders, Gboard, the Google app and the search bar go black; cards and menus sit a few steps above black so they stay apart. The color hooks target neutral surfaces and preserve brighter accent colors.
+• Turning it on switches the phone to dark mode. It only applies while the phone is dark: the quick settings tile or a dark-theme schedule switching to light brings back the normal light theme, and going dark brings Super Dark back.
+• Window blur is turned off while it is in effect (blur makes the drawer, folders and shade see-through and costs battery every frame) and comes back in light theme or when Super Dark is turned off.
+• Applies by itself after a reboot, from the first second, and works live when switched.
+• Folder menus, app shortcut menus and launcher dialogs are solid near-black while blur is off, matching the folder background under Super Dark instead of showing through. App shortcut menus also follow Super Dark when other launcher customizations are off.
+• Gboard and Settings need their boxes ticked in Pixel Suite's LSPosed scope (now recommended).
+
+App drawer folders
+• Moving a folder pushes the other folders aside, like apps in a folder; folders only move among folders and only while your finger is over the folder rows.
+• Dropping a folder no longer makes the other folders jump or shake.
+• Dragging a whole folder to the home screen shows Cancel instead of Remove.
+
+Folder menus and drag buttons
+• Holding a drawer folder: Sort folds open Auto (A–Z) and Custom with the same animation and icons as the folder ⋮ menu; home folder Sort gets the new icons too.
+• Folder menus size themselves to their longest label, and the folder no longer moves up for its menu (the cause of a stutter).
+• The Remove, Cancel and Uninstall buttons fade in a moment after a drag starts, so they never appear cut off.
+
+Pixel Suite app
+• After changing a setting that needs Pixel Launcher or Files to restart, a Restart pill appears in the corner; tap to restart that app, long-press to dismiss.
+
 ## v2.0.1
 Pixel Suite 2.0.1 polishes the launcher with folder and drag improvements, a cleaner screen recording sheet and many fixes.
 
@@ -97,9 +122,9 @@ Install / update
 
 Install PixelSuite-v1.1.3.apk over the previous public release, then reboot. No uninstall is needed when updating with the same signing key.
 
-Source: RovianDev/PixelSuite (https://github.com/RovianDev/PixelSuite) Â· Xposed listing (https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite)
+Source: RovianDev/PixelSuite (https://github.com/RovianDev/PixelSuite) · Xposed listing (https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite)
 
-Buy me a coffee (https://buymeacoffee.com/roviandev) Â· Patreon (https://www.patreon.com/c/RovianDev)
+Buy me a coffee (https://buymeacoffee.com/roviandev) · Patreon (https://www.patreon.com/c/RovianDev)
 
 
 APK SHA-256: 602379d748b67c8c5834108176eb2532e1c411bb1e85474718c0f1f6e4c56709

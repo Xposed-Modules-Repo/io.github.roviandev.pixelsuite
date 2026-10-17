@@ -23,7 +23,7 @@ final class Feature {
     static int defaultFor(String key) {
         if(LauncherFeatures.LABEL_LEVEL.equals(key))return 2;
         if(LauncherFeatures.GRID_SIZE.equals(key)||LauncherFeatures.DRAWER_GRID_SIZE.equals(key))return 3;
-        return (LauncherFeatures.LABEL_SIZE.equals(key) || LauncherFeatures.HIDE_SHORTCUTS.equals(key) || LauncherFeatures.GRID.equals(key) || LauncherFeatures.DRAWER.equals(key) || LauncherFeatures.RENAME.equals(key) || LauncherFeatures.DRAG_PILL.equals(key) || LauncherFeatures.ICONS.equals(key) || FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
+        return (SuperDark.KEY.equals(key) || LauncherFeatures.LABEL_SIZE.equals(key) || LauncherFeatures.HIDE_SHORTCUTS.equals(key) || LauncherFeatures.GRID.equals(key) || LauncherFeatures.DRAWER.equals(key) || LauncherFeatures.RENAME.equals(key) || LauncherFeatures.DRAG_PILL.equals(key) || LauncherFeatures.ICONS.equals(key) || FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
                 || LOCK_SHORTCUTS.equals(key)) ? 0 : 1;
     }
 

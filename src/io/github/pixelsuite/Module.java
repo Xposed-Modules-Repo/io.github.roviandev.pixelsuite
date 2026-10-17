@@ -43,9 +43,11 @@ public class Module extends XposedModule {
         if (SYSTEMUI.equals(pkg)) {
             VolumeCamera.installSystemUi(cl);
             ScreenRecordTidy.install(cl);
+            SuperDark.installSystemUi(cl);
         } else if (LAUNCHER.equals(pkg)) {
             ClearAll.installLauncher(cl);
             LauncherFeatures.install(cl);
+            SuperDarkApps.installLauncher(cl);
         } else if (FILES.equals(pkg)) {
             FilesSort.install(cl);
         } else if (ScreenshotEditor.PACKAGE.equals(pkg)) {
@@ -54,6 +56,9 @@ public class Module extends XposedModule {
             DocumentsSort.install(cl);
         } else if (AliasProvider.GOOGLE.equals(pkg)) {
             GoogleAliases.install();
+            SuperDarkApps.install(cl, pkg);
+        } else if (SuperDarkApps.GBOARD.equals(pkg) || SETTINGS.equals(pkg)) {
+            SuperDarkApps.install(cl, pkg);
         }
     }
 
