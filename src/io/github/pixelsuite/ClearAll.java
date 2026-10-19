@@ -80,6 +80,19 @@ final class ClearAll {
                 }
             });
 
+            // The launcher greys out and disables the whole action row while the centred task has no thumbnail (right
+            // after a reboot, until each app has been opened once) or while the list scrolls; that switched Clear all off
+            // too. Select and Screenshot need that thumbnail; Clear all does not, so it is turned back on every time.
+            try {
+                Xp.hookAllMethods(actionsClass, "updateDisabledFlags", new Xp.Callback() {
+                    @Override
+                    protected void afterHookedMethod(Xp.Param param) {
+                        Object mine = Xp.getAdditionalInstanceField(param.thisObject, KEY_BUTTON);
+                        if (mine instanceof View && !((View) mine).isEnabled()) ((View) mine).setEnabled(true);
+                    }
+                });
+            } catch (Throwable t) { Module.log(SUB + "kept-enabled hook unavailable (" + t + ")"); }
+
             // Separate step: if anything here fails, the new button still works.
             hideStockClearAll(cl);
 

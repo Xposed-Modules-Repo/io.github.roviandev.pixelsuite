@@ -29,8 +29,55 @@ final class HomeOptions {
 
     private HomeOptions() {}
 
+    /** Where the finger went down last on the launcher (screen coordinates), for the long-press menu. */
+    static volatile float downX = -1, downY = -1;
+
+    /**
+     * The long-press menu of an empty home screen spot opens around the finger: its middle row under the thumb, kept
+     * inside the screen. Stock placement put it above the touch point, so a press in the middle of the screen sent the
+     * menu far up.
+     */
+    static void follow(final View popup) {
+        if (popup == null || downY < 0) return;
+        boolean first = Xp.getAdditionalInstanceField(popup, "pixelsuite_follow") == null;
+        Xp.setAdditionalInstanceField(popup, "pixelsuite_follow", downY);   // this opening's finger (the view may be reused)
+        if (first) popup.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) { place(v); }
+        });
+        popup.post(new Runnable() { public void run() { place(popup); } });
+    }
+
+    private static void place(View v) {
+        Object f = Xp.getAdditionalInstanceField(v, "pixelsuite_follow"); if (!(f instanceof Float)) return;
+        float touchY = (Float) f;
+        int h = v.getHeight(); if (h <= 0) return;
+        int[] at = new int[2]; v.getLocationOnScreen(at);
+        float baseTop = at[1] - v.getTranslationY();
+        int screen = v.getResources().getDisplayMetrics().heightPixels, margin = FrostedSurface.dp(v.getContext(), 16), top = margin, bottom = margin;
+        try { android.view.WindowInsets in = (android.view.WindowInsets)LauncherFeatures.call(v, "getRootWindowInsets"); if (in != null) { top += in.getStableInsetTop(); bottom += in.getStableInsetBottom(); } } catch (Throwable ignored) { }
+        float want = Math.max(top, Math.min(touchY - h / 2f, screen - bottom - h));
+        v.setTranslationY(want - baseTop);
+        // The stock arrow points at where the menu used to be; with the menu on the finger it is not needed.
+        try { Object arrow = LauncherFeatures.get(v, "mArrow"); if (arrow instanceof View) ((View) arrow).setVisibility(View.INVISIBLE); } catch (Throwable ignored) { }
+    }
+
     static void install() {
-        installPositioning();
+        try {
+            Xp.hookAllMethods(LauncherFeatures.type("views.BaseDragLayer"), "onInterceptTouchEvent", new Xp.Callback() {
+                protected void beforeHookedMethod(Xp.Param p) {
+                    if (p.args.length > 0 && p.args[0] instanceof android.view.MotionEvent) {
+                        android.view.MotionEvent e = (android.view.MotionEvent) p.args[0];
+                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) { downX = e.getRawX(); downY = e.getRawY(); }
+                    }
+                }
+            });
+        } catch (Throwable error) { LauncherFeatures.logOnce("Home menu finger position unavailable", error); }
+        try {
+            final Class<?> options = LauncherFeatures.type("views.OptionsPopupView");
+            Xp.hookAllMethods(LauncherFeatures.type("popup.ArrowPopup"), "onLayout", new Xp.Callback() {
+                protected void afterHookedMethod(Xp.Param p) { if (options.isInstance(p.thisObject) && Xp.getAdditionalInstanceField(p.thisObject, "pixelsuite_follow") == null) follow((View) p.thisObject); }
+            });
+        } catch (Throwable error) { LauncherFeatures.logOnce("Home menu placement unavailable", error); }
         Class<?> popup = LauncherFeatures.type("views.OptionsPopupView");
         int hooks = 0;
         for (Method m : popup.getDeclaredMethods()) {
@@ -65,6 +112,8 @@ final class HomeOptions {
         android.view.ViewGroup popup;
         try{popup=(android.view.ViewGroup)LauncherFeatures.get(builder,"j");}
         catch(Throwable otherMapping){popup=(android.view.ViewGroup)LauncherFeatures.get(builder,"f9310j");}
+        if(popup!=null)removeAppsList(popup);
+        if(popup!=null)follow(popup);
         if(popup==null||popup.findViewWithTag("pixelsuite_settings")!=null)return;
         Context context=popup.getContext();int homeId=context.getResources().getIdentifier("settings_button_text","string",context.getPackageName());
         if(homeId==0)return;CharSequence home=context.getText(homeId);View sample=null;android.widget.TextView sampleLabel=null;int at=-1;
@@ -88,56 +137,30 @@ final class HomeOptions {
         row.setOnClickListener(new View.OnClickListener(){public void onClick(View view){LauncherFeatures.call(builder,"d",view,option);}});
         row.setOnLongClickListener(new View.OnLongClickListener(){public boolean onLongClick(View view){return Boolean.TRUE.equals(LauncherFeatures.call(builder,"d",view,option));}});
         popup.addView(row,at+1);
-        watchPosition(popup);
     }
-    /** Applies only to the native workspace popup containing our added settings row. */
-    private static boolean homePopup(Object value){
-        return value instanceof android.view.ViewGroup
-            && value.getClass().getName().equals("com.google.android.apps.nexuslauncher.customize.OptionsPopupDialog$PopupView")
-            && ((android.view.ViewGroup)value).findViewWithTag("pixelsuite_settings")!=null;
+    /**
+     * The stock "Apps list" row is left out of this menu (the drawer is a swipe up away). Found by the launcher's own
+     * string (all_apps_button_label), or its English text if that resource is renamed. The remaining rows get their
+     * first/middle/last corner shapes again, so the menu has no square or doubled corner where the row was.
+     */
+    static CharSequence appsListLabel(Context c){
+        try{int id=c.getResources().getIdentifier("all_apps_button_label","string",c.getPackageName());if(id!=0)return c.getText(id);}catch(Throwable ignored){}
+        return "Apps list";
     }
-    private static void installPositioning(){
-        try{
-            Xp.hookAllMethods(LauncherFeatures.type("popup.ArrowPopup"),"orientAboutObject",new Xp.Callback(){
-                protected void afterHookedMethod(Xp.Param p){
-                    if(!homePopup(p.thisObject))return;
-                    try{position((android.view.ViewGroup)p.thisObject,true);}catch(Throwable error){LauncherFeatures.logOnce("Home menu position unavailable",error);}
-                }
-            });
-        }catch(Throwable error){LauncherFeatures.logOnce("Home menu positioning hook unavailable",error);}
+    static void removeAppsList(android.view.ViewGroup popup){
+        CharSequence apps=appsListLabel(popup.getContext());
+        for(int i=popup.getChildCount()-1;i>=0;i--){
+            View child=popup.getChildAt(i);Object label;
+            try{label=LauncherFeatures.get(child,"mBubbleText");}catch(Throwable ignored){continue;}
+            if(!(label instanceof android.widget.TextView))continue;
+            CharSequence text=((android.widget.TextView)label).getText();
+            if(text==null||!(apps.toString().contentEquals(text)||"Apps list".contentEquals(text)))continue;
+            popup.removeViewAt(i);
+            try{LauncherFeatures.call(popup,"assignMarginsAndBackgrounds",popup);}catch(Throwable noReshape){}
+            LauncherFeatures.logOnce("Home menu: Apps list row removed",null);
+        }
     }
-    private static void watchPosition(final android.view.ViewGroup popup){
-        if(Xp.getAdditionalInstanceField(popup,"pixelsuite_home_position")!=null)return;
-        Xp.setAdditionalInstanceField(popup,"pixelsuite_home_position",Boolean.TRUE);
-        popup.addOnLayoutChangeListener(new View.OnLayoutChangeListener(){
-            public void onLayoutChange(View v,int l,int t,int r,int b,int ol,int ot,int or,int ob){
-                try{if(homePopup(popup))position(popup,false);}catch(Throwable error){LauncherFeatures.logOnce("Home menu position unavailable",error);}
-            }
-        });
-    }
-    private static void position(android.view.ViewGroup popup,boolean beforeLayout){
-        if(!(popup.getParent() instanceof View))return;
-        View layer=(View)popup.getParent();
-        android.graphics.RectF target=(android.graphics.RectF)LauncherFeatures.get(popup,"mTargetRect");
-        int height=popup.getMeasuredHeight();if(target==null||height<=0||layer.getHeight()<=0)return;
-        android.graphics.Rect frame=new android.graphics.Rect();layer.getWindowVisibleDisplayFrame(frame);
-        int[] origin=new int[2];layer.getLocationOnScreen(origin);
-        int gap=Math.round(8*popup.getResources().getDisplayMetrics().density);
-        int safeTop=Math.max(0,frame.top-origin[1])+gap;
-        int safeBottom=Math.min(layer.getHeight(),frame.bottom-origin[1])-gap;
-        if(safeBottom<=safeTop)return;
-        int y=HomeMenuPlacement.top(Math.round(target.top),height,safeTop,safeBottom,gap);
-        // Stock may choose below/center when the full menu cannot fit above the hold. Replace only that position;
-        // backgrounds, rows, scales, alpha, timings and native open/close animators stay with the launcher.
-        int gravity=((Number)LauncherFeatures.get(popup,"mGravity")).intValue();
-        LauncherFeatures.set(popup,"mGravity",gravity&~android.view.Gravity.VERTICAL_GRAVITY_MASK);
-        LauncherFeatures.set(popup,"mIsAboveIcon",true);
-        if(beforeLayout&&popup.getLayoutParams() instanceof android.widget.FrameLayout.LayoutParams){
-            android.widget.FrameLayout.LayoutParams lp=(android.widget.FrameLayout.LayoutParams)popup.getLayoutParams();
-            lp.gravity=(lp.gravity&~android.view.Gravity.VERTICAL_GRAVITY_MASK)|android.view.Gravity.TOP;
-            lp.topMargin=y;lp.bottomMargin=0;popup.setTranslationY(0f);
-        }else if(Math.abs(popup.getY()-y)>.5f)popup.setY(y);
-    }
+
     static Object newOption(){
         Class<?> type=LauncherFeatures.type("views.OptionsPopupView$OptionItem");
         try{return Xp.newInstance(type);}catch(Throwable constructorRemoved){
@@ -151,6 +174,13 @@ final class HomeOptions {
     static List<?> withSettings(List<?> items) {
         Activity a = LauncherFeatures.activity.get();
         if (a == null || items == null || items.isEmpty()) return items;
+        boolean homeMenu=false; for(Object item:items)if(item!=null&&isHomeSettings(item,a)){homeMenu=true;break;}
+        if(!homeMenu)return items;
+        // The stock "Apps list" row is left out (see removeAppsList).
+        CharSequence apps = appsListLabel(a);
+        ArrayList<Object> kept = new ArrayList<Object>();
+        for (Object item : items) { CharSequence l = item == null ? "" : label(item); if (!(apps.toString().contentEquals(l) || "Apps list".contentEquals(l))) kept.add(item); }
+        if (kept.size() != items.size()) { items = kept; LauncherFeatures.logOnce("Home menu: Apps list row removed", null); }
         int home = -1;
         for (int i = 0; i < items.size(); i++) {
             Object item = items.get(i);

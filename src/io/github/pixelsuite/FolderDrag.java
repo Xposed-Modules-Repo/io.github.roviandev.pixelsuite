@@ -139,7 +139,7 @@ final class FolderDrag {
     private static Object drawerList(Activity a) {
         if (DrawerDrag.fromFolder()) return null;   // apps held from a drawer folder: the drawer behind it stays put
         boolean drawer = DrawerDrag.active();
-        if (!drawer) try { drawer = call(call(a, "getStateManager"), "getState") == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
+        if (!drawer) try { drawer = LauncherFeatures.launcherState(call(a, "getStateManager")) == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
         if (!drawer) return null;
         try { return call(call(a, "getAppsView"), "getActiveRecyclerView"); } catch (Throwable error) { return null; }
     }
@@ -184,7 +184,7 @@ final class FolderDrag {
             return;
         }
         boolean drawer = DrawerDrag.active();
-        if (!drawer) try { drawer = call(call(a, "getStateManager"), "getState") == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
+        if (!drawer) try { drawer = LauncherFeatures.launcherState(call(a, "getStateManager")) == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
         if (drawer) {
             // preview65: holding apps that came out of a drawer folder, a second-finger swipe must not scroll the
             // drawer behind the open folder (a second-finger tap still picks apps).

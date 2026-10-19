@@ -1,14 +1,8 @@
 package io.github.pixelsuite;
 
 import android.app.Activity;
-import android.content.Context;
-import android.graphics.Rect;
-import android.graphics.drawable.ColorDrawable;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.LinearLayout;
-import android.widget.PopupWindow;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -26,7 +20,6 @@ import java.util.Map;
  */
 final class FolderSort {
     static final int CUSTOM = 0, AUTO = 1;
-    private static PopupWindow open;
 
     private FolderSort() {}
 
@@ -137,7 +130,7 @@ final class FolderSort {
         final android.widget.EditText edit = new android.widget.EditText(a); edit.setSingleLine(true);
         try { edit.setText((CharSequence) LauncherFeatures.get(info, "title")); } catch (Throwable ignored) { }
         edit.selectAll();
-        edit.setPadding(FrostedSurface.dp(a, 24), FrostedSurface.dp(a, 16), FrostedSurface.dp(a, 24), FrostedSurface.dp(a, 16));
+        edit.setPadding(FrostedSurface.dp(a, 20), FrostedSurface.dp(a, 10), FrostedSurface.dp(a, 20), FrostedSurface.dp(a, 10)); edit.setTextSize(16);
         final android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(a).setTitle("Rename folder").setView(edit)
                 .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create();
         FrostedSurface.show(dialog);
@@ -156,39 +149,5 @@ final class FolderSort {
                 }
             }
         });
-    }
-
-    /** Sort choices for a home folder, opened from the folder's long-press menu. */
-    static void showHomeMenu(final Object info) {
-        dismiss();
-        final View icon = findFolderIcon(info); if (icon == null) return;
-        final Context c = icon.getContext();
-        LinearLayout card = new LinearLayout(c); card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(0, FrostedSurface.dp(c, 6), 0, FrostedSurface.dp(c, 6));
-        final PopupWindow window = new PopupWindow(card, FrostedSurface.dp(c, 180), -2, true);
-        card.setBackground(FrostedSurface.windowDrawable(c, 20)); card.setClipToOutline(true);
-        window.setBackgroundDrawable(new ColorDrawable(0)); window.setOutsideTouchable(true);
-        window.setElevation(FrostedSurface.dp(c, 8));
-        int mode = homeMode(info);
-        FolderOptions.row(card, "Auto (A–Z)", 13, mode == AUTO, new Runnable() { public void run() {
-            dismiss(); if (homeMode(info) == AUTO) return;
-            DrawerFolderMenu.confirm("Sort apps?", "Sort the apps in this folder from A to Z?", new Runnable() { public void run() { sortHome(info); } });
-        }});
-        FolderOptions.row(card, "Custom", 14, mode == CUSTOM, new Runnable() { public void run() { dismiss(); setHomeMode(info, CUSTOM); } });
-        Rect r = new Rect(); if (!icon.getGlobalVisibleRect(r)) return;
-        Rect frame = new Rect(); icon.getWindowVisibleDisplayFrame(frame);
-        int w = FrostedSurface.dp(c, 180), h = FrostedSurface.dp(c, 12 + 96), m = FrostedSurface.dp(c, 12);
-        int left = Math.max(frame.left + m, Math.min(r.centerX() - w / 2, frame.right - w - m));
-        int top = r.bottom + FrostedSurface.dp(c, 6);
-        if (top + h > frame.bottom - m) top = Math.max(frame.top + m, r.top - FrostedSurface.dp(c, 6) - h);
-        window.setWidth(w); window.setHeight(h);
-        window.showAtLocation(icon.getRootView(), Gravity.TOP | Gravity.LEFT, left, top);
-        FrostedSurface.popupWindow(card, 20);
-        open = window;
-    }
-
-    static void dismiss() {
-        PopupWindow w = open; open = null;
-        if (w != null) try { w.dismiss(); } catch (Throwable ignored) { }
     }
 }

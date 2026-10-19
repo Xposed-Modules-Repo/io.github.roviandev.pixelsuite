@@ -83,10 +83,10 @@ final class SuperDark {
         } catch (Throwable t) { Module.log("SuperDark: ScrimView unavailable (" + t + ")"); }
         // The lock screen PIN/pattern background (#2D303B) does not come from any system colour (preview92: still grey
         // after a boot with Super Dark from the first second, and after the scrim tint went black). It is painted
-        // directly, so the stock panel greys are caught where System UI paints: only these exact colours, any alpha.
+        // directly, so the stock panel greys are caught where System UI sets them on its views: only these exact colours, any alpha.
         int n2 = 0;
-        n2 += hookPanel(android.graphics.Paint.class, "setColor");
-        n2 += hookPanel(android.graphics.Canvas.class, "drawColor");
+        // Not Paint.setColor / Canvas.drawColor: they run for everything System UI draws (status bar, shade frames), and
+        // the logs show the lock screen colour always arrives through View.setBackgroundColor.
         n2 += hookPanel(android.graphics.drawable.ColorDrawable.class, "setColor");
         n2 += hookPanel(android.graphics.drawable.GradientDrawable.class, "setColor");
         n2 += hookPanel(android.view.View.class, "setBackgroundColor");
@@ -310,7 +310,7 @@ final class SuperDark {
             case "surfacecontainer": return 0xff0b0b0b;
             case "surfacecontainerhigh": return 0xff121212;
             case "surfacecontainerhighest": return 0xff1a1a1a;
-            case "surfacebright": return 0xff222222;
+            case "surfacebright": return 0xff0e0e0e;   // System UI dialogs ("Active apps") sit on it
             case "surfacevariant": return 0xff161616;
             // Android 16+/17 frosted surfaces: the app drawer, folders, quick settings, notifications and the shade are
             // drawn with these "effect" colours over a blur (preview83 log: the plain surfaces changed but these screens

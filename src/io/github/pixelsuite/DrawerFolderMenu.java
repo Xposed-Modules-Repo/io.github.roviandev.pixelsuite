@@ -95,7 +95,7 @@ final class DrawerFolderMenu {
         final LauncherData.Folder f = DrawerFolders.record(info); final Activity a = LauncherFeatures.activity.get();
         if (f == null || a == null) return;
         final EditText edit = new EditText(a); edit.setSingleLine(true); edit.setText(f.name); edit.selectAll();
-        edit.setPadding(FrostedSurface.dp(a, 24), FrostedSurface.dp(a, 16), FrostedSurface.dp(a, 24), FrostedSurface.dp(a, 16));
+        edit.setPadding(FrostedSurface.dp(a, 20), FrostedSurface.dp(a, 10), FrostedSurface.dp(a, 20), FrostedSurface.dp(a, 10)); edit.setTextSize(16);
         final AlertDialog dialog = new AlertDialog.Builder(a).setTitle("Rename folder").setView(edit)
                 .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create();
         FrostedSurface.show(dialog);

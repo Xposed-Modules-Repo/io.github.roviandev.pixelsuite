@@ -128,11 +128,11 @@ final class LauncherFeatures {
             installGrid();
             installBackdropDrawing();
             DrawerFolders.install();
-            DrawerDrag.install();DrawerHomeTarget.install();FolderDrag.install();ScatterEffect.install();MultiDrag.install();ShapeWatch.install();
+            DrawerDrag.install();DrawerHomeTarget.install();FolderDrag.install();installFolderDropSettle();ScatterEffect.install();MultiDrag.install();ShapeWatch.install();
             ThemeFolderRestore.install();
             installMenus();
             try{HomeOptions.install();}catch(Throwable error){Module.log("Pixel Suite settings row unavailable",error);}
-            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.2)");
+            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.3)");
         } catch (Throwable error) { Module.log("Launcher customization unavailable", error); }
     }
     static Class<?> type(String name) { return Xp.findClass(ROOT + name, loader); }
@@ -154,22 +154,6 @@ final class LauncherFeatures {
             }
             protected void afterHookedMethod(Xp.Param p){if(dragLayerClass.isInstance(p.thisObject))BackdropSurface.afterDrawChild((android.graphics.Canvas)p.args[0]);}
         });
-    }
-    static String lastHomeIcons;
-    /** Diagnostic for the reported home-icon enlargement: logs the home icon size when it changes. */
-    static void logHomeIcons(String when){
-        try{
-            Activity a=activity.get();if(a==null)return;
-            View workspace=(View)get(a,"mWorkspace");TextView icon=firstIcon(workspace);
-            Object size=null;try{size=get(call(a,"getDeviceProfile"),"iconSizePx");}catch(Throwable ignored){}
-            String now=(icon==null?"no icon":get(icon,"mIconSize")+"px icon in "+icon.getWidth()+"x"+icon.getHeight()+" cell")+", profile iconSizePx="+size+", workspace scale="+workspace.getScaleX();
-            if(!now.equals(lastHomeIcons)){lastHomeIcons=now;Module.log("Home icons "+when+": "+now);}
-        }catch(Throwable ignored){}
-    }
-    static TextView firstIcon(View v){
-        if(type("BubbleTextView").isInstance(v)&&v.getWidth()>0)return (TextView)v;
-        if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++){TextView t=firstIcon(g.getChildAt(i));if(t!=null)return t;}}
-        return null;
     }
     static Object get(Object o, String name) { return Xp.getObjectField(o, name); }
     static void set(Object o, String name, Object v) { Xp.setObjectField(o, name, v); }
@@ -215,7 +199,6 @@ final class LauncherFeatures {
         for (Object app : array) if (!privateItem(app)) { label(app); list.add(app); }
         return list;
     }
-    /** How many times the drawer was refreshed (preview80: DrawerDrag skips a second refresh at the end of a drag). */
     static volatile int refreshes;
     static void refresh() {
         Activity a = activity.get(); if (a == null) return;
@@ -388,7 +371,7 @@ final class LauncherFeatures {
             });
         }
         Xp.hookAllMethods(type("folder.Folder"), "animateOpen", new Xp.Callback() {
-            protected void beforeHookedMethod(Xp.Param p) { logHomeIcons("before a folder opens");styleFolder(p.thisObject);attachFolderMenu(p.thisObject);if(gridFor(get(p.thisObject,"mInfo"))>0)((View)get(p.thisObject,"mFolderName")).setVisibility(View.VISIBLE); }
+            protected void beforeHookedMethod(Xp.Param p) { styleFolder(p.thisObject);attachFolderMenu(p.thisObject);if(gridFor(get(p.thisObject,"mInfo"))>0)((View)get(p.thisObject,"mFolderName")).setVisibility(View.VISIBLE); }
         });
         for(Method method:type("folder.Folder").getDeclaredMethods())if(method.getName().equals("onSizeChanged"))Xp.x().hook(method).intercept(new XposedInterface.Hooker(){public Object intercept(XposedInterface.Chain chain)throws Throwable{
             View folder=(View)chain.getThisObject();View footer=(View)get(folder,"mFooter");
@@ -400,7 +383,6 @@ final class LauncherFeatures {
         Xp.hookAllMethods(android.content.res.Resources.class,"getDimensionPixelSize",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){int[] minimum=folderTitleMinimum.get();if(minimum!=null&&minimum[0]!=0&&((Number)p.args[0]).intValue()==minimum[0])p.setResult(minimum[1]);}});
         Xp.hookAllMethods(type("folder.Folder"), "closeComplete", new Xp.Callback() {
             protected void afterHookedMethod(Xp.Param p) {
-                logHomeIcons("after a folder closed");
                 // A drawer folder hidden for the end of its close (DrawerFolders.closeDrawerFolder) is visible again for its next open.
                 if(Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_hidden_close"))){Xp.setAdditionalInstanceField(p.thisObject,"pixelsuite_hidden_close",false);((View)p.thisObject).setAlpha(1f);}
                 Object task=Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_after_close");
@@ -450,7 +432,16 @@ final class LauncherFeatures {
                 public Object intercept(XposedInterface.Chain chain) throws Throwable {
                     int n = gridFor(get(get(chain.getThisObject(), "folder"), "mInfo"));
                     if (n == 4 || n == 5) {
-                        try { View opening = (View) get(chain.getThisObject(), "folder"); if (isOpening(chain, opening)) alignAboveDock(opening); }
+                        // Closing too: moving icons inside the folder can put the stock position back (preview107/108 video:
+                        // the folder jumped as it began to close), so the close starts from the same place the folder opened.
+                        try {
+                            View opening = (View) get(chain.getThisObject(), "folder");
+                            boolean open = isOpening(chain, opening);
+                            alignAboveDock(opening);
+                            if (!open) {
+                                settleBeforeClose(opening);
+                            }
+                        }
                         catch (Throwable error) { logOnce("Folder dock alignment unavailable", error); }
                     }
                     // Both ends of the stock color animation must be the colors the module draws:
@@ -486,18 +477,11 @@ final class LauncherFeatures {
             Object delegate=get(p.thisObject,"mInvalidateDelegate");
             if(delegate instanceof View&&styledPreview(((View)delegate).getTag()))p.setResult(FrostedSurface.closedFolderColor(((View)delegate).getContext()));
         }});
-        // Diagnostic: measured size of fitted folders (once per grid and size).
-        Xp.hookAllMethods(type("folder.Folder"),"onMeasure",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
-            View folder=(View)p.thisObject;int n=gridFor(get(folder,"mInfo"));if(n<4)return;
-            String line=n+"x"+n+" folder measured "+folder.getMeasuredWidth()+"x"+folder.getMeasuredHeight()+" in a "+folder.getResources().getDisplayMetrics().widthPixels+"x"+folder.getResources().getDisplayMetrics().heightPixels+" display ("+lastChrome+")";
-            if(!line.equals(lastFolderMeasure)){lastFolderMeasure=line;Module.log(line);}
-        }});
         // 4x4 and 5x5 folders sit with their bottom edge on the owner's red line near the dock (see alignAboveDock).
         if(Xp.hookAllMethods(type("folder.Folder"),"centerAboutIcon",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
             try{alignAboveDock((View)p.thisObject);}catch(Throwable error){logOnce("Folder dock alignment unavailable",error);}
         }}).isEmpty())Module.log("Folder.centerAboutIcon not found: 4x4 folders are placed from the open animation instead");
     }
-    static String lastChrome="";
     static final java.util.Set<String> loggedOnce=java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
     static void logOnce(String message,Throwable error){if(!loggedOnce.add(message))return;if(error==null)Module.log(message);else Module.log(message,error);}
     /** Gap between an open 4x4 folder's bottom edge and the top of the dock icons (the owner's second red line). */
@@ -536,15 +520,99 @@ final class LauncherFeatures {
         int left=((Number)get(params,"x")).intValue();
         int across=drag.getWidth()-insets.left-insets.right;
         int targetLeft=grid==4&&width>0&&across>=width?insets.left+(across-width)/2:left;
-        String note=grid+"x"+grid+" folder placed: top "+top+" -> "+target+", left "+left+" -> "+targetLeft+", size "+width+"x"+height+", dock icons at "+dock[0]+", line "+line;
-        if(!note.equals(lastPlacement)){lastPlacement=note;Module.log(note);}
         boolean moveY=target>=insets.top+dp(a,8)&&target!=top,moveX=targetLeft!=left;
         if(!moveX&&!moveY)return;
         if(moveY){set(params,"y",target);folder.setPivotY(folder.getPivotY()-(target-top));}
         if(moveX){set(params,"x",targetLeft);folder.setPivotX(folder.getPivotX()-(targetLeft-left));}
         folder.requestLayout();
     }
-    static String lastPlacement;
+
+    /**
+     * preview109 video: after an app was moved inside a folder, the folder shook as it closed. Home: the drop leaves the
+     * launcher in its drag ("spring loaded") state and the stock code returns to normal only 500 ms later, so a close
+     * right after the drop shrank the folder into an icon that was itself still sliding and growing back with the
+     * home page. Drawer: the folder's pages could still be sliding. Before the close animation is built, the home page
+     * is put back to normal at once and the folder's page settles where it is going.
+     */
+    static void settleBeforeClose(View folder) {
+        try {
+            Object content = get(folder, "mContent");
+            try { call(content, "completePendingPageChanges"); } catch (Throwable ignored) { }
+            try { call(content, "snapToPageImmediately", ((Number) call(content, "getDestinationPage")).intValue()); } catch (Throwable ignored) { }
+        } catch (Throwable ignored) { }
+        if (DrawerFolders.drawerFolderView(folder)) return;   // the drawer keeps its own state
+        settleHomePage("close");
+    }
+
+    /**
+     * The launcher's current state. Pixel Launcher 17 has no StateManager.getState() (preview112 log: NoSuchMethodException,
+     * so every earlier settle attempt did nothing); its field holding the state is read instead.
+     */
+    static Object launcherState(Object manager) {
+        try { return get(manager, "mState"); } catch (Throwable renamed) { }
+        try { return call(manager, "getState"); } catch (Throwable renamed) { }
+        try {
+            Class<?> state = type("LauncherState");
+            for (java.lang.reflect.Field f : manager.getClass().getDeclaredFields()) {
+                f.setAccessible(true);
+                Object v = f.get(manager);
+                if (state.isInstance(v)) { logOnce("Launcher state read from StateManager." + f.getName(), null); return v; }
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
+    /**
+     * Puts the home page back to normal at once when it is still (or again) in drag mode or on its way back. In the
+     * preview112 video the page stayed shrunk behind the open folder after the drop and only grew back when the folder
+     * closed, so the folder shrank into an icon that was moving. Done right after a drop inside a home folder (the page
+     * is behind the open folder then) and again as a home folder starts closing. goToState(NORMAL, false) ends a
+     * running transition and applies the normal state; it is skipped in any other state (edit mode, overview).
+     */
+    static void settleHomePage(String when) {
+        try {
+            Activity a = activity.get(); if (a == null) return;
+            Object manager = call(a, "getStateManager"), state = launcherState(manager);
+            Object normal = type("LauncherState").getField("NORMAL").get(null), spring = type("LauncherState").getField("SPRING_LOADED").get(null);
+            if (state == normal || state == spring) call(manager, "goToState", normal, false);
+        } catch (Throwable error) { logOnce("Folder: home page settle unavailable", error); }
+    }
+
+    /** Set while a folder handles a drop on itself: its "back to normal in 500 ms" becomes "now" (see settleBeforeClose). */
+    static final ThreadLocal<Boolean> folderDrop = new ThreadLocal<Boolean>();
+    /** The folder of the drop in progress is a drawer folder (see installFolderDropSettle). */
+    static final ThreadLocal<Boolean> drawerDrop = new ThreadLocal<Boolean>();
+    static void installFolderDropSettle() {
+        try {
+            int drops = Xp.hookAllMethods(type("folder.Folder"), "onDrop", new Xp.Callback() {
+                protected void beforeHookedMethod(Xp.Param p) {
+                    folderDrop.set(Boolean.TRUE);
+                    if (DrawerFolders.drawerFolderView((View) p.thisObject)) drawerDrop.set(Boolean.TRUE);
+                }
+                protected void afterHookedMethod(Xp.Param p) {
+                    boolean drawer = drawerDrop.get() != null;
+                    folderDrop.remove(); drawerDrop.remove();
+                    if (!drawer) new Handler(Looper.getMainLooper()).post(new Runnable() { public void run() { settleHomePage("drop"); } });
+                }
+            }).size();
+            int states = Xp.hookAllMethods(type("statemanager.StateManager"), "goToState", new Xp.Callback() {
+                protected void beforeHookedMethod(Xp.Param p) {
+                    if (folderDrop.get() == null || p.args.length < 1) return;
+                    try {
+                        if (p.args[0] != type("LauncherState").getField("NORMAL").get(null)) return;
+                        // preview110 video: a drop inside a drawer folder sent the launcher to the home screen half a second
+                        // later (stock "back to normal after a drop"), and back to the drawer: the drawer jumped behind the
+                        // folder. A drop inside a drawer folder stays in the drawer.
+                        if (drawerDrop.get() != null) { p.setResult(null); return; }
+                        // Home: back to normal now instead of in 500 ms, so the page has settled before the folder closes.
+                        if (p.args.length >= 2 && p.args[1] instanceof Long) p.args[1] = 0L;
+                        else if (p.args.length >= 2 && p.args[1] instanceof Integer) p.args[1] = 0;
+                    } catch (Throwable ignored) { }
+                }
+            }).size();
+            Module.log("Folder drop settle: " + drops + " drop hooks, " + states + " state hooks");
+        } catch (Throwable error) { logOnce("Folder drop settle unavailable", error); }
+    }
     /** The animation being built opens the folder: its boolean argument if it has one, else the folder's open flag. */
     static boolean isOpening(XposedInterface.Chain chain,View folder){
         List<Object> args=chain.getArgs();
@@ -594,7 +662,6 @@ final class LauncherFeatures {
         }
         return current==ancestor?y:Integer.MIN_VALUE;
     }
-    static String lastFolderMeasure;
     /** Same rule as the PreviewBackground.drawBackground hook: which closed folders use the module's color. */
     static boolean styledPreview(Object info){return info!=null&&(DrawerFolders.isFolder(info)||on(GRID));}
     static void decorateAnimator(Object result,final XposedInterface.Chain chain){
@@ -836,8 +903,6 @@ final class LauncherFeatures {
             // After the cell width was worked out with the stock spacing (see FOLDER_4X4_COLUMN_GAP).
             border.x=Math.round(border.x*FOLDER_4X4_COLUMN_GAP);
         }
-        lastChrome = "label lines " + labelLines + ", cell " + cellWidth + "x" + cellHeight + ", spacing " + border.x + ", chrome " + chrome
-                + ", margin " + margin + ", icon " + icon + " (preview33 " + preview33 + ", target " + target + ")";
         return Xp.newInstance(old.getClass(), get(old,"labelTextSizePx"), icon,
                 text, labelLines,
                 fittedPadding, new Point(border), pad, get(old,"contentPaddingTop"),
@@ -966,9 +1031,63 @@ final class LauncherFeatures {
         addFolderRow(rows, "Rename", "pixelsuite_folder_rename", 1, 0, new View.OnClickListener() {
             public void onClick(View v) { call(popup, "close", true); FolderSort.homeRename(info); }
         });
+        final ViewGroup list = rows;
         addFolderRow(rows, "Sort", "pixelsuite_folder_sort", 9, 1, new View.OnClickListener() {
-            public void onClick(View v) { call(popup, "close", true); FolderSort.showHomeMenu(info); }
+            public void onClick(View v) { toggleHomeSort(popup, list, v, info); }
         });
+    }
+
+    /**
+     * Home folder Sort, the drawer folder way: Auto (A–Z) and Custom fold open right under Sort inside the same menu
+     * (its arrow turns up), instead of the menu closing and a second one appearing lower down. Rows are the launcher's
+     * own menu rows, so they follow light and dark theme like the rest of the menu; the launcher keeps the menu anchored
+     * to the folder as it grows (an extra shift of ours moved it twice as far, away from the folder).
+     */
+    static void toggleHomeSort(final Object popup, final ViewGroup rows, final View sortRow, final Object info) {
+        final Context c = rows.getContext();
+        View auto = rows.findViewWithTag("pixelsuite_folder_sort_auto"), custom = rows.findViewWithTag("pixelsuite_folder_sort_custom");
+        if (auto == null) {
+            int mode = FolderSort.homeMode(info), at = rows.indexOfChild(sortRow) + 1;
+            addFolderRow(rows, "Auto (A\u2013Z)", "pixelsuite_folder_sort_auto", 13, at, new View.OnClickListener() {
+                public void onClick(View v) {
+                    call(popup, "close", true); if (FolderSort.homeMode(info) == FolderSort.AUTO) return;
+                    DrawerFolderMenu.confirm("Sort apps?", "Sort the apps in this folder from A to Z?", new Runnable() { public void run() { FolderSort.sortHome(info); } });
+                }
+            });
+            addFolderRow(rows, "Custom", "pixelsuite_folder_sort_custom", 14, at + 1, new View.OnClickListener() {
+                public void onClick(View v) { call(popup, "close", true); FolderSort.setHomeMode(info, FolderSort.CUSTOM); }
+            });
+            auto = rows.findViewWithTag("pixelsuite_folder_sort_auto"); custom = rows.findViewWithTag("pixelsuite_folder_sort_custom");
+            for (View r : new View[] {auto, custom}) {
+                boolean checked = (r == auto) == (mode == FolderSort.AUTO);
+                TextView label = (TextView) get(r, "mBubbleText");
+                if (checked) { label.setText(label.getText() + "   \u2713"); r.setContentDescription(label.getText() + ", selected"); }
+                r.setPadding(r.getPaddingLeft() + FrostedSurface.dp(c, 14), r.getPaddingTop(), r.getPaddingRight(), r.getPaddingBottom());   // indented under Sort
+                r.getLayoutParams().height = 0; r.setAlpha(0f);
+                // The other rows lost their own backgrounds to the menu's single panel (FrostedSurface.popup); these new
+                // rows must too, or they show as a lighter band across the middle of the menu.
+                if (Xp.getAdditionalInstanceField(popup, "pixelsuite_panel") != null) FrostedSurface.clearRow(r);
+            }
+        }
+        final View[] choices = {auto, custom};
+        Object open = Xp.getAdditionalInstanceField(rows, "pixelsuite_sort_open");
+        final boolean opening = !Boolean.TRUE.equals(open);
+        Xp.setAdditionalInstanceField(rows, "pixelsuite_sort_open", opening);
+        try { ((LauncherGlyph) ((View) get(sortRow, "mIconView")).getBackground()).flip(opening); } catch (Throwable ignored) { }
+        final int full = sortRow.getHeight() > 0 ? sortRow.getHeight() : FrostedSurface.dp(c, 48);
+        float from = choices[0].getLayoutParams().height / (float) full;
+        android.animation.ValueAnimator anim = android.animation.ValueAnimator.ofFloat(from, opening ? 1f : 0f);
+        anim.setDuration(opening ? 260 : 200); anim.setInterpolator(new android.view.animation.PathInterpolator(.2f, 0f, 0f, 1f));
+        anim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() { public void onAnimationUpdate(android.animation.ValueAnimator va) {
+            float t = (Float) va.getAnimatedValue(); int added = 0;
+            for (int i = 0; i < 2; i++) {
+                View r = choices[i]; int h = Math.max(0, Math.round(full * t)); r.getLayoutParams().height = h; added += h;
+                float shown = Math.max(0f, Math.min(1f, (t - .15f * i) / (1f - .15f * i)));
+                r.setAlpha(shown); r.setTranslationY(-FrostedSurface.dp(c, 6) * (1f - shown));
+            }
+            rows.requestLayout();
+        }});
+        anim.start();
     }
     static void addFolderRow(ViewGroup rows, String title, String tag, int glyph, int index, View.OnClickListener listener) {
         Context context = rows.getContext();

@@ -57,10 +57,11 @@ public class Module extends XposedModule {
             ClearAll.installLauncher(cl);
             LauncherFeatures.install(cl);
             SuperDarkApps.installLauncher(cl);
+            SuperDarkApps.installLauncherSettings(cl);
         } else if (FILES.equals(pkg)) {
             FilesSort.install(cl);
         } else if (ScreenshotEditor.PACKAGE.equals(pkg)) {
-            ScreenshotEditor.install(cl);
+            ScreenshotEditor.install(cl, param.getApplicationInfo());
         } else if (DocumentsSort.GOOGLE.equals(pkg) || DocumentsSort.AOSP.equals(pkg)) {
             DocumentsSort.install(cl);
         } else if (AliasProvider.GOOGLE.equals(pkg)) {

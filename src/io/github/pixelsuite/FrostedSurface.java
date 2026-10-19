@@ -83,7 +83,7 @@ final class FrostedSurface {
     static AlertDialog show(AlertDialog.Builder builder){return show(builder.create());}
     static AlertDialog show(AlertDialog dialog){
         dialog.setCancelable(true);dialog.setCanceledOnTouchOutside(true);
-        dialog.show();style(dialog);track(dialog);return dialog;
+        dialog.show();compact(dialog);style(dialog);track(dialog);return dialog;
     }
     /**
      * Module dialogs (Add apps, Rename, Change icon, folder prompts) must leave with the usual
@@ -140,23 +140,52 @@ final class FrostedSurface {
      * (the dialog's content view, a child view like the dropdown's) carries the blur and the tint,
      * with rounded corners. Logs "Dialog blur: bounds=…" like the dropdown.
      */
+    /**
+     * Module prompts (Rename, Remove folder?, Sort apps?, Add apps...) sized like a compact menu card instead of a
+     * full-width dialog: at most 340dp wide, smaller title and text, tighter padding and shorter buttons. Text colours
+     * stay the theme's own, so it reads the same in light, dark and Super Dark-Mode.
+     */
+    static void compact(AlertDialog dialog){
+        try{
+            Window window=dialog.getWindow();if(window==null)return;Context c=dialog.getContext();
+            int screen=c.getResources().getDisplayMetrics().widthPixels;
+            window.setLayout(Math.min(screen-dp(c,48),dp(c,340)),ViewGroup.LayoutParams.WRAP_CONTENT);
+            View root=window.getDecorView();
+            android.widget.TextView title=(android.widget.TextView)find(root,"alertTitle");
+            if(title!=null){title.setTextSize(18);}
+            View top=find(root,"topPanel");if(top!=null)top.setPadding(top.getPaddingLeft(),dp(c,4),top.getPaddingRight(),0);
+            View titleTemplate=find(root,"title_template");if(titleTemplate!=null)titleTemplate.setPadding(dp(c,20),dp(c,18),dp(c,20),dp(c,4));
+            android.widget.TextView message=(android.widget.TextView)find(root,"message");
+            if(message!=null){message.setTextSize(14);message.setPadding(dp(c,20),dp(c,4),dp(c,20),dp(c,8));}
+            View scroll=find(root,"scrollView");if(scroll!=null)scroll.setPadding(0,0,0,0);
+            View custom=find(root,"custom");if(custom!=null)custom.setPadding(dp(c,4),0,dp(c,4),0);
+            View buttons=find(root,"buttonPanel");if(buttons!=null)buttons.setPadding(dp(c,12),0,dp(c,12),dp(c,8));
+            for(int which:new int[]{AlertDialog.BUTTON_POSITIVE,AlertDialog.BUTTON_NEGATIVE,AlertDialog.BUTTON_NEUTRAL}){
+                android.widget.Button b=dialog.getButton(which);if(b==null)continue;
+                b.setTextSize(14);b.setMinHeight(dp(c,40));b.setMinimumHeight(dp(c,40));b.setPadding(dp(c,14),0,dp(c,14),0);
+            }
+        }catch(Throwable error){SuiteLog.log("Compact dialog unavailable",error);}
+    }
+    private static View find(View root,String name){int id=root.getResources().getIdentifier(name,"id","android");return id==0?null:root.findViewById(id);}
     static void style(AlertDialog dialog){
         Window window=dialog.getWindow();if(window==null)return;Context c=dialog.getContext();window.setDimAmount(dark(c)?.18f:.10f);
         View panel=window.getDecorView().findViewById(android.R.id.content);
-        if(!blurEnabled(c)||panel==null){window.setBackgroundDrawable(solidMenu(c,28));return;}
+        if(!blurEnabled(c)||panel==null){window.setBackgroundDrawable(solidMenu(c,24));return;}
         window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-        final float corners=dp(c,28);
+        final float corners=dp(c,24);
         panel.setOutlineProvider(new android.view.ViewOutlineProvider(){public void getOutline(View v,android.graphics.Outline outline){outline.setRoundRect(0,0,v.getWidth(),v.getHeight(),corners);}});
         panel.setClipToOutline(true);
-        frost(panel,28,"Dialog");
+        frost(panel,24,"Dialog");
     }
     static void popup(ViewGroup popup){
         if(!LauncherFeatures.frosted()&&!(dark(popup.getContext())&&Feature.on(popup.getContext(),SuperDark.KEY)))return;
         if(!blurEnabled(popup.getContext()))popup.setBackground(solidMenu(popup.getContext(),24));
         else{BackdropSurface background=new BackdropSurface(popup.getContext(),24);background.bind(popup);popup.setBackground(background);}
-        clearRows(popup,LauncherFeatures.get(popup,"mIterateChildrenTag"));
+        clearRows(popup,LauncherFeatures.get(popup,"mIterateChildrenTag"));Xp.setAdditionalInstanceField(popup,"pixelsuite_panel",Boolean.TRUE);
         try{View arrow=(View)LauncherFeatures.get(popup,"mArrow");if(arrow.getBackground()!=null)arrow.getBackground().setColorFilter(colors(popup.getContext())[0],PorterDuff.Mode.SRC_IN);}catch(Throwable ignored){}
     }
+    /** One menu row without its own background (the ripple's mask stays, so touch feedback still works). */
+    static void clearRow(View view){Drawable d=view.getBackground();if(d instanceof RippleDrawable){RippleDrawable r=(RippleDrawable)d;for(int j=0;j<r.getNumberOfLayers();j++)if(r.getId(j)!=android.R.id.mask)r.getDrawable(j).setAlpha(0);}else if(d!=null)d.setAlpha(0);}
     static void clearRows(ViewGroup parent,Object wrapperTag){
         for(int i=0;i<parent.getChildCount();i++){
             View view=parent.getChildAt(i);

@@ -35,14 +35,54 @@ final class DrawerFolderAlignment {
         ((View)LauncherFeatures.get(icon,"mFolderName")).addOnLayoutChangeListener(listener);
     }
 
-    /** After the whole row has been laid out (neighbours to the right lay out after us). */
+    /**
+     * After the whole row has been laid out (neighbours to the right lay out after us), and before the next frame is
+     * drawn. preview114 video (slowed): a drawer folder whose apps were moved is rebuilt about 0.7 s after it closes,
+     * and the new icon was drawn for one frame with the stock preview (smaller and higher) and then one more frame with
+     * its name 21 px too high, before this alignment (then run from a posted task) caught up: the icon jumped twice.
+     * It now runs in the pre-draw pass that follows the layout, and when it changes anything that frame is skipped and
+     * drawn again aligned. The posted task stays as a fallback for a frame that never draws.
+     */
     static void schedule(final View icon){
         if(Boolean.TRUE.equals(Xp.getAdditionalInstanceField(icon,"pixelsuite_align_pending")))return;
         Xp.setAdditionalInstanceField(icon,"pixelsuite_align_pending",true);
+        final android.view.ViewTreeObserver.OnPreDrawListener[] hook=new android.view.ViewTreeObserver.OnPreDrawListener[1];
+        hook[0]=new android.view.ViewTreeObserver.OnPreDrawListener(){public boolean onPreDraw(){
+            try{android.view.ViewTreeObserver o=icon.getViewTreeObserver();if(o.isAlive())o.removeOnPreDrawListener(this);}catch(Throwable ignored){}
+            if(!Boolean.TRUE.equals(Xp.getAdditionalInstanceField(icon,"pixelsuite_align_pending")))return true;
+            Xp.setAdditionalInstanceField(icon,"pixelsuite_align_pending",false);
+            boolean changed=false;
+            try{changed=align(icon);}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder alignment unavailable",error);}
+            // Skip this frame once when something moved, so the stale picture is never shown; never twice in a row.
+            Object skipped=Xp.getAdditionalInstanceField(icon,"pixelsuite_align_skipped");
+            if(changed&&!Boolean.TRUE.equals(skipped)){Xp.setAdditionalInstanceField(icon,"pixelsuite_align_skipped",true);return false;}
+            Xp.setAdditionalInstanceField(icon,"pixelsuite_align_skipped",false);
+            return true;
+        }};
+        try{icon.getViewTreeObserver().addOnPreDrawListener(hook[0]);}catch(Throwable ignored){}
         icon.post(new Runnable(){public void run(){
+            try{android.view.ViewTreeObserver o=icon.getViewTreeObserver();if(o.isAlive())o.removeOnPreDrawListener(hook[0]);}catch(Throwable ignored){}
+            if(!Boolean.TRUE.equals(Xp.getAdditionalInstanceField(icon,"pixelsuite_align_pending")))return;
             Xp.setAdditionalInstanceField(icon,"pixelsuite_align_pending",false);
             try{align(icon);}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder alignment unavailable",error);}
         }});
+    }
+
+    /**
+     * A new icon placed in a cell starts from the alignment that cell last had (same drawer, same row geometry), so even
+     * its very first frame shows the preview and name where the aligned icon had them. {@link #align} corrects it right
+     * after if the row differs.
+     */
+    static void seed(View icon,FrameLayout frame){
+        Object last=Xp.getAdditionalInstanceField(frame,"pixelsuite_last_alignment");
+        if(!(last instanceof int[]))return;
+        int[] v=(int[])last;
+        if(!(Xp.getAdditionalInstanceField(icon,"pixelsuite_drawer_preview_size") instanceof Integer)){
+            Xp.setAdditionalInstanceField(icon,"pixelsuite_drawer_preview_size",v[0]);
+            Xp.setAdditionalInstanceField(icon,"pixelsuite_drawer_preview_top",v[1]);
+            try{Object manager=LauncherFeatures.get(icon,"mPreviewItemManager");LauncherFeatures.set(manager,"mTotalWidth",-1);}catch(Throwable ignored){}
+        }
+        try{View label=(View)LauncherFeatures.get(icon,"mFolderName");if(label.getTranslationY()==0&&v[2]!=0)label.setTranslationY(v[2]);}catch(Throwable ignored){}
     }
 
     static void install(){
@@ -93,28 +133,30 @@ final class DrawerFolderAlignment {
         return new int[]{sample.getPaddingTop(),size,sample.getBaseline()};
     }
 
-    static void align(View icon){
-        if(!(icon.getParent() instanceof FrameLayout))return;
+    /** Lines the icon up with its row; true when anything visible changed. */
+    static boolean align(View icon){
+        if(!(icon.getParent() instanceof FrameLayout))return false;
         FrameLayout frame=(FrameLayout)icon.getParent();
-        if(frame.getWidth()<=0||frame.getHeight()<=0)return;
-        int[] ref=reference(frame);if(ref==null)return;
+        if(frame.getWidth()<=0||frame.getHeight()<=0)return false;
+        int[] ref=reference(frame);if(ref==null)return false;
         int top=ref[0],size=ref[1],baseline=ref[2];
-        if(icon.getTranslationY()!=0)icon.setTranslationY(0);         // preview31 moved the whole FolderIcon
+        boolean changed=false;
+        if(icon.getTranslationY()!=0){icon.setTranslationY(0);changed=true;}         // preview31 moved the whole FolderIcon
         // Caption: the same type as the drawer's app labels (preview31's copy kept; real cell when present).
         TextView label=(TextView)LauncherFeatures.get(icon,"mFolderName");
         TextView style=styleSource(frame);
         if(style!=null){
-            if(Math.abs(label.getTextSize()-style.getTextSize())>.1f)label.setTextSize(0,style.getTextSize());
-            if(label.getTypeface()!=style.getTypeface())label.setTypeface(style.getTypeface());
-            if(label.getLetterSpacing()!=style.getLetterSpacing())label.setLetterSpacing(style.getLetterSpacing());
-            if(label.getIncludeFontPadding()!=style.getIncludeFontPadding())label.setIncludeFontPadding(style.getIncludeFontPadding());
-            if(label.getPaddingLeft()!=style.getPaddingLeft()||label.getPaddingRight()!=style.getPaddingRight())label.setPadding(style.getPaddingLeft(),label.getPaddingTop(),style.getPaddingRight(),label.getPaddingBottom());
+            if(Math.abs(label.getTextSize()-style.getTextSize())>.1f){label.setTextSize(0,style.getTextSize());changed=true;}
+            if(label.getTypeface()!=style.getTypeface()){label.setTypeface(style.getTypeface());changed=true;}
+            if(label.getLetterSpacing()!=style.getLetterSpacing()){label.setLetterSpacing(style.getLetterSpacing());changed=true;}
+            if(label.getIncludeFontPadding()!=style.getIncludeFontPadding()){label.setIncludeFontPadding(style.getIncludeFontPadding());changed=true;}
+            if(label.getPaddingLeft()!=style.getPaddingLeft()||label.getPaddingRight()!=style.getPaddingRight()){label.setPadding(style.getPaddingLeft(),label.getPaddingTop(),style.getPaddingRight(),label.getPaddingBottom());changed=true;}
         }
-        if(label.getMaxLines()!=1)label.setMaxLines(1);
-        if(label.getEllipsize()!=android.text.TextUtils.TruncateAt.END)label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if(label.getMaxLines()!=1){label.setMaxLines(1);changed=true;}
+        if(label.getEllipsize()!=android.text.TextUtils.TruncateAt.END){label.setEllipsize(android.text.TextUtils.TruncateAt.END);changed=true;}
         if(label.getLayout()!=null){
             float move=baseline-(label.getTop()+label.getBaseline());
-            if(Math.abs(label.getTranslationY()-move)>.5f)label.setTranslationY(move);
+            if(Math.abs(label.getTranslationY()-move)>.5f){label.setTranslationY(move);changed=true;}
         }
         // Preview: same top and size as the neighbouring app icons.
         Object oldSize=Xp.getAdditionalInstanceField(icon,"pixelsuite_drawer_preview_size"),oldTop=Xp.getAdditionalInstanceField(icon,"pixelsuite_drawer_preview_top");
@@ -124,10 +166,12 @@ final class DrawerFolderAlignment {
             Object manager=LauncherFeatures.get(icon,"mPreviewItemManager");
             LauncherFeatures.set(manager,"mTotalWidth",-1);
             LauncherFeatures.call(manager,"recomputePreviewDrawingParams");
-            icon.invalidate();
+            icon.invalidate();changed=true;
         }
+        Xp.setAdditionalInstanceField(frame,"pixelsuite_last_alignment",new int[]{size,top,Math.round(label.getTranslationY())});
         String note="Drawer folder aligned: cell "+frame.getWidth()+"x"+frame.getHeight()+", icon top "+top+", size "+size+", baseline "+baseline+", caption top "+label.getTop()+" shift "+Math.round(label.getTranslationY());
         if(!note.equals(lastNote)){lastNote=note;Module.log(note);}
+        return changed;
     }
     static String lastNote;
 

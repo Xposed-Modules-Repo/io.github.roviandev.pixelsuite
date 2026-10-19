@@ -43,10 +43,11 @@ import java.util.WeakHashMap;
  * the other tools keep working while Doodles is open.
  */
 final class DoodleOverlay extends FrameLayout {
-    static final int[] COLORS = {0xffec5f59, 0xffa1322d, 0xffdf7630, 0xfff6c644, 0xff49c562, 0xff34c8bc,
-            0xff2a84c8, 0xff0f558a, 0xffa657c0, 0xffec5fbb, 0xfffafafa, 0xff000000};
-    static final String[] COLOR_NAMES = {"Red", "Dark red", "Orange", "Yellow", "Green", "Turquoise",
-            "Blue", "Dark blue", "Purple", "Pink", "White", "Black"};
+    // The first four are the compact menu's: four clearly different colours. The rest are behind the rainbow.
+    static final int[] COLORS = {0xffec5f59, 0xfff6c644, 0xff49c562, 0xff2a84c8,
+            0xffdf7630, 0xffa1322d, 0xff34c8bc, 0xff0f558a, 0xffa657c0, 0xffec5fbb, 0xfffafafa, 0xff000000};
+    static final String[] COLOR_NAMES = {"Red", "Yellow", "Green", "Blue",
+            "Orange", "Dark red", "Turquoise", "Dark blue", "Purple", "Pink", "White", "Black"};
     static final Map<Object, List<Doodle>> models = new WeakHashMap<Object, List<Doodle>>();
     static WeakReference<DoodleOverlay> current = new WeakReference<DoodleOverlay>(null);
 
@@ -62,13 +63,13 @@ final class DoodleOverlay extends FrameLayout {
     final List<Doodle> shapes;
     Doodle selected;
     final Layer layer;
-    final LinearLayout panel;
+    final FrameLayout panel;
     final float density;
     final int surface, onSurface, onSurfaceVariant, accent, onAccent, outline;
     float toolbarTopRaw;
     Object backCallback;
     final List<ImageView> shapeButtons = new ArrayList<ImageView>(), colorButtons = new ArrayList<ImageView>();
-    ImageView fillButton;
+    ImageView fillButton, trashButton, doneButton;
     SeekBar size;
 
     // ------------------------------------------------------------------ static entry points
@@ -103,14 +104,20 @@ final class DoodleOverlay extends FrameLayout {
 
     /** Closes Doodles; the shapes stay on the picture. */
     static void leave(boolean fromButton) {
-        DoodleOverlay o = current.get();
+        final DoodleOverlay o = current.get();
         current = new WeakReference<DoodleOverlay>(null);
         ScreenshotEditor.setSelected(false);
         if (o == null) return;
         o.selected = null;
         o.refresh();
         o.registerBack(false);
-        if (o.getParent() instanceof ViewGroup) ((ViewGroup) o.getParent()).removeView(o);
+        // A short fade instead of vanishing in one frame (the flash seen when leaving with a back swipe).
+        o.setEnabled(false);
+        o.stopFling();
+        if(o.widthAnim!=null){o.widthAnim.cancel();o.widthAnim=null;}
+        o.animate().alpha(0f).setDuration(140).withEndAction(new Runnable() { public void run() {
+            if (o.getParent() instanceof ViewGroup) ((ViewGroup) o.getParent()).removeView(o);
+        }}).start();
     }
 
     /** Copies of the shapes for one renderer, for drawing into its picture (any thread). */
@@ -241,14 +248,17 @@ final class DoodleOverlay extends FrameLayout {
         layer = new Layer(a);
         addView(layer, new LayoutParams(-1, -1));
         panel = buildPanel(a);
-        LayoutParams lp = new LayoutParams(-1, -2, Gravity.BOTTOM);
-        lp.leftMargin = lp.rightMargin = dp(12);
+        // Centred at its compact width; it only ever moves up and down (opening the full menu widens it from the centre).
+        LayoutParams lp = new LayoutParams(compactWidth(), -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         lp.bottomMargin = dp(140);
         addView(panel, lp);
         setClipChildren(false);
     }
 
     int dp(float v) { return Math.round(v * density); }
+
+    /** While fading out after leaving, touches go straight through to the editor. */
+    @Override public boolean dispatchTouchEvent(MotionEvent e) { return isEnabled() && super.dispatchTouchEvent(e); }
 
     @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
         // Sit just above the editor's toolbar (the Doodles button's row).
@@ -259,6 +269,11 @@ final class DoodleOverlay extends FrameLayout {
             if (lp.bottomMargin != margin) { lp.bottomMargin = margin; panel.setLayoutParams(lp); }
         }
         super.onLayout(changed, l, t, r, b);
+        if (box != null && progress > 0f) {
+            android.view.ViewGroup.LayoutParams lp = panel.getLayoutParams();
+            int w = widthAt(progress);
+            if (lp.width != w) post(new Runnable() { public void run() { applyProgress(); } });
+        }
         placePanel();
     }
 
@@ -341,6 +356,8 @@ final class DoodleOverlay extends FrameLayout {
 
         /** Touches this layer takes: the picture area (a little wider), above the toolbar. */
         boolean ours(Bridge.Space s, float x, float y) {
+            int[] me = new int[2]; getLocationOnScreen(me);
+            if (grabberNear(x + me[0], y + me[1]) != null) return true;
             if (selected != null && Doodle.handleAt(selected.isLine(), screen(selected, s), x, y, dp(26)) >= 0) return true;
             RectF area = new RectF(s.image.left - dp(24), s.image.top - dp(8), s.image.right + dp(24), s.image.bottom + dp(24));
             if (toolbarTopRaw > 0) {
@@ -359,7 +376,16 @@ final class DoodleOverlay extends FrameLayout {
             return null;
         }
 
+        View grabbing;   // a grab that started just outside the menu, handed to the grabber
+
         @Override public boolean onTouchEvent(MotionEvent e) {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) grabbing = grabberNear(e.getRawX(), e.getRawY());
+            if (grabbing != null) {
+                View pill = grabbing;
+                int action = e.getActionMasked();
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) grabbing = null;
+                return grab(pill, e);
+            }
             Bridge.Space s = Bridge.space(canvasView, DoodleOverlay.this);
             if (s == null) return false;
             float x = e.getX(), y = e.getY();
@@ -370,11 +396,11 @@ final class DoodleOverlay extends FrameLayout {
                     hadSelection = selected != null;
                     saved = false;
                     handle = selected == null ? -1 : Doodle.handleAt(selected.isLine(), screen(selected, s), x, y, dp(26));
-                    if (handle >= 0) { mode = HANDLE; dim(true); return true; }
+                    if (handle >= 0) { mode = HANDLE; return true; }   // the menu steps aside once the drag really starts
                     Doodle d = hit(s, x, y);
                     if (d != null) {
                         if (d != selected) { selected = d; syncPanel(); performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); }
-                        mode = MOVE; dim(true); invalidate(); return true;
+                        mode = MOVE; invalidate(); return true;
                     }
                     mode = PENDING;
                     return true;
@@ -398,7 +424,7 @@ final class DoodleOverlay extends FrameLayout {
                         selected = d; syncPanel();
                         mode = CREATE; dim(true);
                     }
-                    if ((mode == MOVE || mode == HANDLE) && !saved && Math.hypot(x - downX, y - downY) > slop / 2f) { checkpoint(); saved = true; }
+                    if ((mode == MOVE || mode == HANDLE) && !saved && Math.hypot(x - downX, y - downY) > slop / 2f) { checkpoint(); saved = true; dim(true); }
                     if (mode == CREATE) {
                         float[] b = image(s, x, y);
                         synchronized (models) { selected.x2 = b[0]; selected.y2 = b[1]; }
@@ -462,15 +488,37 @@ final class DoodleOverlay extends FrameLayout {
             return (float) Math.hypot(e.getX(0) - e.getX(1), e.getY(0) - e.getY(1));
         }
 
+        /** The dashed outline and its handles: hidden while the shape is being moved, back on lift. */
+        float chrome = 1f;
+        android.animation.ValueAnimator chromeAnim;
+
+        boolean dragging() { return saved && (mode == MOVE || mode == HANDLE || mode == PINCH || mode == CREATE); }
+
+        void showChrome(boolean on) {
+            float to = on ? 1f : 0f;
+            if (chromeAnim != null) chromeAnim.cancel();
+            if (!on) { chrome = 0f; invalidate(); return; }   // gone at once, so the shape's own points show
+            if (chrome == to) return;
+            chromeAnim = android.animation.ValueAnimator.ofFloat(chrome, to).setDuration(160);
+            chromeAnim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                public void onAnimationUpdate(android.animation.ValueAnimator a) { chrome = (Float) a.getAnimatedValue(); invalidate(); }
+            });
+            chromeAnim.start();
+        }
+
         @Override protected void onDraw(Canvas canvas) {
             Doodle d = selected;
             if (d == null) return;
+            if (dragging()) { if (chrome != 0f) showChrome(false); return; }
+            if (chrome <= 0.01f && (chromeAnim == null || !chromeAnim.isRunning())) { showChrome(true); return; }
+            int alpha = Math.round(255 * chrome);
             Bridge.Space s = Bridge.space(canvasView, DoodleOverlay.this);
             if (s == null) return;
             float[] p = screen(d, s);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1.5f));
             paint.setColor(0xccffffff);
+            paint.setAlpha(Math.round(0xcc * chrome));
             paint.setPathEffect(new DashPathEffect(new float[]{dp(6), dp(4)}, 0));
             if (d.isLine()) canvas.drawLine(p[0], p[1], p[2], p[3], paint);
             else canvas.drawRect(Math.min(p[0], p[2]), Math.min(p[1], p[3]), Math.max(p[0], p[2]), Math.max(p[1], p[3]), paint);
@@ -478,14 +526,18 @@ final class DoodleOverlay extends FrameLayout {
             float[] h = Doodle.handlePoints(d.isLine(), p);
             for (int i = 0; i < h.length / 2; i++) {
                 paint.setStyle(Paint.Style.FILL);
+                // smaller than before (9dp -> 7dp); the touch area around them is unchanged
                 paint.setColor(0x33000000);
-                canvas.drawCircle(h[i * 2], h[i * 2 + 1] + dp(1), dp(10), paint);
+                paint.setAlpha(Math.round(0x33 * chrome));
+                canvas.drawCircle(h[i * 2], h[i * 2 + 1] + dp(1), dp(7.5f), paint);
                 paint.setColor(0xffffffff);
-                canvas.drawCircle(h[i * 2], h[i * 2 + 1], dp(9), paint);
+                paint.setAlpha(alpha);
+                canvas.drawCircle(h[i * 2], h[i * 2 + 1], dp(7), paint);
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeWidth(dp(3));
+                paint.setStrokeWidth(dp(2.5f));
                 paint.setColor(accent);
-                canvas.drawCircle(h[i * 2], h[i * 2 + 1], dp(6.5f), paint);
+                paint.setAlpha(Math.round(Color.alpha(accent) * chrome));
+                canvas.drawCircle(h[i * 2], h[i * 2 + 1], dp(5f), paint);
             }
         }
     }
@@ -497,26 +549,98 @@ final class DoodleOverlay extends FrameLayout {
 
     // ------------------------------------------------------------------ the panel
 
-    LinearLayout buildPanel(final Context c) {
-        LinearLayout box = new LinearLayout(c);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(10), dp(2), dp(10), dp(8));
+    // Compact menu: four shapes and four colours, then "more shapes" and "more colours"; either opens the full menu
+    // to the right. Shapes keep this order; colour i sits under shape i.
+    static final int[] SHAPE_ORDER = {Doodle.ARROW, Doodle.LINE, Doodle.RECT, Doodle.OVAL, Doodle.DOUBLE_ARROW, Doodle.TRIANGLE, Doodle.STAR, Doodle.BUBBLE};
+    static final int SHOWN = 4;                    // shapes and colours in the compact menu
+    static boolean sExpanded;                      // the menu's last state, for the next Doodles session
+    final List<Integer> shapeKinds = new ArrayList<Integer>();
+    final List<View> extraShapes = new ArrayList<View>(), extraColors = new ArrayList<View>();
+    View moreShapes, moreColors, sideGrabber;
+    LinearLayout box;
+    NoScroll shapeScroll, colorScroll;
+    float progress;                                // 0 compact .. 1 full
+    android.animation.ValueAnimator widthAnim;
+    android.view.VelocityTracker sideVelocity;
+
+    /** A row that never scrolls by touch (compact rows), or only when the menu is full (colours). */
+    final class NoScroll extends HorizontalScrollView {
+        boolean scrollable;
+        NoScroll(Context c) { super(c); setHorizontalScrollBarEnabled(false); setOverScrollMode(OVER_SCROLL_NEVER); setFillViewport(true); }
+        @Override public boolean onInterceptTouchEvent(MotionEvent e) { return scrollable && super.onInterceptTouchEvent(e); }
+        @Override public boolean onTouchEvent(MotionEvent e) { return scrollable && super.onTouchEvent(e); }
+    }
+
+    /*
+     * Geometry (preview112, owner's red box): the compact menu is ~302dp wide and ~148dp tall; the full menu spans the
+     * screen. Columns are wider than they are tall in compact (5 across the box) and narrower in full (8 across the
+     * screen, plus room for the side grabber); the column width moves between the two with the animation, and every
+     * row uses the same columns, so shapes and colours always sit exactly under each other. Rows are 40dp tall.
+     */
+    int pad() { return dp(12); }
+    int grab() { return dp(24); }                       // room for the side grabber in the full menu
+    int rowH() { return dp(40); }
+    int screenW() { return (getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels) - dp(16); }
+    int compactWidth() { return Math.min(dp(302), screenW()); }
+    int fullWidth() { return screenW(); }
+    float colCompact() { return (compactWidth() - 2f * pad()) / (SHOWN + 1); }
+    float colFull() { return (fullWidth() - 2f * pad() - grab()) / SHAPE_ORDER.length; }
+    float col(float p) {
+        float wanted = colCompact() + (colFull() - colCompact()) * p;
+        // On narrow screens the compact/full widths coincide: do not bulge beyond the screen mid-animation.
+        float fit = (fullWidth() - 2f * pad() - grab() * p) / (SHOWN + 1 + (SHAPE_ORDER.length - SHOWN - 1) * p);
+        return Math.min(wanted, fit);
+    }
+    int widthAt(float p) { return Math.round(2 * pad() + grab() * p + col(p) * (SHOWN + 1 + (SHAPE_ORDER.length - SHOWN - 1) * p)); }
+
+    /** A centred circle, at most 32dp across, whatever the cell's size (selection, swatches). */
+    final class Dot extends Drawable {
+        final int fill, ring; final float ringW;
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Dot(int fill, int ring, float ringW) { this.fill = fill; this.ring = ring; this.ringW = ringW; }
+        @Override public void draw(Canvas canvas) {
+            android.graphics.Rect b = getBounds();
+            float r = Math.min(dp(16), Math.min(b.width(), b.height()) / 2f);
+            if (r <= 0) return;
+            paint.setStyle(Paint.Style.FILL); paint.setColor(fill);
+            if (Color.alpha(fill) > 0) canvas.drawCircle(b.exactCenterX(), b.exactCenterY(), r, paint);
+            if (ringW > 0) {
+                paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(ringW); paint.setColor(ring);
+                canvas.drawCircle(b.exactCenterX(), b.exactCenterY(), r - ringW / 2, paint);
+            }
+        }
+        @Override public void setAlpha(int alpha) {}
+        @Override public void setColorFilter(ColorFilter filter) {}
+        @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
+    }
+
+    FrameLayout buildPanel(final Context c) {
+        FrameLayout shell = new FrameLayout(c);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(surface);
         bg.setCornerRadius(dp(28));
-        box.setBackground(bg);
-        box.setElevation(dp(6));
-        box.setClickable(true);   // the panel keeps its touches
-        box.addView(dragHandle(c), new LinearLayout.LayoutParams(-1, dp(22)));
+        shell.setBackground(bg);
+        shell.setElevation(dp(6));
+        shell.setClipToOutline(true);   // rows wider than the compact menu are cut at its rounded edge
+        shell.setClickable(true);       // the panel keeps its touches
 
-        HorizontalScrollView shapeScroll = new HorizontalScrollView(c);
-        shapeScroll.setHorizontalScrollBarEnabled(false);
+        box = new LinearLayout(c);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad(), dp(2), pad(), dp(2));
+        box.addView(dragHandle(c), new LinearLayout.LayoutParams(-1, dp(12)));
+
+        // shapes: the four shown, "more shapes", then the rest
+        shapeScroll = new NoScroll(c);
         LinearLayout shapeRow = new LinearLayout(c);
-        for (int k = 0; k < Doodle.KINDS; k++) {
-            final int kind = k;
+        for (int i = 0; i < SHAPE_ORDER.length; i++) {
+            if (i == SHOWN) {
+                moreShapes = roundButton(c, new MoreShapesIcon(onSurface, density).big(), "More shapes", new OnClickListener() { public void onClick(View v) { setExpanded(true, true); } });
+                shapeRow.addView(moreShapes, new LinearLayout.LayoutParams(Math.round(colCompact()), rowH()));
+            }
+            final int kind = SHAPE_ORDER[i];
             ImageView b = new ImageView(c);
-            b.setImageDrawable(new ShapeIcon(kind, onSurface, density));
-            b.setContentDescription(Doodle.NAMES[k]);
+            b.setImageDrawable(new ShapeIcon(kind, onSurface, density).big());
+            b.setContentDescription(Doodle.NAMES[kind]);
             b.setScaleType(ImageView.ScaleType.CENTER);
             b.setOnClickListener(new OnClickListener() { public void onClick(View v) {
                 sKind = kind;
@@ -528,41 +652,47 @@ final class DoodleOverlay extends FrameLayout {
                 }
                 syncPanel();
             }});
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
-            lp.rightMargin = dp(4);
-            shapeRow.addView(b, lp);
-            shapeButtons.add(b);
+            shapeRow.addView(b, new LinearLayout.LayoutParams(Math.round(colCompact()), rowH()));
+            shapeButtons.add(b); shapeKinds.add(kind);
+            if (i >= SHOWN) extraShapes.add(b); else baseCells.add(b);
         }
         shapeScroll.addView(shapeRow);
         box.addView(shapeScroll, new LinearLayout.LayoutParams(-1, -2));
 
-        HorizontalScrollView colorScroll = new HorizontalScrollView(c);
-        colorScroll.setHorizontalScrollBarEnabled(false);
+        // colours: the four shown, "more colours" (a rainbow), then the rest; they scroll only in the full menu
+        colorScroll = new NoScroll(c);
         LinearLayout colorRow = new LinearLayout(c);
-        colorRow.setPadding(dp(4), dp(6), dp(4), dp(6));
         for (int i = 0; i < COLORS.length; i++) {
+            if (i == SHOWN) {
+                moreColors = new View(c);
+                moreColors.setBackground(new RainbowIcon(density));
+                moreColors.setContentDescription("More colours");
+                moreColors.setOnClickListener(new OnClickListener() { public void onClick(View v) { setExpanded(true, true); } });
+                colorRow.addView(moreColors, new LinearLayout.LayoutParams(Math.round(colCompact()), rowH()));
+            }
             final int color = COLORS[i];
             ImageView swatch = new ImageView(c);
             swatch.setContentDescription(COLOR_NAMES[i]);
             swatch.setOnClickListener(new OnClickListener() { public void onClick(View v) { sColor = color; applyToSelected(); syncPanel(); } });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(32), dp(32));
-            lp.rightMargin = dp(8);
-            colorRow.addView(swatch, lp);
+            colorRow.addView(swatch, new LinearLayout.LayoutParams(Math.round(colCompact()), rowH()));
             colorButtons.add(swatch);
+            if (i >= SHOWN) extraColors.add(swatch); else baseCells.add(swatch);
         }
         colorScroll.addView(colorRow);
         box.addView(colorScroll, new LinearLayout.LayoutParams(-1, -2));
 
+        // thickness, fill, delete, done in one row
         LinearLayout controls = new LinearLayout(c);
         controls.setGravity(Gravity.CENTER_VERTICAL);
         ImageView thin = new ImageView(c);
         thin.setImageDrawable(new StrokeIcon(onSurfaceVariant, density));
         thin.setContentDescription("Thickness");
-        controls.addView(thin, new LinearLayout.LayoutParams(dp(28), dp(40)));
+        controls.addView(thin, new LinearLayout.LayoutParams(dp(24), rowH()));
         size = new SeekBar(c);
         size.setMax(23);
         size.setProgress(Math.round(sWidthDp) - 1);
         size.setContentDescription("Thickness");
+        size.setPadding(dp(8), 0, dp(8), 0);
         size.setProgressTintList(android.content.res.ColorStateList.valueOf(accent));
         size.setThumbTintList(android.content.res.ColorStateList.valueOf(accent));
         size.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(outline));
@@ -571,12 +701,14 @@ final class DoodleOverlay extends FrameLayout {
             public void onStartTrackingTouch(SeekBar bar) { if (selected != null) checkpoint(); }
             public void onStopTrackingTouch(SeekBar bar) {}
         });
-        controls.addView(size, new LinearLayout.LayoutParams(0, dp(40), 1));
+        controls.addView(size, new LinearLayout.LayoutParams(0, rowH(), 1));
         fillButton = roundButton(c, new FillIcon(onSurface, density), "Fill shape", new OnClickListener() { public void onClick(View v) {
             sFill = !sFill; applyToSelected(); syncPanel();
         }});
-        controls.addView(fillButton, buttonParams());
-        controls.addView(roundButton(c, new TrashIcon(onSurface, density), "Delete shape", new OnClickListener() { public void onClick(View v) {
+        controls.addView(fillButton, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        // preview115 (owner): delete sits under the blue swatch and done under the rainbow, in the same columns as the
+        // shapes and colours above (both kept there by applyProgress as the column width changes).
+        controls.addView(trashButton = roundButton(c, new TrashIcon(onSurface, density), "Delete shape", new OnClickListener() { public void onClick(View v) {
             if (selected != null || !shapes.isEmpty()) checkpoint();
             synchronized (models) {
                 if (selected != null) shapes.remove(selected);
@@ -584,17 +716,187 @@ final class DoodleOverlay extends FrameLayout {
             }
             selected = null; refresh(); syncPanel();
             v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-        }}), buttonParams());
-        ImageView done = roundButton(c, new CheckIcon(onAccent, density), "Done", new OnClickListener() { public void onClick(View v) { leave(false); } });
-        GradientDrawable doneBg = new GradientDrawable(); doneBg.setShape(GradientDrawable.OVAL); doneBg.setColor(accent);
-        done.setBackground(doneBg);
-        controls.addView(done, buttonParams());
+        }}), new LinearLayout.LayoutParams(dp(38), dp(38)));
+        // done: the same 32dp circle as the colour swatches and the rainbow, centred in the last column, with a larger check
+        CheckIcon check = new CheckIcon(onAccent, density); check.scale = 1.15f;
+        doneButton = roundButton(c, check, "Done", new OnClickListener() { public void onClick(View v) { leave(false); } });
+        doneButton.setBackground(new Dot(accent, 0, 0));
+        controls.addView(doneButton, new LinearLayout.LayoutParams(Math.round(colCompact()), rowH()));
         box.addView(controls, new LinearLayout.LayoutParams(-1, -2));
+        box.addView(dragHandle(c), new LinearLayout.LayoutParams(-1, dp(12)));   // the same grabber at the bottom
+        shell.addView(box, new FrameLayout.LayoutParams(-1, -2));
+
+        // One side grabber, on the right of the full menu (fixed height: a match_parent child made the menu screen-tall).
+        sideGrabber = sideGrabber(c);
+        shell.addView(sideGrabber, new FrameLayout.LayoutParams(pad() + grab(), dp(96), Gravity.END | Gravity.CENTER_VERTICAL));
+        progress = sExpanded ? 1f : 0f;
+        applyProgress();
         syncPanel();
-        return box;
+        return shell;
     }
 
-    /** The pill at the top of the menu: hold it (it buzzes once) and drag the menu anywhere. */
+    final List<View> baseCells = new ArrayList<View>();
+
+    private static void width(View v, int w) {
+        android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+        if (lp != null && lp.width != w) { lp.width = w; v.setLayoutParams(lp); }
+    }
+
+    /**
+     * Lays the menu out for a point between compact (0) and full (1): the menu's width, the column width, the "more"
+     * buttons closing their column while the extra shapes and colours open theirs (each popping in a moment after the
+     * one before), and the side grabber. Runs every animation frame.
+     */
+    void applyProgress() {
+        float p = Math.max(0f, Math.min(1f, progress));
+        android.view.ViewGroup.LayoutParams lp = panel_lp();
+        int w = widthAt(p);
+        if (lp != null && lp.width != w) { lp.width = w; ((View) box.getParent()).setLayoutParams(lp); }
+        float c = col(p);
+        // Column widths are handed out so their rounding never adds up: column k always ends at round(k * c), in both
+        // rows, so the shapes, colours and the controls under them (done under the rainbow) line up to the pixel.
+        distribute((ViewGroup) shapeScroll.getChildAt(0), c, p);
+        distribute((ViewGroup) colorScroll.getChildAt(0), c, p);
+        // done fills the last column (under the rainbow, or the last colour of the full menu); delete is centred on the column before it
+        if (doneButton != null) width(doneButton, Math.round(c));
+        if (trashButton != null && trashButton.getLayoutParams() instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams t = (LinearLayout.LayoutParams) trashButton.getLayoutParams();
+            int m = Math.max(0, Math.round((c - dp(38)) / 2f));
+            if (t.rightMargin != m) { t.rightMargin = m; trashButton.setLayoutParams(t); }
+        }
+        for (View more : new View[]{moreShapes, moreColors}) {
+            if (more == null) continue;
+            more.setEnabled(p < 0.5f);
+            // Never dimmed: the "more" buttons keep full colour and simply shrink away into the opening row.
+            float fold = Math.min(1f, p * 1.4f);
+            more.setAlpha(fold >= 1f ? 0f : 1f);
+            more.setScaleX(1 - fold); more.setScaleY(1 - fold);
+        }
+        grow(extraShapes, p, c);
+        grow(extraColors, p, c);
+        sideGrabber.setAlpha(Math.max(0f, (p - 0.5f) * 2f));
+        sideGrabber.setTranslationX((1 - p) * dp(16));
+        sideGrabber.setVisibility(p > 0.5f ? VISIBLE : INVISIBLE);
+        box.setPadding(pad(), dp(2), pad() + Math.round(grab() * p), dp(2));
+        colorScroll.scrollable = p >= 1f;
+        shapeScroll.scrollable = p >= 1f;
+        if (p <= 0f) colorScroll.scrollTo(0, 0);
+    }
+
+    /** Widths for one row: shown cells take a column, "more" closes its column and the extras open theirs (see applyProgress). */
+    private void distribute(ViewGroup row, float c, float p) {
+        if (row == null) return;
+        float x = 0;
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View v = row.getChildAt(i);
+            float w = (v == moreShapes || v == moreColors) ? c * (1 - p) : (extraShapes.contains(v) || extraColors.contains(v)) ? c * p : c;
+            width(v, Math.round(x + w) - Math.round(x));
+            x += w;
+        }
+    }
+
+    /** The extra shapes and colours open their columns as the menu widens; each pops in by size, never fading. */
+    private void grow(List<View> views, float p, float c) {
+        int w = Math.round(c * p);
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.get(i);
+            float start = Math.min(i, 7) * 0.05f, local = p >= 1f ? 1f : Math.max(0f, Math.min(1f, (p - 0.2f - start) / 0.45f));
+            v.setAlpha(w > dp(2) ? 1f : 0f);
+            float sc = 0.5f + 0.5f * local;
+            v.setScaleX(sc); v.setScaleY(sc);
+            v.setEnabled(local > 0.5f);   // a hidden button never takes a tap
+        }
+    }
+
+    private android.view.ViewGroup.LayoutParams panel_lp() {
+        View shell = (View) box.getParent();
+        return shell == null ? null : shell.getLayoutParams();
+    }
+
+    /** Opens or closes the full menu, animated from wherever it is now (also mid-swipe). */
+    void setExpanded(boolean open, boolean animate) {
+        sExpanded = open;
+        if (widthAnim != null) widthAnim.cancel();
+        float to = open ? 1f : 0f;
+        if (!animate) { progress = to; applyProgress(); return; }
+        widthAnim = android.animation.ValueAnimator.ofFloat(progress, to);
+        widthAnim.setDuration(open ? 380 : 300);
+        widthAnim.setInterpolator(open ? new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f)
+                                       : new android.view.animation.PathInterpolator(0.3f, 0f, 0.1f, 1f));
+        widthAnim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator a) { progress = (Float) a.getAnimatedValue(); applyProgress(); }
+        });
+        widthAnim.start();
+    }
+
+    /**
+     * The full menu's right-edge grabber (as in preview110, with more room from the colours): a vertical pill with a
+     * small arrow pointing back left. Hold it (the grabber buzz) and swipe left to fold the menu back to compact,
+     * following the finger; a tap folds it too.
+     */
+    View sideGrabber(Context c) {
+        final View g = new View(c) {
+            final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            @Override protected void onDraw(Canvas canvas) {
+                float cx = getWidth() - dp(12), cy = getHeight() / 2f, h = dp(isPressed() ? 36 : 30), w = dp(4);
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(onSurfaceVariant); p.setAlpha(isPressed() ? 255 : 150);
+                canvas.drawRoundRect(new RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), w / 2, w / 2, p);
+                p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(2)); p.setStrokeCap(Paint.Cap.ROUND); p.setStrokeJoin(Paint.Join.ROUND);
+                float ax = cx - dp(9), s = dp(3.5f);
+                android.graphics.Path arrow = new android.graphics.Path();
+                arrow.moveTo(ax + s * 0.6f, cy - s); arrow.lineTo(ax - s * 0.4f, cy); arrow.lineTo(ax + s * 0.6f, cy + s);
+                canvas.drawPath(arrow, p);
+            }
+        };
+        g.setContentDescription("Make Doodles menu smaller");
+        g.setOnTouchListener(new View.OnTouchListener() {
+            float startX, startP; boolean moved;
+            public boolean onTouch(View v, MotionEvent e) {
+                if (progress <= 0.01f && e.getActionMasked() == MotionEvent.ACTION_DOWN) return false;
+                if (sideVelocity != null) { MotionEvent r = MotionEvent.obtain(e); r.setLocation(e.getRawX(), e.getRawY()); sideVelocity.addMovement(r); r.recycle(); }
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN: {
+                        if (widthAnim != null) widthAnim.cancel();
+                        startX = e.getRawX(); startP = progress; moved = false;
+                        if (sideVelocity != null) sideVelocity.recycle();
+                        sideVelocity = android.view.VelocityTracker.obtain();
+                        MotionEvent r = MotionEvent.obtain(e); r.setLocation(e.getRawX(), e.getRawY()); sideVelocity.addMovement(r); r.recycle();
+                        v.setPressed(true); v.invalidate();
+                        v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
+                        return true;
+                    }
+                    case MotionEvent.ACTION_MOVE: {
+                        float dx = e.getRawX() - startX;
+                        if (Math.abs(dx) > dp(4)) moved = true;
+                        // the menu is centred, so its right edge moves half the width change
+                        float span = Math.max(1, (fullWidth() - compactWidth()) / 2f);
+                        progress = Math.max(0f, Math.min(1f, startP + dx / span));
+                        applyProgress();
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL: {
+                        v.setPressed(false); v.invalidate();
+                        float vx = 0;
+                        if (sideVelocity != null) { sideVelocity.computeCurrentVelocity(1000); vx = sideVelocity.getXVelocity(); sideVelocity.recycle(); sideVelocity = null; }
+                        boolean close = !moved || vx < -dp(300) || (vx < dp(300) && progress < 0.7f);
+                        if (close) v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                        setExpanded(!close, true);
+                        return true;
+                    }
+                }
+                return true;
+            }
+        });
+        return g;
+    }
+
+    /**
+     * The pills at the top and bottom of the menu: hold one (it buzzes once) and drag the menu anywhere,
+     * or flick it: it flies to the top or bottom edge and bounces off it before settling there.
+     */
     View dragHandle(Context c) {
         final View pill = new View(c) {
             final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -607,36 +909,194 @@ final class DoodleOverlay extends FrameLayout {
         };
         pill.setContentDescription("Move Doodles menu");
         pill.setOnTouchListener(new View.OnTouchListener() {
-            float startRaw, startShift;
             public boolean onTouch(View v, MotionEvent e) {
-                switch (e.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN:
-                        if (Math.abs(e.getX() - v.getWidth() / 2f) > dp(56)) return false;   // only the pill itself
-                        startRaw = e.getRawY(); startShift = sPanelShift;
-                        v.setPressed(true); v.invalidate();
-                        v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);   // moving is now active
-                        if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        sPanelShift = startShift + (e.getRawY() - startRaw);
-                        placePanel();
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        v.setPressed(false); v.invalidate();
-                        return true;
-                }
-                return true;
+                if (e.getActionMasked() == MotionEvent.ACTION_DOWN && Math.abs(e.getX() - v.getWidth() / 2f) > dp(110)) return false;
+                return grab(v, e);
             }
         });
+        if (topPill == null) topPill = pill; else bottomPill = pill;
         return pill;
+    }
+
+    View topPill, bottomPill, grabbed;
+    float grabStartRaw, grabStartShift;
+    android.view.VelocityTracker grabVelocity;
+
+    /**
+     * Moving the menu by a grabber, shared by the pills and by the strips just above and below the menu
+     * (the layer hands those touches here), so a grab that lands a little off the pill still moves the menu.
+     */
+    boolean grab(View pill, MotionEvent e) {
+        if (grabVelocity != null) {
+            MotionEvent raw = MotionEvent.obtain(e);
+            raw.setLocation(e.getRawX(), e.getRawY());   // the menu moves under the finger: track screen positions
+            grabVelocity.addMovement(raw);
+            raw.recycle();
+        }
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                stopFling();
+                grabbed = pill;
+                grabStartRaw = e.getRawY(); grabStartShift = sPanelShift;
+                if (grabVelocity != null) grabVelocity.recycle();
+                grabVelocity = android.view.VelocityTracker.obtain();
+                MotionEvent raw = MotionEvent.obtain(e); raw.setLocation(e.getRawX(), e.getRawY()); grabVelocity.addMovement(raw); raw.recycle();
+                pill.setPressed(true); pill.invalidate();
+                pill.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);   // moving is now active
+                if (pill.getParent() != null) pill.getParent().requestDisallowInterceptTouchEvent(true);
+                return true;
+            }
+            case MotionEvent.ACTION_MOVE:
+                sPanelShift = grabStartShift + (e.getRawY() - grabStartRaw);
+                placePanel();
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                pill.setPressed(false); pill.invalidate();
+                grabbed = null;
+                float vy = 0;
+                if (grabVelocity != null) {
+                    grabVelocity.computeCurrentVelocity(1000);
+                    vy = grabVelocity.getYVelocity();
+                    grabVelocity.recycle(); grabVelocity = null;
+                }
+                int fling = ViewConfiguration.get(pill.getContext()).getScaledMinimumFlingVelocity();
+                if (e.getActionMasked() == MotionEvent.ACTION_UP && Math.abs(vy) > Math.max(fling * 4, dp(500))) flingPanel(vy);
+                return true;
+            }
+        }
+        return true;
+    }
+
+    /** The pill whose strip (just outside the menu, above or below it) this screen point is in, or null. */
+    View grabberNear(float rawX, float rawY) {
+        if (panel.getAlpha() < 0.5f || topPill == null) return null;
+        int[] at = new int[2]; panel.getLocationOnScreen(at);
+        float top = at[1], bottom = at[1] + panel.getHeight(), cx = at[0] + panel.getWidth() / 2f;
+        if (Math.abs(rawX - cx) > dp(110)) return null;
+        // the grabber rows are slim (14dp), so a touch up to 24dp outside the menu still takes the grabber
+        if (rawY >= top - dp(24) && rawY < top) return topPill;
+        if (bottomPill != null && rawY > bottom && rawY <= bottom + dp(24)) return bottomPill;
+        return null;
+    }
+
+    android.animation.ValueAnimator flight;
+    Runnable impact;
+
+    void stopFling() {
+        android.animation.ValueAnimator previous = flight;
+        flight = null; // cancel also calls onAnimationEnd: it must not snap a grabbed menu to its old target.
+        if (impact != null) { removeCallbacks(impact); impact = null; }
+        if (previous != null) previous.cancel();
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        stopFling();
+        if (widthAnim != null) { widthAnim.cancel(); widthAnim = null; }
+        if(sideVelocity!=null){sideVelocity.recycle();sideVelocity=null;}
+        if (sideGrabber != null) sideGrabber.setPressed(false);
+        if (grabVelocity != null) { grabVelocity.recycle(); grabVelocity = null; }
+        if (grabbed != null) { grabbed.setPressed(false); grabbed = null; }
+        layer.grabbing = null;
+        if (layer.chromeAnim != null) layer.chromeAnim.cancel();
+        panel.animate().cancel();
+        super.onDetachedFromWindow();
+    }
+
+    /**
+     * Throws the menu to the top or bottom edge with the flick's speed, then bounces it off that edge:
+     * a quick flight, then two small rebounds that shrink away, so it lands softly where it hit.
+     */
+    void flingPanel(float vy) {
+        if (getHeight() <= 0 || panel.getHeight() <= 0) return;
+        float min = topLimit() - panel.getTop(), max = Math.max(min, bottomLimit() - panel.getTop() - panel.getHeight());
+        final float from = sPanelShift, edge = vy < 0 ? min : max;
+        final float distance = Math.abs(edge - from);
+        final float speed = Math.max(Math.abs(vy), dp(1400));                        // px per second
+        final float travel = distance < 1 ? 0 : Math.max(90, Math.min(320, distance / speed * 1000f));   // ms
+        final float amp = Math.min(dp(30), Math.max(dp(8), speed * 0.012f));         // first rebound height
+        final float bounce = 520;                                                    // ms of rebounds
+        final float inward = vy < 0 ? 1 : -1;                                        // rebounds go back into the screen
+        stopFling();
+        flight = android.animation.ValueAnimator.ofFloat(0f, travel + bounce);
+        flight.setDuration((long) (travel + bounce));
+        flight.setInterpolator(new android.view.animation.LinearInterpolator());
+        flight.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator a) {
+                float t = (Float) a.getAnimatedValue(), y;
+                if (t < travel) {
+                    float f = t / travel;
+                    y = from + (edge - from) * (f * (1.15f - 0.15f * f));   // nearly full speed into the edge
+                } else {
+                    float b = (t - travel) / bounce;                         // 0..1
+                    // |sin| arcs, each shorter and lower: a ball settling against a wall
+                    float arc = (float) Math.abs(Math.sin(Math.PI * 2.2 * Math.pow(b, 0.8)));
+                    y = edge + inward * amp * arc * (float) Math.pow(1 - b, 2.2);
+                }
+                y = Math.max(min, Math.min(max, y));
+                sPanelShift = y;
+                panel.setTranslationY(y);
+            }
+        });
+        flight.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) {
+                if (flight != a) return;
+                sPanelShift = edge; panel.setTranslationY(edge); flight = null;
+                if (impact != null) { removeCallbacks(impact); impact = null; }
+            }
+        });
+        // a light tick as it hits the edge
+        final android.animation.ValueAnimator started = flight;
+        impact = new Runnable() { public void run() { if (flight == started && started.isRunning()) panel.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); } };
+        postDelayed(impact, (long) travel);
+        started.start();
+    }
+
+    /**
+     * The highest the menu goes: just under the editor's top bar (Undo, Redo, Share, Save), so it never covers it.
+     * The bar ends a little above the picture; the picture's top is read when Doodles opens (not zoomed yet) and
+     * kept, so zooming or panning the picture later does not move the limit.
+     */
+    float sTopLimit = -1, sBottomLimit = -1;
+    /** How far the editor's corner brackets stand out from the picture; the menu's limits sit on them. */
+    static final float FRAME_DP = 18;
+    float topLimit() {
+        if (sTopLimit < 0) {
+            Bridge.Space s = canvasView == null ? null : Bridge.space(canvasView, this);
+            // the top of the editor's corner brackets around the picture (owner's screenshot): picture top - 18dp
+            if (s != null && s.image.top > dp(40)) {
+                sTopLimit = Math.max(dp(32), Math.min(dp(160), s.image.top - FRAME_DP * density));
+                sBottomLimit = s.image.bottom + FRAME_DP * density;
+            }
+            if (sTopLimit < 0) { ScreenshotEditor.logOnce("Doodles menu top limit: picture not placed yet, 110dp used", null); return dp(110); }
+        }
+        return sTopLimit;
+    }
+
+    /**
+     * The lowest the menu goes: just above the gesture bar (home handle), whatever the editor's own toolbar is doing.
+     * In this layer's coordinates, from the window's navigation-bar inset.
+     */
+    float bottomLimit() {
+        int nav = 0;
+        try {
+            android.view.WindowInsets in = (android.view.WindowInsets) Xp.callMethod(this, "getRootWindowInsets");
+            if (in != null) nav = in.getStableInsetBottom();   // the navigation bar (stable: not the keyboard)
+        } catch (Throwable ignored) { }
+        View root = getRootView();
+        int[] at = new int[2]; getLocationInWindow(at);
+        float screenBottom = (root != null && root.getHeight() > 0 ? root.getHeight() : at[1] + getHeight()) - nav - dp(4);
+        float limit = Math.min(getHeight(), screenBottom - at[1]);
+        // and no lower than the bottom of the corner brackets around the picture (owner's screenshot)
+        topLimit();
+        if (sBottomLimit > 0) limit = Math.min(limit, sBottomLimit);
+        return limit;
     }
 
     /** Applies the dragged shift, kept inside the screen. */
     void placePanel() {
         if (getHeight() <= 0 || panel.getHeight() <= 0) { panel.setTranslationY(sPanelShift); return; }
-        float top = dp(32), lowest = getHeight() - dp(8);
-        float min = top - panel.getTop(), max = lowest - panel.getTop() - panel.getHeight();
+        float min = topLimit() - panel.getTop(), max = bottomLimit() - panel.getTop() - panel.getHeight();
         sPanelShift = Math.max(min, Math.min(Math.max(min, max), sPanelShift));
         panel.setTranslationY(sPanelShift);
     }
@@ -666,9 +1126,9 @@ final class DoodleOverlay extends FrameLayout {
         if (d != null) { sKind = d.kind; sColor = d.color; sFill = d.fillable() ? d.fill : sFill; }
         for (int i = 0; i < shapeButtons.size(); i++) {
             ImageView b = shapeButtons.get(i);
-            boolean on = i == kind;
-            GradientDrawable bg = new GradientDrawable(); bg.setShape(GradientDrawable.OVAL); bg.setColor(on ? accent : Color.TRANSPARENT);
-            b.setBackground(bg);
+            boolean on = shapeKinds.get(i) == kind;
+            // the same centred 32dp circle as a colour swatch, in the same column, so the two rows line up exactly
+            b.setBackground(new Dot(on ? accent : Color.TRANSPARENT, 0, 0));
             ((ShapeIcon) b.getDrawable()).color = on ? onAccent : onSurface;
             b.getDrawable().invalidateSelf();
             b.setSelected(on);
@@ -676,10 +1136,20 @@ final class DoodleOverlay extends FrameLayout {
         for (int i = 0; i < colorButtons.size(); i++) {
             ImageView b = colorButtons.get(i);
             boolean on = COLORS[i] == color;
-            GradientDrawable dot = new GradientDrawable(); dot.setShape(GradientDrawable.OVAL); dot.setColor(COLORS[i]);
-            dot.setStroke(on ? dp(3) : dp(1), on ? accent : outline);
-            b.setBackground(dot);
+            b.setBackground(new Dot(COLORS[i], on ? accent : outline, on ? dp(3) : dp(1)));
             b.setSelected(on);
+        }
+        // In the compact menu, a choice that is only in the full menu lights up its "more" button.
+        boolean extraKind = true; for (int i = 0; i < SHOWN; i++) if (SHAPE_ORDER[i] == kind) extraKind = false;
+        boolean extraColor = true; for (int i = 0; i < SHOWN; i++) if (COLORS[i] == color) extraColor = false;
+        if (moreShapes != null) {
+            moreShapes.setBackground(new Dot(extraKind ? accent : Color.TRANSPARENT, 0, 0));
+            Drawable icon = ((ImageView) moreShapes).getDrawable();
+            if (icon instanceof Icon) { ((Icon) icon).color = extraKind ? onAccent : onSurface; icon.invalidateSelf(); }
+        }
+        if (moreColors != null) {
+            Drawable icon = moreColors.getBackground();
+            if (icon instanceof RainbowIcon) { ((RainbowIcon) icon).ring = extraColor ? accent : 0; icon.invalidateSelf(); }
         }
         GradientDrawable fillBg = new GradientDrawable(); fillBg.setShape(GradientDrawable.OVAL);
         fillBg.setColor(fill ? (accent & 0x00ffffff) | 0x40000000 : Color.TRANSPARENT);
@@ -696,11 +1166,12 @@ final class DoodleOverlay extends FrameLayout {
     // ------------------------------------------------------------------ icons (drawn, no resources)
 
     abstract static class Icon extends Drawable {
-        int color; final float density;
+        int color; final float density; float scale = 1f;
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         Icon(int color, float density) { this.color = color; this.density = density; }
-        @Override public int getIntrinsicWidth() { return Math.round(24 * density); }
-        @Override public int getIntrinsicHeight() { return Math.round(24 * density); }
+        Icon big() { scale = 1.15f; return this; }
+        @Override public int getIntrinsicWidth() { return Math.round(24 * density * scale); }
+        @Override public int getIntrinsicHeight() { return Math.round(24 * density * scale); }
         @Override public void setAlpha(int alpha) {}
         @Override public void setColorFilter(ColorFilter filter) {}
         @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
@@ -711,9 +1182,9 @@ final class DoodleOverlay extends FrameLayout {
         /** Draws in a 24x24 box centred on the bounds. */
         @Override public void draw(Canvas canvas) {
             int save = canvas.save();
-            float size = 24 * density;
+            float size = 24 * density * scale;
             canvas.translate(getBounds().exactCenterX() - size / 2, getBounds().exactCenterY() - size / 2);
-            canvas.scale(density, density);
+            canvas.scale(density * scale, density * scale);
             paint.setColor(color);
             draw24(canvas);
             canvas.restoreToCount(save);
@@ -734,6 +1205,44 @@ final class DoodleOverlay extends FrameLayout {
         }
     }
 
+    /** "More shapes": a small triangle, star and circle huddled together. */
+    static final class MoreShapesIcon extends Icon {
+        MoreShapesIcon(int color, float density) { super(color, density); }
+        @Override void draw24(Canvas c) {
+            paint.setColor(color); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.8f);
+            paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
+            c.drawPath(Doodle.outline(Doodle.TRIANGLE, 3, 3, 13, 12, 1.8f), paint);
+            c.drawPath(Doodle.outline(Doodle.STAR, 12, 11, 22, 21, 1.8f), paint);
+            c.drawCircle(17.5f, 6.5f, 3.5f, paint);
+            c.drawRoundRect(new RectF(3, 15, 9.5f, 21), 1.5f, 1.5f, paint);
+        }
+    }
+    /** "More colours": a swatch the size of the others, painted as a colour wheel; ringed when a hidden colour is in use. */
+    static final class RainbowIcon extends Drawable {
+        final float density; int ring, picked;
+        final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        RainbowIcon(float density) { this.density = density; }
+        @Override public int getIntrinsicWidth() { return Math.round(34 * density); }
+        @Override public int getIntrinsicHeight() { return Math.round(34 * density); }
+        @Override public void draw(Canvas canvas) {
+            float cx = getBounds().exactCenterX(), cy = getBounds().exactCenterY(), r = Math.min(16 * density, Math.min(getBounds().width(), getBounds().height()) / 2f);
+            if (r <= 0) return;
+            paint.setStyle(Paint.Style.FILL);
+            // Full opacity: the paint still carried the faint ring's alpha (0x33) from the last draw, so the colour wheel
+            // itself was drawn at 20% whenever no hidden colour was in use (the "dim" rainbow).
+            paint.setColor(0xff000000);
+            paint.setShader(new android.graphics.SweepGradient(cx, cy, new int[]{0xffec5f59, 0xfff6c644, 0xff49c562, 0xff34c8bc, 0xff2a84c8, 0xffa657c0, 0xffec5fbb, 0xffec5f59}, null));
+            canvas.drawCircle(cx, cy, r, paint);
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth((ring != 0 ? 3 : 1) * density);
+            paint.setColor(ring != 0 ? ring : 0x33ffffff);
+            canvas.drawCircle(cx, cy, r - paint.getStrokeWidth() / 2, paint);
+        }
+        @Override public void setAlpha(int alpha) {}
+        @Override public void setColorFilter(ColorFilter filter) {}
+        @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
+    }
     static final class StrokeIcon extends Icon {
         StrokeIcon(int color, float density) { super(color, density); }
         @Override void draw24(Canvas c) {
@@ -769,8 +1278,8 @@ final class DoodleOverlay extends FrameLayout {
     static final class CheckIcon extends Icon {
         CheckIcon(int color, float density) { super(color, density); }
         @Override void draw24(Canvas c) {
-            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.4f); paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
-            Path p = new Path(); p.moveTo(5.5f, 12.5f); p.lineTo(10, 17); p.lineTo(18.5f, 7.5f);
+            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.2f); paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
+            Path p = new Path(); p.moveTo(6f, 12.5f); p.lineTo(10, 16.5f); p.lineTo(18f, 8f);
             c.drawPath(p, paint);
         }
     }
@@ -808,13 +1317,26 @@ final class DoodleOverlay extends FrameLayout {
         static void resolve(View canvas) throws Exception {
             if (viewScene != null) return;
             ClassLoader cl = canvas.getClass().getClassLoader();
-            viewScene = ScreenshotEditor.field(canvas.getClass(), "a");
-            Class<?> scene = Xp.findClass("irz", cl), area = Xp.findClass("ira", cl);
-            sceneRenderer = ScreenshotEditor.field(scene, "b");
-            sceneRect = ScreenshotEditor.field(scene, "e");
-            sceneCanvas = ScreenshotEditor.method(scene, "k");
-            canvasWidth = ScreenshotEditor.method(area, "d");
-            canvasMatrix = ScreenshotEditor.method(area, "f");
+            // Names from StudioNames; fields found by type (irz.b is the renderer, irz.e the first RectF).
+            Class<?> scene = StudioNames.cls("scene", cl), area = StudioNames.cls("area", cl);
+            viewScene = ScreenshotEditor.fieldOfType(canvas.getClass(), scene);
+            sceneRenderer = ScreenshotEditor.fieldOfType(scene, StudioNames.cls("renderer", cl));
+            sceneRect = firstRect(scene);
+            sceneCanvas = ScreenshotEditor.method(scene, StudioNames.m("scene.area"));
+            canvasWidth = ScreenshotEditor.method(area, StudioNames.m("area.width"));
+            canvasMatrix = ScreenshotEditor.method(area, StudioNames.m("area.matrix"));
+        }
+
+        /** The scene's image rectangle: its first RectF field by name (e, before f and j). */
+        static java.lang.reflect.Field firstRect(Class<?> scene) throws NoSuchFieldException {
+            java.lang.reflect.Field best = null;
+            for (java.lang.reflect.Field f : scene.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType() != RectF.class) continue;
+                if (best == null || f.getName().compareTo(best.getName()) < 0) best = f;
+            }
+            if (best == null) throw new NoSuchFieldException("RectF in " + scene.getName());
+            best.setAccessible(true);
+            return best;
         }
 
         static Object renderer(View canvas) throws Exception {
