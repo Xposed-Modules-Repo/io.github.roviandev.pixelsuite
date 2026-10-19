@@ -1,21 +1,45 @@
+## v2.0.3
+
+🏠 Home-screen menu: removed the redundant “Apps list” option—you can already open the app drawer by swiping up.
+
+🌗 App launch: fixed the white flash when opening Pixel Suite in dark theme.
+
+✏️ Doodles redesign: a wider, shorter menu with aligned shapes, colors and controls. Tap More shapes or the rainbow icon to expand for more shapes and colors. Tap the arrow on the right to fold it back. Drag or flick the menu up or down to reposition it.
+
+📁 Drawer folders: the Back gesture closes the folder first; the next Back gesture leaves the drawer. Fixed accidental taps during transitions and icon/name jumps after reordering.
+
+🗂️ Home folders: smoother closing after moving apps, with stock spring animations preserved. Auto (A–Z) and Custom sorting now open inside the same menu.
+
+✂️ Pixel Studio: fixed, and should be much harder to break after future updates.
+
+🧹 Recents: fixed a rare issue where Clear all became disabled after restarting.
+
+🌑 Super Dark: fixed a few places where the dark theme wasn’t applying and made theme handling more efficient.
+
+✨ Cleaner interface: compact, consistent prompts and shorter descriptions throughout Pixel Suite. Animated previews and essential setup instructions remain.
+
 ## v2.0.2
 Pixel Suite 2.0.2 adds Themes with Super Dark-Mode, smarter folder moving in the app drawer and a restart prompt in the app.
 
 Themes: Super Dark-Mode
-• New Themes section in the Pixel Suite app, under Pixel Launcher, with Super Dark-Mode: a true-black dark theme for OLED screens.
+• New Themes section under Themes in the Pixel Suite app, with Super Dark-Mode: a true-black dark theme for OLED screens.
 • Settings, the shade, quick settings tiles, notifications, the lock screen PIN/pattern screen, the app drawer, folders, Gboard, the Google app and the search bar go black; cards and menus sit a few steps above black so they stay apart. The color hooks target neutral surfaces and preserve brighter accent colors.
 • Turning it on switches the phone to dark mode. It only applies while the phone is dark: the quick settings tile or a dark-theme schedule switching to light brings back the normal light theme, and going dark brings Super Dark back.
 • Window blur is turned off while it is in effect (blur makes the drawer, folders and shade see-through and costs battery every frame) and comes back in light theme or when Super Dark is turned off.
 • Applies by itself after a reboot, from the first second, and works live when switched.
-• Folder menus, app shortcut menus and launcher dialogs are solid near-black while blur is off, matching the folder background under Super Dark instead of showing through. App shortcut menus also follow Super Dark when other launcher customizations are off.
+• Folder menus, the held folder menu, launcher dialogs and app shortcut menus are solid while blur is off, in the same colour as the folder background.
+• System UI dialogs (like "Active apps" in quick settings) and the Home settings header in Pixel Launcher go dark too.
 • Gboard and Settings need their boxes ticked in Pixel Suite's LSPosed scope (now recommended).
 
 App drawer folders
+• Back (either edge) with a drawer folder open closes only the folder; a second back leaves the drawer.
 • Moving a folder pushes the other folders aside, like apps in a folder; folders only move among folders and only while your finger is over the folder rows.
 • Dropping a folder no longer makes the other folders jump or shake.
 • Dragging a whole folder to the home screen shows Cancel instead of Remove.
 
 Folder menus and drag buttons
+• Home folder Sort now folds Auto (A–Z) and Custom open inside the same menu, like drawer folders, instead of jumping to a second menu.
+• The Sort arrow keeps the same room from the lines whether it points down or up.
 • Holding a drawer folder: Sort folds open Auto (A–Z) and Custom with the same animation and icons as the folder ⋮ menu; home folder Sort gets the new icons too.
 • Folder menus size themselves to their longest label, and the folder no longer moves up for its menu (the cause of a stutter).
 • The Remove, Cancel and Uninstall buttons fade in a moment after a drag starts, so they never appear cut off.

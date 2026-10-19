@@ -1,10 +1,36 @@
+## v2.0.3
+
+## What's new in 2.0.3:
+
+🏠 **Home-screen menu:** removed the redundant “Apps list” option—you can already open the app drawer by swiping up.
+
+🌗 **App launch:** fixed the white flash when opening Pixel Suite in dark theme.
+
+✏️ **Doodles redesign:** a wider, shorter menu with aligned shapes, colors and controls. Tap More shapes or the rainbow icon to expand for more shapes and colors. Tap the arrow on the right to fold it back. Drag or flick the menu up or down to reposition it.
+
+📁 **Drawer folders:** the Back gesture closes the folder first; the next Back gesture leaves the drawer. Fixed accidental taps during transitions and icon/name jumps after reordering.
+
+🗂️ **Home folders:** smoother closing after moving apps, with stock spring animations preserved. Auto (A–Z) and Custom sorting now open inside the same menu.
+
+✂️ **Pixel Studio:** fixed, and should be much harder to break after future updates.
+
+🧹 **Recents:** fixed a rare issue where Clear all became disabled after restarting.
+
+🌑 **Super Dark:** fixed a few places where the dark theme wasn’t applying and made theme handling more efficient.
+
+✨ **Cleaner interface:** compact, consistent prompts and shorter descriptions throughout Pixel Suite. Animated previews and essential setup instructions remain.
+
+Install over the current official version and reboot.
+
+---
+
 ## v2.0.2
 
 This update brings Super Dark-Mode, better drawer-folder movement, and the folder/menu fixes from the latest rounds of testing. Thanks to everyone who helped test it.
 
 ## 🌑 Super Dark-Mode
 
-- **New Themes section:** Find Super Dark-Mode under Pixel Launcher in Pixel Suite. It starts disabled.
+- **New Themes section:** Find Super Dark-Mode under Themes in Pixel Suite. It starts disabled.
 - **Black backgrounds:** Supported Settings, notification shade, quick settings, lock-screen PIN/pattern backgrounds, launcher, Google search and Gboard surfaces use black or near-black colors. Cards remain distinct from the background; apps with their own palettes can look different.
 - **Follows your theme:** Switching to light mode restores the normal light theme. Switching back to dark reapplies Super Dark, including with a dark-theme schedule.
 - **Solid folder menus:** Folder panels, their three-dot menus and app shortcut menus share the same near-black tone under Super Dark. With blur disabled, menu backgrounds are opaque so text and icons behind them do not show through. App shortcut menus also follow Super Dark when other launcher customizations are off.

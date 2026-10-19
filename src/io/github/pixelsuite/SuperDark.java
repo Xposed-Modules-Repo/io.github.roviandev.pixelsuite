@@ -64,8 +64,6 @@ final class SuperDark {
             Module.log("SuperDark: scrim hooks " + h);
         } catch (Throwable t) { Module.log("SuperDark: ScrimView unavailable (" + t + ")"); }
         int n2 = 0;
-        n2 += hookPanel(android.graphics.Paint.class, "setColor");
-        n2 += hookPanel(android.graphics.Canvas.class, "drawColor");
         n2 += hookPanel(android.graphics.drawable.ColorDrawable.class, "setColor");
         n2 += hookPanel(android.graphics.drawable.GradientDrawable.class, "setColor");
         n2 += hookPanel(android.view.View.class, "setBackgroundColor");
@@ -249,7 +247,7 @@ final class SuperDark {
             case "surfacecontainer": return 0xff0b0b0b;
             case "surfacecontainerhigh": return 0xff121212;
             case "surfacecontainerhighest": return 0xff1a1a1a;
-            case "surfacebright": return 0xff222222;
+            case "surfacebright": return 0xff0e0e0e;
             case "surfacevariant": return 0xff161616;
             case "surfaceeffect0": case "surfaceeffect0fallback": return 0xff000000;
             case "surfaceeffect1": return 0xff0e0e0e;

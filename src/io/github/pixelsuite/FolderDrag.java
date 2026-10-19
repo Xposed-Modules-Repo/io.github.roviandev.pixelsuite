@@ -123,7 +123,7 @@ final class FolderDrag {
     private static Object drawerList(Activity a) {
         if (DrawerDrag.fromFolder()) return null;
         boolean drawer = DrawerDrag.active();
-        if (!drawer) try { drawer = call(call(a, "getStateManager"), "getState") == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
+        if (!drawer) try { drawer = LauncherFeatures.launcherState(call(a, "getStateManager")) == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
         if (!drawer) return null;
         try { return call(call(a, "getAppsView"), "getActiveRecyclerView"); } catch (Throwable error) { return null; }
     }
@@ -163,7 +163,7 @@ final class FolderDrag {
             return;
         }
         boolean drawer = DrawerDrag.active();
-        if (!drawer) try { drawer = call(call(a, "getStateManager"), "getState") == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
+        if (!drawer) try { drawer = LauncherFeatures.launcherState(call(a, "getStateManager")) == type("LauncherState").getField("ALL_APPS").get(null); } catch (Throwable ignored) { }
         if (drawer) {
             if (DrawerDrag.fromFolder()) return;
             try {

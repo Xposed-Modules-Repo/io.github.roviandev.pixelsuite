@@ -26,7 +26,6 @@ import java.util.Map;
 final class ScreenshotEditor {
     static final String PACKAGE = "com.google.android.apps.pixel.creativeassistant";
     static final int ICON_ID = 0x7f7ffd01;
-    static final String TOOLBAR_LAMBDA = "jgn", PEN_RESTART = "jip";
     private static final Feature.Cached sFreeCrop = new Feature.Cached(Feature.SCREENSHOT_FREE_CROP);
     private static Boolean sDoodles;
     static ClassLoader loader;
@@ -39,8 +38,9 @@ final class ScreenshotEditor {
         if (error == null) Module.log("screenshot-editor: " + message); else Module.log("screenshot-editor: " + message, error);
     }
 
-    static void install(ClassLoader cl) {
+    static void install(ClassLoader cl, android.content.pm.ApplicationInfo ai) {
         loader = cl;
+        StudioNames.resolve(cl, ai);
         installFreeCrop(cl);
         installDoodles(cl);
         installUndoRedo(cl);
@@ -54,28 +54,22 @@ final class ScreenshotEditor {
 
     static void installUndoRedo(ClassLoader cl) {
         try {
-            final Class<?> khq = Xp.findClass("khq", cl), jqx = Xp.findClass("jqx", cl), state = Xp.findClass("bsd", cl);
-            final Class<?> svf = Xp.findClass("svf", cl), jix = Xp.findClass("jix", cl);
-            sHistoryState = field(khq, "c");
-            sStateGet = state.getMethod("a");
-            sStateSet = state.getMethod("b", Object.class);
-            sHistoryMake = jqx.getConstructor(boolean.class, boolean.class, boolean.class);
-            sCanUndo = field(jqx, "a"); sCanRedo = field(jqx, "b"); sModified = field(jqx, "c");
-            sHistoryRefresh = method(khq, "f");
-            final Object unit = staticField(Xp.findClass("ssh", cl), "a");
+            final Class<?> khq = StudioNames.cls("history", cl), jqx = StudioNames.cls("undoState", cl), state = StudioNames.cls("state", cl);
+            final Class<?> svf = StudioNames.cls("fn0", cl), jix = StudioNames.cls("ui", cl), composer = StudioNames.cls("composer", cl);
+            sStateGet = getter(state);
+            sStateSet = setter(state);
+            sHistoryMake = jqx.getDeclaredConstructor(boolean.class, boolean.class, boolean.class);
+            sHistoryMake.setAccessible(true);
+            sCanUndo = probeFlag(jqx, true, false, false); sCanRedo = probeFlag(jqx, false, true, false); sModified = probeFlag(jqx, false, false, true);
+            sHistoryRefresh = method(khq, StudioNames.m("history.refresh"));
+            final Object unit = unit(cl);
             Xp.hookMethod(sHistoryRefresh, new Xp.Callback() {
                 @Override protected void afterHookedMethod(Xp.Param p) {
                     sHistoryOwner = new WeakReference<Object>(p.thisObject);
                     publishDoodleHistory(p.thisObject);
                 }
             });
-            Method bar = null;
-            for (Method m : jix.getDeclaredMethods()) {
-                Class<?>[] t = m.getParameterTypes();
-                if (m.getName().equals("e") && t.length == 6 && t[0] == boolean.class && t[1] == boolean.class && t[2] == svf && t[3] == svf) bar = m;
-            }
-            if (bar == null) throw new NoSuchMethodException("jix.e(undo, redo)");
-            bar.setAccessible(true);
+            Method bar = method(jix, StudioNames.m("ui.undoBar"), boolean.class, boolean.class, svf, svf, composer, int.class);
             final Class<?> function = svf;
             Xp.hookMethod(bar, new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
@@ -97,7 +91,7 @@ final class ScreenshotEditor {
         if (original == null) return null;
         return Proxy.newProxyInstance(function.getClassLoader(), new Class<?>[]{function}, new InvocationHandler() {
             @Override public Object invoke(Object proxy, Method m, Object[] args) throws Throwable {
-                if (m.getName().equals("a") && m.getParameterTypes().length == 0) {
+                if (m.getDeclaringClass() != Object.class && m.getParameterTypes().length == 0) {
                     if (undo ? DoodleOverlay.undo() : DoodleOverlay.redo()) return unit;
                 }
                 if (m.getDeclaringClass() == Object.class) {
@@ -112,7 +106,8 @@ final class ScreenshotEditor {
 
     static void publishDoodleHistory(Object owner) {
         try {
-            Object state = sHistoryState.get(owner);
+            if (sHistoryState == null) sHistoryState = historyField(owner);
+            Object state = sHistoryState == null ? null : sHistoryState.get(owner);
             if (state == null || sStateSet == null || !sStateGet.getDeclaringClass().isInstance(state)) return;
             boolean undo = DoodleOverlay.canUndo(), redo = DoodleOverlay.canRedo(), any = DoodleOverlay.hasShapes();
             if (!undo && !redo && !any) return;
@@ -120,6 +115,21 @@ final class ScreenshotEditor {
             sStateSet.invoke(state, sHistoryMake.newInstance(
                     sCanUndo.getBoolean(now) || undo, sCanRedo.getBoolean(now) || redo, sModified.getBoolean(now) || any));
         } catch (Throwable error) { logOnce("undo/redo state not published", error); }
+    }
+
+    private static Field historyField(Object owner) {
+        for (Class<?> c = owner.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
+                try {
+                    f.setAccessible(true);
+                    Object v = f.get(owner);
+                    if (v != null && sStateGet.getDeclaringClass().isInstance(v) && sHistoryMake.getDeclaringClass().isInstance(sStateGet.invoke(v))) return f;
+                } catch (Throwable ignored) { }
+            }
+        }
+        logOnce("undo/redo state field not found", null);
+        return null;
     }
 
     static void doodleHistoryChanged() {
@@ -161,13 +171,63 @@ final class ScreenshotEditor {
         Method m = type.getDeclaredMethod(name, params); m.setAccessible(true); return m;
     }
 
+    static Method sam(Class<?> iface) throws NoSuchMethodException {
+        for (Method m : iface.getMethods()) if (m.getDeclaringClass() != Object.class && !m.isDefault() && !java.lang.reflect.Modifier.isStatic(m.getModifiers())) return m;
+        throw new NoSuchMethodException("no method in " + iface.getName());
+    }
+    static Method getter(Class<?> state) throws NoSuchMethodException {
+        for (Method m : state.getMethods()) if (m.getParameterTypes().length == 0 && m.getReturnType() == Object.class && m.getDeclaringClass() != Object.class) return m;
+        throw new NoSuchMethodException("state getter in " + state.getName());
+    }
+    static Method setter(Class<?> state) throws NoSuchMethodException {
+        for (Method m : state.getMethods()) { Class<?>[] t = m.getParameterTypes(); if (t.length == 1 && t[0] == Object.class && m.getReturnType() == void.class) return m; }
+        throw new NoSuchMethodException("state setter in " + state.getName());
+    }
+    static Object unit(ClassLoader cl) throws Exception {
+        Class<?> u = StudioNames.cls("unit", cl);
+        for (Field f : u.getDeclaredFields()) if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) && f.getType() == u) { f.setAccessible(true); return f.get(null); }
+        throw new NoSuchFieldException("kotlin.Unit instance");
+    }
+    static Field fieldOfType(Class<?> owner, Class<?> type) throws NoSuchFieldException {
+        Field found = null;
+        for (Field f : owner.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType() != type) continue;
+            if (found != null) throw new NoSuchFieldException("more than one " + type.getName() + " in " + owner.getName());
+            found = f;
+        }
+        if (found == null) throw new NoSuchFieldException(type.getName() + " in " + owner.getName());
+        found.setAccessible(true);
+        return found;
+    }
+    private static Field probeFlag(Class<?> type, boolean a, boolean b, boolean c) throws Exception {
+        Object v = sHistoryMake.newInstance(a, b, c);
+        for (Field f : type.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType() != boolean.class) continue;
+            f.setAccessible(true);
+            if (f.getBoolean(v)) return f;
+        }
+        throw new NoSuchFieldException("undo flag in " + type.getName());
+    }
+    static Map<String, Object> enumByName(Class<?> type) throws Exception {
+        Map<String, Object> out = new HashMap<String, Object>();
+        for (Field f : type.getDeclaredFields()) {
+            if (!java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType() != type) continue;
+            f.setAccessible(true);
+            Object v = f.get(null);
+            if (v != null) out.put(String.valueOf(v), v);
+        }
+        return out;
+    }
+
     static void installFreeCrop(ClassLoader cl) {
         try {
-            final Class<?> handler = Xp.findClass("jfs", cl);
-            final Class<?> rect = Xp.findClass("cer", cl), state = Xp.findClass("bsd", cl), svq = Xp.findClass("svq", cl);
+            final Class<?> handler = StudioNames.cls("crop", cl);
+            final Class<?> rect = StudioNames.cls("rect", cl), state = StudioNames.cls("state", cl), svq = StudioNames.cls("fn1", cl);
             Constructor<?> ctor = handler.getDeclaredConstructor(state, state, rect, float.class, svq);
             Xp.hookMethod(ctor, new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
+                    remember(sRectStates, p.args[0]);
+                    remember(sHandleStates, p.args[1]);
                     if (!setting(sFreeCrop, Feature.SCREENSHOT_FREE_CROP)) return;
                     float stock = ((Number) p.args[3]).floatValue();
                     p.args[3] = 1f;
@@ -181,34 +241,73 @@ final class ScreenshotEditor {
         }
     }
 
-    static void installCropHandles(ClassLoader cl, Class<?> rectType, Class<?> stateType) throws Exception {
-        final Class<?> lambda = Xp.findClass("hsj", cl);
-        final Field which = field(lambda, "c"), rectState = field(lambda, "a"), handleState = field(lambda, "b");
-        final Method get = stateType.getMethod("a"), set = stateType.getMethod("b", Object.class);
-        final Field left = field(rectType, "b"), top = field(rectType, "c"), right = field(rectType, "d"), bottom = field(rectType, "e");
-        final Field offset = field(Xp.findClass("ceq", cl), "a");
-        Class<?> edges = Xp.findClass("jez", cl);
-        final Object[] handle = new Object[9];
-        String[] names = {"a", "b", "c", "d", "e", "f", "g", "h", "i"};
-        for (int i = 0; i < 9; i++) handle[i] = staticField(edges, names[i]);
-        if (!"INSIDE".equals(String.valueOf(handle[8])) && !String.valueOf(handle[8]).contains("INSIDE")) {
-            logOnce("crop handle names changed (" + handle[8] + "), stock touch areas kept", null);
-            return;
+    private static final List<WeakReference<Object>> sRectStates = new java.util.ArrayList<WeakReference<Object>>();
+    private static final List<WeakReference<Object>> sHandleStates = new java.util.ArrayList<WeakReference<Object>>();
+
+    private static void remember(List<WeakReference<Object>> list, Object o) {
+        if (o == null) return;
+        synchronized (list) {
+            for (int i = list.size() - 1; i >= 0; i--) if (list.get(i).get() == null || list.size() > 8) list.remove(i);
+            list.add(new WeakReference<Object>(o));
         }
-        final Object unit = staticField(Xp.findClass("ssh", cl), "a");
-        Method invoke = lambda.getDeclaredMethod("a", Object.class);
+    }
+    private static boolean holds(List<WeakReference<Object>> list, Object o) {
+        if (o == null) return false;
+        synchronized (list) { for (WeakReference<Object> r : list) if (r.get() == o) return true; }
+        return false;
+    }
+
+    static void installCropHandles(ClassLoader cl, Class<?> rectType, Class<?> stateType) throws Exception {
+        final Class<?> lambda = StudioNames.cls("cropLambda", cl);
+        final List<Field> slots = new java.util.ArrayList<Field>();
+        for (Field f : lambda.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
+            f.setAccessible(true); slots.add(f);
+        }
+        final Method get = getter(stateType), set = setter(stateType);
+        final Field[] ltrb = new Field[4];
+        Constructor<?> make = rectType.getDeclaredConstructor(float.class, float.class, float.class, float.class);
+        make.setAccessible(true);
+        Object probe = make.newInstance(1f, 2f, 3f, 4f);
+        for (Field f : rectType.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType() != float.class) continue;
+            f.setAccessible(true);
+            int v = Math.round(f.getFloat(probe));
+            if (v >= 1 && v <= 4) ltrb[v - 1] = f;
+        }
+        for (Field f : ltrb) if (f == null) throw new NoSuchFieldException("crop rect edges in " + rectType.getName());
+        final Map<String, Object> edges = enumByName(StudioNames.cls("edges", cl));
+        final Object[] handle = new Object[9];
+        String[] names = {"LEFT", "TOP", "RIGHT", "BOTTOM", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "INSIDE"};
+        for (int i = 0; i < 9; i++) {
+            handle[i] = edges.get(names[i]);
+            if (handle[i] == null) { logOnce("crop handle names changed (" + edges.keySet() + "), stock touch areas kept", null); return; }
+        }
+        final Object unit = unit(cl);
+        Method invoke = lambda.getDeclaredMethod(sam(StudioNames.cls("fn1", cl)).getName(), Object.class);
+        invoke.setAccessible(true);
+        final Map<Class<?>, Field> offsetField = new HashMap<Class<?>, Field>();
         Xp.hookMethod(invoke, new Xp.Callback() {
             @Override protected void beforeHookedMethod(Xp.Param p) {
                 try {
-                    if (which.getInt(p.thisObject) != 20 || p.args[0] == null) return;
+                    Object at = p.args[0];
+                    if (at == null) return;
+                    Object rectState = null, handleState = null;
+                    for (Field f : slots) {
+                        Object v = f.get(p.thisObject);
+                        if (holds(sRectStates, v)) rectState = v; else if (holds(sHandleStates, v)) handleState = v;
+                    }
+                    if (rectState == null || handleState == null) return;
                     if (!setting(sFreeCrop, Feature.SCREENSHOT_FREE_CROP)) return;
-                    Object r = get.invoke(rectState.get(p.thisObject));
-                    if (r == null) return;
-                    long packed = offset.getLong(p.args[0]);
+                    Field off = offsetField.get(at.getClass());
+                    if (off == null) { off = fieldOfType(at.getClass(), long.class); offsetField.put(at.getClass(), off); }
+                    Object r = get.invoke(rectState);
+                    if (!rectType.isInstance(r)) return;
+                    long packed = off.getLong(at);
                     float x = Float.intBitsToFloat((int) (packed >> 32)), y = Float.intBitsToFloat((int) packed);
-                    int pick = CropHit.pick(left.getFloat(r), top.getFloat(r), right.getFloat(r), bottom.getFloat(r), x, y,
+                    int pick = CropHit.pick(ltrb[0].getFloat(r), ltrb[1].getFloat(r), ltrb[2].getFloat(r), ltrb[3].getFloat(r), x, y,
                             24 * Resources.getSystem().getDisplayMetrics().density);
-                    set.invoke(handleState.get(p.thisObject), pick < 0 ? null : handle[pick]);
+                    set.invoke(handleState, pick < 0 ? null : handle[pick]);
                     p.setResult(unit);
                 } catch (Throwable error) {
                     logOnce("crop handle hit test failed, stock one used", error);
@@ -228,28 +327,30 @@ final class ScreenshotEditor {
 
     static void installDoodles(final ClassLoader cl) {
         try {
-            final Class<?> jix = Xp.findClass("jix", cl), composer = Xp.findClass("bqi", cl), modifier = Xp.findClass("cbw", cl);
-            final Class<?> painterType = Xp.findClass("chx", cl);
-            svfType = Xp.findClass("svf", cl);
-            stateType = Xp.findClass("bsd", cl);
-            penButton = method(jix, "k", modifier, painterType, painterType, long.class, boolean.class, svfType, composer, int.class);
-            toolButton = method(jix, "L", int.class, svfType, boolean.class, modifier, composer, int.class);
-            spacer = method(Xp.findClass("afq", cl), "z", modifier, composer);
-            width = method(Xp.findClass("ajd", cl), "i", modifier, float.class);
-            emptyModifier = staticField(modifier, "g");
-            readState = stateType.getMethod("a");
-            writeState = stateType.getMethod("b", Object.class);
-            Class<?> mutable = Xp.findClass("btx", cl), policyType = Xp.findClass("bty", cl);
+            final Class<?> jix = StudioNames.cls("ui", cl), composer = StudioNames.cls("composer", cl), modifier = StudioNames.cls("modifier", cl);
+            final Class<?> painterType = StudioNames.cls("painter", cl);
+            uiClass = jix.getName(); painterClass = painterType;
+            svfType = StudioNames.cls("fn0", cl);
+            stateType = StudioNames.cls("state", cl);
+            penButton = method(jix, StudioNames.m("ui.pen"), modifier, painterType, painterType, long.class, boolean.class, svfType, composer, int.class);
+            toolButton = method(jix, StudioNames.m("ui.tool"), int.class, svfType, boolean.class, modifier, composer, int.class);
+            try {
+                spacer = method(StudioNames.cls("spacer", cl), StudioNames.m("spacer.m"), modifier, composer);
+                width = method(StudioNames.cls("width", cl), StudioNames.m("width.m"), modifier, float.class);
+            } catch (Throwable missing) { spacer = width = null; logOnce("doodles button gap left out (" + missing + ")", null); }
+            emptyModifier = emptyModifier(modifier);
+            readState = getter(stateType);
+            writeState = setter(stateType);
+            Class<?> mutable = StudioNames.cls("mutable", cl), policyType = StudioNames.cls("policy", cl);
             Constructor<?> state = mutable.getDeclaredConstructor(Object.class, policyType);
             state.setAccessible(true);
-            selectedState = state.newInstance(Boolean.FALSE, staticField(Xp.findClass("buf", cl), "a"));
-            final Method doneButton = method(jix, "f", String.class, boolean.class, svfType, int.class, composer, int.class, int.class);
-            final Class<?> clickLambda = Xp.findClass("jgi", cl);
-            final Field clickCase = field(clickLambda, "c");
+            selectedState = state.newInstance(Boolean.FALSE, structuralPolicy(StudioNames.cls("policy.impl", cl)));
+            final Method doneButton = method(jix, StudioNames.m("ui.done"), String.class, boolean.class, svfType, int.class, composer, int.class, int.class);
 
-            Method painterResource = method(Xp.findClass("dee", cl), "J", int.class, composer, int.class);
-            final Constructor<?> bitmapPainter = Xp.findClass("chv", cl).getDeclaredConstructor(Xp.findClass("cey", cl));
-            final Constructor<?> imageBitmap = Xp.findClass("cey", cl).getDeclaredConstructor(Bitmap.class);
+            Method painterResource = method(StudioNames.cls("painterRes", cl), StudioNames.m("painterRes.m"), int.class, composer, int.class);
+            final Class<?> imageType = StudioNames.cls("imageBitmap", cl);
+            final Constructor<?> bitmapPainter = StudioNames.cls("bitmapPainter", cl).getDeclaredConstructor(imageType);
+            final Constructor<?> imageBitmap = imageType.getDeclaredConstructor(Bitmap.class);
             bitmapPainter.setAccessible(true); imageBitmap.setAccessible(true);
             Xp.hookMethod(painterResource, new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
@@ -259,19 +360,22 @@ final class ScreenshotEditor {
                         p.setResult(painter);
                     } catch (Throwable error) { logOnce("doodles icon unavailable", error); }
                 }
+                @Override protected void afterHookedMethod(Xp.Param p) {
+                    Object r = p.getResult();
+                    if (r != null && r != painter) synchronized (painterIds) { painterIds.put(r, (Integer) p.args[0]); }
+                }
             });
 
             Xp.hookMethod(penButton, new Xp.Callback() {
                 @Override protected void afterHookedMethod(Xp.Param p) {
-                    Object click = p.args[5];
-                    int which = -1;
-                    try { if (clickLambda.isInstance(click)) which = clickCase.getInt(click); } catch (Throwable ignored) { }
+                    Integer which;
+                    synchronized (painterIds) { which = painterIds.get(p.args[1]); }
                     track("stroke" + which, Boolean.TRUE.equals(p.args[4]));
-                    if (which != 4 || !doodlesOn() || !fromToolbarRow()) return;
+                    if (which == null || which != normalPen() || !doodlesOn() || !fromToolbarRow()) return;
                     try {
                         Object composer = p.args[6];
                         boolean selected = Boolean.TRUE.equals(readState.invoke(selectedState));
-                        spacer.invoke(null, width.invoke(null, emptyModifier, 4f), composer);
+                        if (spacer != null && width != null) spacer.invoke(null, width.invoke(null, emptyModifier, 4f), composer);
                         toolButton.invoke(null, ICON_ID, click(), selected, emptyModifier, composer, 0);
                         logOnce("doodles button added after the pen", null);
                     } catch (Throwable error) { logOnce("doodles button could not be added", error); }
@@ -307,12 +411,59 @@ final class ScreenshotEditor {
         }
     }
 
+    static String uiClass; static Class<?> painterClass;
+    static final Map<Object, Integer> painterIds = new java.util.WeakHashMap<Object, Integer>();
+    private static int sNormalPen;
+
+    static int normalPen() {
+        if (sNormalPen == 0) {
+            Context c = app();
+            if (c != null) sNormalPen = c.getResources().getIdentifier("brush_normal_bristles", "drawable", PACKAGE);
+            if (sNormalPen == 0) { logOnce("pen icon not found, doodles button skipped", null); return -1; }
+        }
+        return sNormalPen;
+    }
+
+    static Object emptyModifier(Class<?> modifier) throws Exception {
+        for (Field f : modifier.getDeclaredFields()) {
+            if (!java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+            f.setAccessible(true);
+            Object v = f.get(null);
+            if (modifier.isInstance(v)) return v;
+        }
+        throw new NoSuchFieldException("empty Modifier in " + modifier.getName());
+    }
+
+    static Object structuralPolicy(Class<?> impl) throws Exception {
+        Object any = null;
+        for (Field f : impl.getDeclaredFields()) {
+            if (!java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType() != impl) continue;
+            f.setAccessible(true);
+            Object v = f.get(null);
+            if (v != null && String.valueOf(v).contains("Structural")) return v;
+            if (any == null) any = v;
+        }
+        if (any == null) throw new NoSuchFieldException("equality policy in " + impl.getName());
+        return any;
+    }
+
     static boolean fromToolbarRow() {
+        String row = StudioNames.get("toolbarLambda"), restart = StudioNames.get("penRestart");
         StackTraceElement[] stack = new Throwable().getStackTrace();
+        String caller = null;
         for (int i = 0; i < stack.length && i < 80; i++) {
             String name = stack[i].getClassName();
-            if (TOOLBAR_LAMBDA.equals(name)) return true;
-            if (PEN_RESTART.equals(name)) return false;
+            if (name.equals(row)) return true;
+            if (name.equals(restart)) return false;
+            if (caller == null && name.indexOf('.') < 0 && !name.equals(uiClass) && !name.startsWith("$") && !name.startsWith("LSP")) caller = name;
+        }
+        if (caller != null && painterClass != null) {
+            try {
+                int painters = 0;
+                for (Field f : Class.forName(caller, false, loader).getDeclaredFields()) if (f.getType() == painterClass) painters++;
+                logOnce("toolbar row told apart by shape (" + caller + ")", null);
+                return painters < 2;
+            } catch (Throwable ignored) { }
         }
         logOnce("toolbar row not found on the stack, doodles button skipped", null);
         return false;
@@ -343,7 +494,7 @@ final class ScreenshotEditor {
                 if ("hashCode".equals(name)) return System.identityHashCode(proxy);
                 if ("toString".equals(name)) return "PixelSuiteDoodlesClick";
                 main.post(new Runnable() { public void run() { DoodleOverlay.toggle(); } });
-                return staticField(Xp.findClass("ssh", loader), "a");
+                return unit(loader);
             }
         });
         return clickProxy;
@@ -352,18 +503,21 @@ final class ScreenshotEditor {
     static void closeNativeTool() {
         Object done = doneClick;
         if (done == null || !anyNativeToolOn()) return;
-        try { svfType.getMethod("a").invoke(done); } catch (Throwable error) { logOnce("native tool could not be closed", error); }
+        try { sam(svfType).invoke(done); } catch (Throwable error) { logOnce("native tool could not be closed", error); }
     }
 
     static Field rendererCanvas;
     static Method canvasMatrix;
 
     static void installRendering(ClassLoader cl) throws Exception {
-        final Class<?> renderer = Xp.findClass("irq", cl), config = Xp.findClass("irl", cl), view = Xp.findClass("irt", cl);
-        rendererCanvas = field(renderer, "c");
-        canvasMatrix = method(Xp.findClass("ira", cl), "f");
-        final Field toExport = field(config, "f");
-        Xp.hookMethod(method(renderer, "a", config), new Xp.Callback() {
+        final Class<?> renderer = StudioNames.cls("renderer", cl), config = StudioNames.cls("config", cl), view = StudioNames.cls("view", cl);
+        Class<?> area = StudioNames.cls("area", cl);
+        rendererCanvas = fieldOfType(renderer, area);
+        canvasMatrix = method(area, StudioNames.m("area.matrix"));
+        Field export = null;
+        try { export = fieldOfType(config, boolean.class); } catch (Throwable onlyForTheLog) { }
+        final Field toExport = export;
+        Xp.hookMethod(method(renderer, StudioNames.m("renderer.picture"), config), new Xp.Callback() {
             @Override protected void afterHookedMethod(Xp.Param p) {
                 List<Doodle> shapes = DoodleOverlay.snapshot(p.thisObject);
                 if (shapes.isEmpty() || !(p.getResult() instanceof Picture)) return;
@@ -379,7 +533,7 @@ final class ScreenshotEditor {
                     canvas.restoreToCount(save);
                     out.endRecording();
                     p.setResult(out);
-                    if (toExport.getBoolean(p.args[0])) Module.log("screenshot-editor: " + shapes.size() + " doodles saved into the image");
+                    if (toExport != null && toExport.getBoolean(p.args[0])) Module.log("screenshot-editor: " + shapes.size() + " doodles saved into the image");
                 } catch (Throwable error) { logOnce("doodles could not be drawn into the image", error); }
             }
         });

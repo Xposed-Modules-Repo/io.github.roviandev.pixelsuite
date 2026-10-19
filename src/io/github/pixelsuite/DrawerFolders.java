@@ -45,15 +45,89 @@ final class DrawerFolders {
     static boolean dragEnabled(){return LauncherFeatures.on(LauncherFeatures.DRAWER)||LauncherFeatures.on(LauncherFeatures.DRAG_PILL);}
     static void install() throws Exception {
         DrawerFolderAlignment.install();
+        installOpenTracking();
         Xp.hookAllMethods(Xp.findClass("com.google.android.apps.nexuslauncher.NexusLauncherActivity",LauncherFeatures.loader),"onStateBack",new Xp.Callback(){
             protected void beforeHookedMethod(Xp.Param p){
                 if(FrostedSurface.dismissOpenDialogs()){p.setResult(null);return;}
-                Object top=Xp.callStaticMethod(type("AbstractFloatingView"),"getTopOpenView",p.thisObject);
+                long ago=android.os.SystemClock.uptimeMillis()-folderClosedAt;
+                Object top=null;try{top=Xp.callStaticMethod(type("AbstractFloatingView"),"getTopOpenView",p.thisObject);}catch(Throwable ignored){}
+                View open=openDrawerFolder();
+                if(folderClosedAt>0 && ago<700){p.setResult(null);return;}
+                if(open!=null){folderClosedAt=android.os.SystemClock.uptimeMillis();call(open,"close",true);p.setResult(null);return;}
                 if(top!=null && type("folder.Folder").isInstance(top) && isFolder(get(top,"mInfo"))){
-                    call(top,"close",true);p.setResult(null);
+                    folderClosedAt=android.os.SystemClock.uptimeMillis();call(top,"close",true);p.setResult(null);
                 }
             }
         });
+        int backHooks=0;
+        Xp.Callback backClose=new Xp.Callback(){
+            protected void beforeHookedMethod(Xp.Param p){try{if(type("folder.Folder").isInstance(p.thisObject)&&isFolder(get(p.thisObject,"mInfo")))folderClosedAt=android.os.SystemClock.uptimeMillis();}catch(Throwable ignored){}}
+        };
+        Xp.Callback closeFromBack=new Xp.Callback(){
+            protected void beforeHookedMethod(Xp.Param p){
+                try{
+                    if(!isFolder(get(p.thisObject,"mInfo")))return;
+                    for(StackTraceElement e:new Throwable().getStackTrace()){String m=e.getMethodName();if(m.startsWith("onBack")||m.equals("onStateBack")){folderClosedAt=android.os.SystemClock.uptimeMillis();return;}}
+                }catch(Throwable ignored){}
+            }
+        };
+        for(String closing:new String[]{"handleClose","animateClosed"})backHooks+=Xp.hookAllMethods(type("folder.Folder"),closing,closeFromBack).size();
+        for(String back:new String[]{"onBackInvoked","onBackPressed","onBackStarted"}){
+            backHooks+=Xp.hookAllMethods(type("AbstractFloatingView"),back,backClose).size();
+            backHooks+=Xp.hookAllMethods(type("folder.Folder"),back,backClose).size();
+        }
+        for(String cls:new String[]{"com.android.launcher3.uioverrides.states.AllAppsState","com.android.launcher3.LauncherState","com.android.launcher3.allapps.AllAppsTransitionController","com.android.launcher3.uioverrides.touchcontrollers.AllAppsSwipeController"}){
+            for(String m:new String[]{"onBackStarted","onBackProgressed","onBackInvoked","onBackCancelled","startBackAnimation","onBackAnimationStarted","handleBackInvoked"}){
+                try{
+                    backHooks+=Xp.hookAllMethods(Xp.findClass(cls,LauncherFeatures.loader),m,new Xp.Callback(){
+                        protected void beforeHookedMethod(Xp.Param p){
+                            View folder=openDrawerFolder();long ago=android.os.SystemClock.uptimeMillis()-folderClosedAt;
+                            if(folder==null&&(folderClosedAt<=0||ago>=700))return;
+                            String n=((java.lang.reflect.Method)p.method).getName();
+                            if(n.equals("onBackInvoked")&&folder!=null){folderClosedAt=android.os.SystemClock.uptimeMillis();try{call(folder,"close",true);}catch(Throwable ignored){}}
+                            if(n.equals("onBackStarted")&&folder!=null)folderClosedAt=android.os.SystemClock.uptimeMillis();
+                            p.setResult(null);
+                        }
+                    }).size();
+                }catch(Throwable missing){}
+            }
+        }
+        for(String launcherClass:new String[]{"com.android.launcher3.Launcher","com.android.launcher3.uioverrides.QuickstepLauncher","com.google.android.apps.nexuslauncher.NexusLauncherActivity"}){
+            try{
+                backHooks+=Xp.hookAllMethods(Xp.findClass(launcherClass,LauncherFeatures.loader),"getOnBackAnimationCallback",new Xp.Callback(){
+                    protected void afterHookedMethod(Xp.Param p){
+                        final View folder=openDrawerFolder();if(folder==null)return;
+                        Class<?> want=((java.lang.reflect.Method)p.method).getReturnType();
+                        if(!want.isInterface())return;
+                        p.setResult(java.lang.reflect.Proxy.newProxyInstance(LauncherFeatures.loader,new Class<?>[]{want},new java.lang.reflect.InvocationHandler(){
+                            public Object invoke(Object proxy,java.lang.reflect.Method m,Object[] args){
+                                String n=m.getName();
+                                if(n.equals("onBackInvoked")){try{folderClosedAt=android.os.SystemClock.uptimeMillis();call(folder,"close",true);}catch(Throwable error){Module.log("Drawer folder back",error);}return null;}
+                                if(n.equals("equals"))return proxy==(args==null?null:args[0]);
+                                if(n.equals("hashCode"))return System.identityHashCode(proxy);
+                                if(n.equals("toString"))return "PixelSuiteDrawerFolderBack";
+                                return null;
+                            }
+                        }));
+                    }
+                }).size();
+            }catch(Throwable missing){}
+        }
+        try{
+            Class<?> dispatcher=Class.forName("android.window.WindowOnBackInvokedDispatcher");
+            backHooks+=Xp.hookAllMethods(dispatcher,"registerOnBackInvokedCallback",new Xp.Callback(){
+                protected void beforeHookedMethod(Xp.Param p){wrapBack(p,1);}
+            }).size();
+            backHooks+=Xp.hookAllMethods(dispatcher,"unregisterOnBackInvokedCallback",new Xp.Callback(){
+                protected void beforeHookedMethod(Xp.Param p){if(p.args.length>0){Object w=wrappedBack.remove(p.args[0]);if(w!=null)p.args[0]=w;}}
+            }).size();
+        }catch(Throwable missing){Module.log("Drawer folder back: dispatcher unavailable ("+missing+")");}
+        try{
+            backHooks+=Xp.hookAllMethods(Xp.findClass("com.android.launcher3.Launcher",LauncherFeatures.loader),"onBackPressed",new Xp.Callback(){
+                protected void beforeHookedMethod(Xp.Param p){View folder=openDrawerFolder();if(folder!=null){folderClosedAt=android.os.SystemClock.uptimeMillis();call(folder,"close",true);p.setResult(null);}}
+            }).size();
+        }catch(Throwable missing){}
+        Module.log("Drawer folder back hooks "+backHooks);
         Xp.hookAllMethods(type("statemanager.StateManager"),"goToState",new Xp.Callback(){
             protected void beforeHookedMethod(Xp.Param p){
                 if(p.args.length==0||DrawerDrag.active())return;
@@ -248,6 +322,164 @@ final class DrawerFolders {
     }
     static String displayName(String key){Object app=known.get(key);return app==null?key:String.valueOf(get(app,"title"));}
     static boolean isDrawerMember(Object info){try{return ((Number)get(info,"container")).intValue()<=CONTAINER;}catch(Throwable t){return false;}}
+    static volatile long folderClosedAt;
+
+    private static final java.util.Map<Object,Object> wrappedBack=java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<Object,Object>());
+
+    private static void wrapBack(Xp.Param p,int at){
+        if(p.args.length<=at||p.args[at]==null)return;
+        final Object original=p.args[at];
+        if(original.getClass().getClassLoader()!=LauncherFeatures.loader)return;
+        if(wrappedBack.containsValue(original))return;
+        if(wrappedBack.containsKey(original)){p.args[at]=wrappedBack.get(original);return;}
+        java.util.List<Class<?>> faces=new java.util.ArrayList<Class<?>>();
+        for(Class<?> k=original.getClass();k!=null;k=k.getSuperclass())for(Class<?> f:k.getInterfaces())if(f.getName().startsWith("android.window.")&&!faces.contains(f))faces.add(f);
+        if(faces.isEmpty())return;
+        final boolean[] mine=new boolean[1];
+        Object wrapper=java.lang.reflect.Proxy.newProxyInstance(LauncherFeatures.loader,faces.toArray(new Class<?>[0]),new java.lang.reflect.InvocationHandler(){
+            public Object invoke(Object proxy,java.lang.reflect.Method m,Object[] args)throws Throwable{
+                String n=m.getName();
+                if(n.equals("equals"))return proxy==(args==null?null:args[0]);
+                if(n.equals("hashCode"))return System.identityHashCode(proxy);
+                if(n.equals("toString"))return "PixelSuiteBack("+original+")";
+                if(n.equals("onBackStarted")){
+                    mine[0]=openDrawerFolder()!=null;
+                    long shutAgo=android.os.SystemClock.uptimeMillis()-folderShutAt;
+                    if(!mine[0]&&folderShutAt>0&&shutAgo<250){mine[0]=true;folderClosedAt=android.os.SystemClock.uptimeMillis();}
+                    else if(!mine[0])folderClosedAt=0;
+                }
+                if(mine[0]||(n.equals("onBackInvoked")&&openDrawerFolder()!=null)){
+                    if(n.equals("onBackInvoked")){mine[0]=false;View folder=openDrawerFolder();if(folder!=null)try{folderClosedAt=android.os.SystemClock.uptimeMillis();call(folder,"close",true);}catch(Throwable error){Module.log("Drawer folder back",error);}}
+                    if(n.equals("onBackCancelled"))mine[0]=false;
+                    return null;
+                }
+                try{return m.invoke(original,args);}catch(java.lang.reflect.InvocationTargetException e){throw e.getCause();}
+            }
+        });
+        wrappedBack.put(original,wrapper);p.args[at]=wrapper;
+    }
+
+    private static java.lang.ref.WeakReference<View> openFolder=new java.lang.ref.WeakReference<View>(null);
+    static volatile long folderOpenedAt, folderShutAt;
+
+    static void markOpen(View f,String how){
+        if(f==null)return;
+        long now=android.os.SystemClock.uptimeMillis();
+        Xp.setAdditionalInstanceField(f,"pixelsuite_opened_at",now);
+        openFolder=new java.lang.ref.WeakReference<View>(f);folderOpenedAt=now;
+    }
+    static void markShut(View f,String how){
+        long now=android.os.SystemClock.uptimeMillis();
+        Object opened=Xp.getAdditionalInstanceField(f,"pixelsuite_opened_at");
+        if(!(opened instanceof Long))return;
+        Object closed=Xp.getAdditionalInstanceField(f,"pixelsuite_closed_at");
+        boolean wasOpen=!(closed instanceof Long)||(Long)closed<(Long)opened;
+        Xp.setAdditionalInstanceField(f,"pixelsuite_closed_at",now);
+        if(openFolder.get()==f)openFolder=new java.lang.ref.WeakReference<View>(null);
+        if(wasOpen){folderShutAt=now;busyWaits=0;scheduleRebind();}
+    }
+    static Boolean openByRecord(View f){
+        Object opened=Xp.getAdditionalInstanceField(f,"pixelsuite_opened_at");
+        if(!(opened instanceof Long))return null;
+        Object closed=Xp.getAdditionalInstanceField(f,"pixelsuite_closed_at");
+        return !(closed instanceof Long)||(Long)closed<(Long)opened;
+    }
+
+    private static void installOpenTracking(){
+        try{
+            int n=Xp.hookAllMethods(type("folder.Folder"),"animateOpen",new Xp.Callback(){
+                protected void afterHookedMethod(Xp.Param p){
+                    View f=(View)p.thisObject;
+                    if(drawerFolderView(f))markOpen(f,"animateOpen");
+                }
+            }).size();
+            for(final String m:new String[]{"close","handleClose","animateClosed","closeComplete"}){
+                Xp.Callback shut=new Xp.Callback(){
+                    protected void beforeHookedMethod(Xp.Param p){
+                        if(!(p.thisObject instanceof View))return;
+                        markShut((View)p.thisObject,m);
+                    }
+                };
+                n+=Xp.hookAllMethods(type("folder.Folder"),m,shut).size();
+                if(m.equals("close"))try{n+=Xp.hookAllMethods(type("AbstractFloatingView"),m,shut).size();}catch(Throwable ignored){}
+            }
+            installClickGuard();
+            Module.log("Drawer folder open tracking: "+n+" hooks");
+        }catch(Throwable error){Module.log("Drawer folder open tracking unavailable, using the on-screen check",error);}
+    }
+
+    private static void installClickGuard(){
+        try{
+            Xp.hookAllMethods(Xp.findClass("com.android.launcher3.touch.ItemClickHandler",LauncherFeatures.loader),"onClick",new Xp.Callback(){
+                protected void beforeHookedMethod(Xp.Param p){
+                    if(p.args.length!=1||!(p.args[0] instanceof View))return;
+                    View v=(View)p.args[0];
+                    if(Xp.getAdditionalInstanceField(v,"pixelsuite_drawer_folder_cell")!=null)return;
+                    long now=android.os.SystemClock.uptimeMillis();
+                    View folder=openDrawerFolder();
+                    boolean inside=folder!=null&&isInside(v,folder);
+                    String why=null;
+                    if(folder!=null&&!inside)why="outside the open folder";
+                    else if(inside&&folderOpenedAt>0&&now-folderOpenedAt<200)why="folder opened "+(now-folderOpenedAt)+" ms ago";
+                    else if(folder==null&&folderShutAt>0&&now-folderShutAt<300&&drawerTap(v))why="folder closed "+(now-folderShutAt)+" ms ago";
+                    if(why==null)return;
+                    p.setResult(null);
+                }
+            });
+        }catch(Throwable error){Module.log("Drawer folder tap guard unavailable",error);}
+    }
+    private static boolean drawerTap(View v){
+        for(View q=v;q!=null;){
+            if(q.getClass().getName().contains(".allapps."))return true;
+            if(type("folder.Folder").isInstance(q)&&drawerFolderView(q))return true;
+            android.view.ViewParent parent=q.getParent();q=parent instanceof View?(View)parent:null;
+        }
+        return false;
+    }
+    private static boolean isInside(View v,View folder){
+        for(android.view.ViewParent q=v.getParent();q!=null;q=q.getParent())if(q==folder)return true;
+        return false;
+    }
+
+    static View openDrawerFolder(){
+        View tracked=openFolder.get();
+        if(tracked!=null&&tracked.isAttachedToWindow()&&tracked.isShown())return tracked;
+        Activity a=LauncherFeatures.activity.get();if(a==null)return null;
+        try{
+            ViewGroup layer=(ViewGroup)call(a,"getDragLayer");
+            for(int i=layer.getChildCount()-1;i>=0;i--){
+                View child=layer.getChildAt(i);
+                if(!type("folder.Folder").isInstance(child))continue;
+                if(!drawerFolderView(child))continue;
+                Boolean record=openByRecord(child);
+                if(record!=null){if(record&&child.isAttachedToWindow()&&child.isShown())return child;continue;}
+                if(folderShown(child))return child;
+            }
+        }catch(Throwable error){LauncherFeatures.logOnce("Drawer folder lookup unavailable",error);}
+        try{return findShownFolder(a.getWindow().getDecorView());}catch(Throwable ignored){}
+        return null;
+    }
+    private static View findShownFolder(View v){
+        if(v==null||v.getVisibility()!=View.VISIBLE)return null;
+        if(type("folder.Folder").isInstance(v)){
+            if(!drawerFolderView(v))return null;
+            Boolean record=openByRecord((View)v);
+            return (record!=null?record&&v.isAttachedToWindow()&&v.isShown():folderShown(v))?v:null;
+        }
+        if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=g.getChildCount()-1;i>=0;i--){View r=findShownFolder(g.getChildAt(i));if(r!=null)return r;}}
+        return null;
+    }
+
+    static boolean drawerFolderView(View folder){
+        try{Object info=get(folder,"mInfo");if(info!=null&&isFolder(info))return true;}catch(Throwable ignored){}
+        try{Object d=get(folder,"mLauncherDelegate");if(d!=null&&Xp.getAdditionalInstanceField(d,"pixelsuite_drawer_delegate")!=null)return true;}catch(Throwable ignored){}
+        return false;
+    }
+    static boolean folderShown(View folder){
+        try{Object r=call(folder,"isOpen");if(Boolean.TRUE.equals(r))return true;}catch(Throwable ignored){}
+        try{Object r=get(folder,"mIsOpen");if(Boolean.TRUE.equals(r))return true;}catch(Throwable ignored){}
+        return folder.isAttachedToWindow()&&folder.isShown()&&folder.getAlpha()>0.05f&&!Boolean.TRUE.equals(Xp.getAdditionalInstanceField(folder,"pixelsuite_hidden_close"));
+    }
     static void closeDrawerFolder(boolean animate){
         Activity a=LauncherFeatures.activity.get();if(a==null)return;
         try{
@@ -319,6 +551,7 @@ final class DrawerFolders {
         }else{
             Object[] built=build(frame,context,f);icon=(View)built[0];info=built[1];iconCache.put(id,new Object[]{sig,icon,info});
         }
+        DrawerFolderAlignment.seed(icon,frame);
         frame.addView(icon,new FrameLayout.LayoutParams(-1,-1));frame.setTag(info);
         try{styleLabel(icon,frame);}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder label style unavailable",error);}
         DrawerFolderAlignment.schedule(icon);
@@ -362,6 +595,7 @@ final class DrawerFolders {
             Object folder=get(v,"mFolder");ArrayList<Object> content=new ArrayList<Object>((List<?>)get(info,"contents"));
             if(content.size()<2){chooseApps(info);return;}
             call(folder,"animateOpen",0,content);
+            if(folder instanceof View&&openFolder.get()!=folder)markOpen((View)folder,"drawer icon tap");
         }});
         icon.setOnLongClickListener(new View.OnLongClickListener(){public boolean onLongClick(View v){
             if(!dragEnabled())return false;
@@ -422,8 +656,20 @@ final class DrawerFolders {
         main.post(pass);
         main.postDelayed(new Runnable(){public void run(){try{rebindStale();}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder preview refresh unavailable",error);}}},350);
     }
+    private static int busyWaits;
+    private static boolean busyRebindPending;
     static void rebindStale(){
         if(LauncherFeatures.data==null||DrawerDrag.active())return;
+        if(folderBusy()){
+            if(busyRebindPending||busyWaits>=20)return;
+            busyWaits++;busyRebindPending=true;
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable(){public void run(){
+                busyRebindPending=false;
+                try{rebindStale();}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder preview refresh unavailable",error);}
+            }},250);
+            return;
+        }
+        busyWaits=0;
         List<LauncherData.Folder> folders=LauncherFeatures.data.folders();
         java.util.Set<View> found=java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<View,Boolean>());
         found.addAll(cells.values());
@@ -442,6 +688,16 @@ final class DrawerFolders {
             Module.log("Drawer folder preview updated: "+f.name+" ("+((List<?>)get(cell.getTag(),"contents")).size()+" apps)");
         }
     }
+    static boolean folderBusy(){
+        if(openDrawerFolder()!=null)return true;
+        if(folderShutAt>0&&android.os.SystemClock.uptimeMillis()-folderShutAt<700)return true;
+        try{
+            Activity a=LauncherFeatures.activity.get();if(a==null)return false;
+            ViewGroup layer=(ViewGroup)call(a,"getDragLayer");
+            for(int i=0;i<layer.getChildCount();i++){View c=layer.getChildAt(i);if(type("folder.Folder").isInstance(c)&&drawerFolderView(c))return true;}
+        }catch(Throwable ignored){}
+        return false;
+    }
     static boolean isOpen(View icon){
         try{Object folder=get(icon,"mFolder");if(folder==null)return false;
             try{return Boolean.TRUE.equals(get(folder,"mIsOpen"));}catch(Throwable noField){return Boolean.TRUE.equals(call(folder,"isOpen"));}
@@ -455,8 +711,7 @@ final class DrawerFolders {
     static boolean stale(Object info,LauncherData.Folder f){
         if(!String.valueOf(get(info,"title")).equals(f.name))return true;
         List<?> contents=(List<?>)get(info,"contents");
-        List<String> saved=new ArrayList<String>();
-        for(String key:FolderSort.shownOrder(f))if(known.containsKey(key))saved.add(key);
+        List<String> saved=new ArrayList<String>();for(String key:FolderSort.shownOrder(f))if(known.containsKey(key))saved.add(key);
         if(contents.size()!=saved.size())return true;
         for(int i=0;i<saved.size();i++)if(!saved.get(i).equals(LauncherFeatures.identity(contents.get(i))))return true;
         return false;

@@ -68,6 +68,16 @@ final class ClearAll {
                 }
             });
 
+            try {
+                Xp.hookAllMethods(actionsClass, "updateDisabledFlags", new Xp.Callback() {
+                    @Override
+                    protected void afterHookedMethod(Xp.Param param) {
+                        Object mine = Xp.getAdditionalInstanceField(param.thisObject, KEY_BUTTON);
+                        if (mine instanceof View && !((View) mine).isEnabled()) ((View) mine).setEnabled(true);
+                    }
+                });
+            } catch (Throwable t) { Module.log(SUB + "kept-enabled hook unavailable (" + t + ")"); }
+
             hideStockClearAll(cl);
 
             Module.log(SUB + "hooks installed (dismissAllTasks(View)="
