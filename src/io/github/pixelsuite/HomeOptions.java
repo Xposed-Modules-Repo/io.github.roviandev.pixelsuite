@@ -29,8 +29,8 @@ final class HomeOptions {
 
     private HomeOptions() {}
 
-    /** Where the finger went down last on the launcher (screen coordinates), for the long-press menu. */
-    static volatile float downX = -1, downY = -1;
+    /** Where the finger went down last on the launcher (screen y), for the long-press menu. */
+    static volatile float downY = -1;
 
     /**
      * The long-press menu of an empty home screen spot opens around the finger: its middle row under the thumb, kept
@@ -67,7 +67,7 @@ final class HomeOptions {
                 protected void beforeHookedMethod(Xp.Param p) {
                     if (p.args.length > 0 && p.args[0] instanceof android.view.MotionEvent) {
                         android.view.MotionEvent e = (android.view.MotionEvent) p.args[0];
-                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) { downX = e.getRawX(); downY = e.getRawY(); }
+                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) downY = e.getRawY();
                     }
                 }
             });
@@ -157,7 +157,6 @@ final class HomeOptions {
             if(text==null||!(apps.toString().contentEquals(text)||"Apps list".contentEquals(text)))continue;
             popup.removeViewAt(i);
             try{LauncherFeatures.call(popup,"assignMarginsAndBackgrounds",popup);}catch(Throwable noReshape){}
-            LauncherFeatures.logOnce("Home menu: Apps list row removed",null);
         }
     }
 
@@ -180,7 +179,7 @@ final class HomeOptions {
         CharSequence apps = appsListLabel(a);
         ArrayList<Object> kept = new ArrayList<Object>();
         for (Object item : items) { CharSequence l = item == null ? "" : label(item); if (!(apps.toString().contentEquals(l) || "Apps list".contentEquals(l))) kept.add(item); }
-        if (kept.size() != items.size()) { items = kept; LauncherFeatures.logOnce("Home menu: Apps list row removed", null); }
+        if (kept.size() != items.size()) items = kept;
         int home = -1;
         for (int i = 0; i < items.size(); i++) {
             Object item = items.get(i);

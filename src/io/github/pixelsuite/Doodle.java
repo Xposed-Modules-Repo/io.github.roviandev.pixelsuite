@@ -77,14 +77,8 @@ final class Doodle {
             drawLine(canvas, paint, kind, x1, y1, x2, y2, width);
             return;
         }
-        Path path = outline(kind, left(), top(), right(), bottom(), width);
-        if (fill) {
-            paint.setStyle(Paint.Style.FILL_AND_STROKE);
-            canvas.drawPath(path, paint);
-        } else {
-            paint.setStyle(Paint.Style.STROKE);
-            canvas.drawPath(path, paint);
-        }
+        paint.setStyle(fill ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE);
+        canvas.drawPath(outline(kind, left(), top(), right(), bottom(), width), paint);
     }
 
     /** Arrow head length for a stroke of this width on a line of this length. */

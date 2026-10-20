@@ -22,7 +22,6 @@ import android.widget.TextView;
  *   preview size = reference icon size, centred horizontally;
  *   caption      = one translationY so its first baseline equals the reference baseline.
  * Hit testing, drag and the open/close animation all use the same unmoved FolderIcon.
- * A one-line log reports the measured geometry once per change.
  */
 final class DrawerFolderAlignment {
     static boolean drawer(Object icon){return Boolean.TRUE.equals(Xp.getAdditionalInstanceField(icon,"pixelsuite_drawer_folder_cell"));}
@@ -169,11 +168,8 @@ final class DrawerFolderAlignment {
             icon.invalidate();changed=true;
         }
         Xp.setAdditionalInstanceField(frame,"pixelsuite_last_alignment",new int[]{size,top,Math.round(label.getTranslationY())});
-        String note="Drawer folder aligned: cell "+frame.getWidth()+"x"+frame.getHeight()+", icon top "+top+", size "+size+", baseline "+baseline+", caption top "+label.getTop()+" shift "+Math.round(label.getTranslationY());
-        if(!note.equals(lastNote)){lastNote=note;Module.log(note);}
         return changed;
     }
-    static String lastNote;
 
     /** A real app label in the list for typography, else the stock template. */
     static TextView styleSource(FrameLayout frame){

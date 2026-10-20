@@ -8,7 +8,7 @@ public final class AliasProvider extends ContentProvider {
     static final String AUTHORITY="io.github.roviandev.pixelsuite.aliases";
     static final Uri URI=Uri.parse("content://"+AUTHORITY);
     static final String CHANGE="io.github.roviandev.pixelsuite.ALIASES_CHANGED";
-    static final String GOOGLE="com.google.android.googlequicksearchbox",LAUNCHER="com.google.android.apps.nexuslauncher";
+    static final String GOOGLE="com.google.android.googlequicksearchbox";
     public boolean onCreate(){return true;}
     boolean authorized(boolean write){
         if(Binder.getCallingUid()==android.os.Process.myUid())return true;

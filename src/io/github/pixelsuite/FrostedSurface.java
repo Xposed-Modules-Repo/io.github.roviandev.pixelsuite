@@ -16,16 +16,36 @@ final class FrostedSurface {
     static boolean dark(Context c){return (c.getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES;}
     static int dp(Context c,float value){return Math.round(c.getResources().getDisplayMetrics().density*value);}
     static Context launcherContext(Context c){try{return c.getPackageName().equals("com.google.android.apps.nexuslauncher")?c:c.createPackageContext("com.google.android.apps.nexuslauncher",0);}catch(Throwable ignored){return c;}}
-    static int resourceColor(Context c,String name,int fallback){Context launcher=launcherContext(c);int id=launcher.getResources().getIdentifier(name,"color","com.google.android.apps.nexuslauncher");try{return id==0?fallback:launcher.getResources().getColor(id,launcher.getTheme());}catch(Throwable ignored){return fallback;}}
+    /** Launcher resource ids by type and name, cached inside the launcher's own process (its ids cannot change there; folder discs ask on every draw). */
+    private static final java.util.concurrent.ConcurrentHashMap<String,Integer> launcherIds=new java.util.concurrent.ConcurrentHashMap<String,Integer>();
+    private static int launcherId(Context c,Context launcher,String name,String type){
+        if(!"com.google.android.apps.nexuslauncher".equals(c.getPackageName()))return launcher.getResources().getIdentifier(name,type,"com.google.android.apps.nexuslauncher");
+        String key=type+'/'+name;Integer id=launcherIds.get(key);
+        if(id==null){id=launcher.getResources().getIdentifier(name,type,"com.google.android.apps.nexuslauncher");launcherIds.put(key,id);}
+        return id;
+    }
+    static int resourceColor(Context c,String name,int fallback){Context launcher=launcherContext(c);int id=launcherId(c,launcher,name,"color");try{return id==0?fallback:launcher.getResources().getColor(id,launcher.getTheme());}catch(Throwable ignored){return fallback;}}
+    /** WindowManager.isCrossWindowBlurEnabled, looked up once. */
+    private static volatile Method crossWindowBlur;
     static boolean blurEnabled(Context c){
-        Context launcher=launcherContext(c);int reduce=launcher.getResources().getIdentifier("reduce_workspace_blur_usage","bool","com.google.android.apps.nexuslauncher");
+        if(!SurfaceStyle.blur(c))return false;   // build 190: the Themes slider (Blur Off / Stock) allows no blur
+        Context launcher=launcherContext(c);int reduce=launcherId(c,launcher,"reduce_workspace_blur_usage","bool");
         if(reduce!=0&&launcher.getResources().getBoolean(reduce))return false;
-        try{Object manager=c.getSystemService(Context.WINDOW_SERVICE);return (Boolean)manager.getClass().getMethod("isCrossWindowBlurEnabled").invoke(manager);}catch(Throwable ignored){return android.provider.Settings.Global.getInt(c.getContentResolver(),"disable_window_blurs",0)==0;}
+        try{
+            Object manager=c.getSystemService(Context.WINDOW_SERVICE);Method m=crossWindowBlur;
+            if(m==null||!m.getDeclaringClass().isInstance(manager)){m=manager.getClass().getMethod("isCrossWindowBlurEnabled");crossWindowBlur=m;}
+            return (Boolean)m.invoke(manager);
+        }catch(Throwable ignored){return android.provider.Settings.Global.getInt(c.getContentResolver(),"disable_window_blurs",0)==0;}
     }
     static int fallback(Context c){
         // Super Dark-Mode turns blur off; folders and menus then use its near-black raised surface instead of the tinted grey.
         if(dark(c)&&Feature.on(c,SuperDark.KEY))return SUPER_DARK_PANEL;
+        // build 193 (owner, the Themes slider): without blur, light theme is the stock white and dark theme a tinted black
+        // (one step above black in the accent's hue), on every surface Pixel Suite draws.
+        if(!SurfaceStyle.blur(c))return dark(c)?offDark(c):0xffffffff;
         return LauncherFeatures.surface(c,dark(c)?"system_accent2_800":"system_accent2_200",dark(c)?0xff2f3036:0xffc6c5cc);}
+    /** build 196 (owner: Blur Off's dark folder "too dark"): halfway between the accent's 900 and 800 tones, for every surface Pixel Suite draws without blur in dark theme (folders, menus, drawer, toasts, bars, windows). */
+    static int offDark(Context c){int a=LauncherFeatures.surface(c,"system_accent2_900",0xff1a1b1f),b=LauncherFeatures.surface(c,"system_accent2_800",0xff2f3036);return Color.rgb((Color.red(a)+Color.red(b))/2,(Color.green(a)+Color.green(b))/2,(Color.blue(a)+Color.blue(b))/2);}
     static int composite(int fg,int bg){int fa=Color.alpha(fg),ba=Color.alpha(bg),a=255-((255-fa)*(255-ba)/255);if(a==0)return 0;return Color.argb(a,channel(Color.red(fg),fa,Color.red(bg),ba,a),channel(Color.green(fg),fa,Color.green(bg),ba,a),channel(Color.blue(fg),fa,Color.blue(bg),ba,a));}
     static int channel(int f,int fa,int b,int ba,int a){return ((255-fa)*(b*ba)+(f*255)*fa)/(a*255);}
     static int tone(Context c){
@@ -37,7 +57,12 @@ final class FrostedSurface {
     static int[] folderColors(Context c){return colors(c);}
     /** Super Dark-Mode: open folders and menus just off black, the closed folder icon's disc one step above. */
     static final int SUPER_DARK_PANEL=0xff0a0a0a,SUPER_DARK_CLOSED_FOLDER=0xff161616;
-    static int closedFolderColor(Context c){if(dark(c)&&Feature.on(c,SuperDark.KEY))return SUPER_DARK_CLOSED_FOLDER;return (blend(tone(c),dark(c)?44:8)&0xffffff)|0xeb000000;}
+    static int closedFolderColor(Context c){
+        if(dark(c)&&Feature.on(c,SuperDark.KEY))return SUPER_DARK_CLOSED_FOLDER;
+        // build 193 (owner, Blur Off / Stock in light theme: the drawer's folders had no visible disc, the stock disc colour being
+        // the drawer's own scrim grey): the stock white the owner asked for, which also matches the open folder's stock surface.
+        if(!dark(c)&&!SurfaceStyle.restyled(c))return 0xebffffff;
+        return (blend(tone(c),dark(c)?44:8)&0xffffff)|0xeb000000;}
     static void popupWindow(View content,float radius){frost(content,radius,"Dropdown");}
     /**
      * Menus with window blur off (Super Dark-Mode turns it off): solid, the same colour as the folder panel (owner's
@@ -63,23 +88,19 @@ final class FrostedSurface {
         try{
             Object root=LauncherFeatures.call(content,"getViewRootImpl");
             Drawable blur=(Drawable)LauncherFeatures.call(root,"createBackgroundBlurDrawable");
-            LauncherFeatures.call(blur,"setBlurRadius",blurEnabled(content.getContext())?depthBlurRadius(content.getContext()):0);
+            LauncherFeatures.call(blur,"setBlurRadius",depthBlurRadius(content.getContext()));   // blur is on here (checked above)
             LauncherFeatures.call(blur,"setCornerRadius",(float)dp(content.getContext(),radius));
             try{LauncherFeatures.call(blur,"setColor",Color.TRANSPARENT);}catch(Throwable ignored){}
             content.setBackground(new android.graphics.drawable.LayerDrawable(new Drawable[]{blur,windowDrawable(content.getContext(),radius)}));
-            // One line per dropdown: does the window blur get a real region? (bounds 0x0 = no blur)
-            final Drawable shown=blur;final View view=content;content.post(new Runnable(){public void run(){SuiteLog.log(what+" blur: bounds="+shown.getBounds().toShortString()+", view="+view.getWidth()+"x"+view.getHeight()+", radius="+depthBlurRadius(view.getContext()));}});
-        }catch(Throwable unavailable){GradientDrawable bg=windowDrawable(content.getContext(),radius);bg.setColor(tone(content.getContext())|0xff000000);content.setBackground(bg);SuiteLog.log("Popup window blur unavailable",unavailable);}
+        }catch(Throwable unavailable){GradientDrawable bg=windowDrawable(content.getContext(),radius);bg.setColor(tone(content.getContext())|0xff000000);content.setBackground(bg);if(!blurErrorLogged){blurErrorLogged=true;SuiteLog.log("Popup window blur unavailable",unavailable);}}
     }
+    private static boolean blurErrorLogged;
     static GradientDrawable drawable(Context c,float radius){
         return new BackdropSurface(c,radius);
     }
     static GradientDrawable windowDrawable(Context c,float radius){GradientDrawable d=new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,colors(c));d.setCornerRadius(dp(c,radius));return d;}
     /** The launcher's own drawer/depth blur radius in px (about 30dp), as used for the app drawer. */
-    static int depthBlurRadius(Context c){Context launcher=launcherContext(c);int id=launcher.getResources().getIdentifier("max_depth_blur_radius_enhanced","dimen","com.google.android.apps.nexuslauncher");return id==0?dp(c,30):launcher.getResources().getDimensionPixelSize(id);}
-    static int blurRadius(Context c){Context launcher=launcherContext(c);int id=launcher.getResources().getIdentifier("max_depth_blur_radius_enhanced","dimen","com.google.android.apps.nexuslauncher");return 3*(id==0?dp(c,30):launcher.getResources().getDimensionPixelSize(id));}
-    static void opaqueFallback(View view){opaqueDrawable(view.getBackground(),tone(view.getContext())|0xff000000);}
-    static void opaqueDrawable(Drawable drawable,int color){if(drawable instanceof GradientDrawable)((GradientDrawable)drawable).setColor(color);else if(drawable instanceof android.graphics.drawable.LayerDrawable){android.graphics.drawable.LayerDrawable layers=(android.graphics.drawable.LayerDrawable)drawable;for(int i=0;i<layers.getNumberOfLayers();i++)if(layers.getId(i)!=android.R.id.mask)opaqueDrawable(layers.getDrawable(i),color);}}
+    static int depthBlurRadius(Context c){Context launcher=launcherContext(c);int id=launcherId(c,launcher,"max_depth_blur_radius_enhanced","dimen");return id==0?dp(c,30):launcher.getResources().getDimensionPixelSize(id);}
     static AlertDialog show(AlertDialog.Builder builder){return show(builder.create());}
     static AlertDialog show(AlertDialog dialog){
         dialog.setCancelable(true);dialog.setCanceledOnTouchOutside(true);
@@ -138,7 +159,7 @@ final class FrostedSurface {
      * drawable on the dialog WINDOW's background (the root view), and on the phone the panel stayed
      * a plain tint with sharp content behind it. Now the window draws nothing, and the panel
      * (the dialog's content view, a child view like the dropdown's) carries the blur and the tint,
-     * with rounded corners. Logs "Dialog blur: bounds=…" like the dropdown.
+     * with rounded corners.
      */
     /**
      * Module prompts (Rename, Remove folder?, Sort apps?, Add apps...) sized like a compact menu card instead of a
@@ -178,7 +199,9 @@ final class FrostedSurface {
         frost(panel,24,"Dialog");
     }
     static void popup(ViewGroup popup){
-        if(!LauncherFeatures.frosted()&&!(dark(popup.getContext())&&Feature.on(popup.getContext(),SuperDark.KEY)))return;
+        // build 205 (owner: in Stock / Blur Off an app's menu was two bubbles, Google's actions and the app's own
+        // shortcuts, in two shades): one panel in every style and theme, like the folder menus: the frost under Frosted
+        // Glass, the solid menu colour otherwise (white in light theme, the tinted black in dark, black under Super Dark).
         if(!blurEnabled(popup.getContext()))popup.setBackground(solidMenu(popup.getContext(),24));
         else{BackdropSurface background=new BackdropSurface(popup.getContext(),24);background.bind(popup);popup.setBackground(background);}
         clearRows(popup,LauncherFeatures.get(popup,"mIterateChildrenTag"));Xp.setAdditionalInstanceField(popup,"pixelsuite_panel",Boolean.TRUE);

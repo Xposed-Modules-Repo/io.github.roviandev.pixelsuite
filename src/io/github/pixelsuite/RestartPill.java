@@ -18,7 +18,9 @@ import android.widget.Toast;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A small floating pill in Pixel Suite's own screen that offers to restart the app a changed
@@ -33,16 +35,33 @@ final class RestartPill {
     /** Apps waiting for a restart, in the order their settings changed: package -> label. */
     private static final Map<String, String> pending = new LinkedHashMap<String, String>();
     private static boolean wasShown;
-    private static final ExecutorService IO = Executors.newSingleThreadExecutor();
+    /** One restart at a time, in order; the thread ends after 10 s idle instead of living on. */
+    private static final ExecutorService IO = new ThreadPoolExecutor(0, 1, 10L, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
     private static final PathInterpolator EASE = new PathInterpolator(.2f, 0f, 0f, 1f);
 
     private final Activity activity;
     private final LinearLayout pill;
     private final TextView label;
-    private final LauncherGlyph glyph;
+    private final RestartStatusIcon status;
     private final ImageView icon;
     private final int accent, onAccent;
+    private TextView notice;
+    private final Runnable clearNotice=new Runnable(){public void run(){dismissNotice();}};
+    private void restoreRestart(){if(pill.getVisibility()==View.INVISIBLE)pill.setVisibility(View.VISIBLE);refresh();}
+    private void stopNoticeAnimation(){notice.animate().cancel();}
+    private void dismissNotice(){
+        stopNoticeAnimation();
+        if(!status.motion()||!notice.hasWindowFocus()){notice.setVisibility(View.GONE);restoreRestart();return;}
+        notice.animate().translationY(dp(activity.getResources().getDisplayMetrics().density,24)).scaleX(.9f).scaleY(.9f).setDuration(220).setInterpolator(EASE)
+                .withEndAction(new Runnable(){public void run(){notice.setVisibility(View.GONE);notice.setTranslationY(0);notice.setScaleX(1);notice.setScaleY(1);restoreRestart();}}).start();
+    }
     private boolean busy;
+    private boolean showingDone;
+    private final Runnable finishDone = new Runnable() { public void run() {
+        showingDone=false;
+        synchronized(pending){if(pending.isEmpty()){hide(true);return;}}
+        refresh();
+    }};
     private final Handler main = new Handler(Looper.getMainLooper());
 
     /**
@@ -55,7 +74,7 @@ final class RestartPill {
                 || key.equals(LauncherFeatures.DRAWER_GRID_SIZE) || key.equals(LauncherFeatures.ICONS)
                 || key.equals(LauncherFeatures.HIDE_SHORTCUTS) || key.equals(LauncherFeatures.LABEL_SIZE)
                 || key.equals(LauncherFeatures.LABEL_LEVEL) || key.equals(LauncherFeatures.RENAME)
-                || key.equals(SuperDark.KEY)) return LAUNCHER;   // Super Dark: folder colours and the drawer scrim are set when the launcher starts
+                || key.equals(SuperDark.KEY) || key.equals(SurfaceStyle.KEY)) return LAUNCHER;   // Super Dark: folder colours and the drawer scrim are set when the launcher starts
         if (key.equals(Feature.FILES_SORT)) return FILES;
         return null;
     }
@@ -67,60 +86,98 @@ final class RestartPill {
     }
 
     RestartPill(Activity a, FrameLayout root, int accent, int onAccent) {
-        activity = a; this.accent = accent; this.onAccent = onAccent;
+        activity = a;
+        boolean dark = FrostedSurface.dark(a);
+        this.accent = dark ? (SuperDark.inEffect(a) ? FrostedSurface.SUPER_DARK_PANEL
+                : LauncherFeatures.surface(a,"system_surface_container_high_dark",0xff2b2930)) : accent;
+        this.onAccent = dark ? 0xfff5f5f7 : onAccent;
         float d = a.getResources().getDisplayMetrics().density;
         pill = new LinearLayout(a); pill.setOrientation(LinearLayout.HORIZONTAL); pill.setGravity(Gravity.CENTER_VERTICAL);
         pill.setPadding(dp(d, 14), 0, dp(d, 18), 0); pill.setMinimumHeight(dp(d, 48));
-        GradientDrawable bg = new GradientDrawable(); bg.setColor(accent); bg.setCornerRadius(dp(d, 24)); pill.setBackground(bg);
+        pill.setBackground(outlinedBackground(this.accent,dark,d));
         pill.setElevation(dp(d, 6));
-        icon = new ImageView(a); glyph = new LauncherGlyph(a, 4); glyph.setTintList(android.content.res.ColorStateList.valueOf(onAccent)); icon.setImageDrawable(glyph);
+        status = new RestartStatusIcon(a,this.onAccent);
+        icon = new ImageView(a){
+            @Override protected void onWindowVisibilityChanged(int v){super.onWindowVisibilityChanged(v);status.setActive(v==View.VISIBLE&&hasWindowFocus());}
+            @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);status.setActive(focus&&getWindowVisibility()==View.VISIBLE);}
+            @Override protected void onDetachedFromWindow(){status.setActive(false);super.onDetachedFromWindow();}
+        };icon.setImageDrawable(status);
         LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(d, 20), dp(d, 20)); ip.rightMargin = dp(d, 10);
         pill.addView(icon, ip);
-        label = new TextView(a); label.setTextColor(onAccent); label.setTextSize(14); label.setSingleLine(true);
+        label = new TextView(a); label.setTextColor(this.onAccent); label.setTextSize(14); label.setSingleLine(true);
         label.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
         pill.addView(label);
         pill.setClickable(true); pill.setFocusable(true);
         pill.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { restart(); } });
         // Long-press: not now (the setting still applies after the next restart of that app).
         pill.setOnLongClickListener(new View.OnLongClickListener() { public boolean onLongClick(View v) { synchronized (pending) { pending.clear(); } hide(true); return true; } });
-        final FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+        final FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         final int margin = dp(d, 16); lp.setMargins(margin, margin, margin, margin);
         root.addView(pill, lp);
+        notice=new TextView(a);notice.setTextColor(this.onAccent);notice.setTextSize(13);notice.setGravity(Gravity.CENTER);
+        notice.setPadding(dp(d,18),dp(d,12),dp(d,18),dp(d,12));notice.setMinimumHeight(dp(d,48));
+        notice.setMaxLines(2);notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        notice.setBackground(outlinedBackground(this.accent,dark,d));notice.setElevation(dp(d,6));
+        FrameLayout.LayoutParams np=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);np.setMargins(dp(d,24),dp(d,16),dp(d,24),dp(d,16));root.addView(notice,np);notice.setVisibility(View.GONE);
+        notice.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener(){public WindowInsets onApplyWindowInsets(View v,WindowInsets in){np.bottomMargin=dp(d,16)+in.getSystemWindowInsetBottom();np.leftMargin=dp(d,24)+in.getSystemWindowInsetLeft();np.rightMargin=dp(d,24)+in.getSystemWindowInsetRight();v.setLayoutParams(np);return in;}});
         // Above the gesture bar, whatever the insets.
         pill.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @SuppressWarnings("deprecation")
             public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-                lp.bottomMargin = margin + insets.getSystemWindowInsetBottom(); lp.rightMargin = margin + insets.getSystemWindowInsetRight();
+                lp.bottomMargin = margin + insets.getSystemWindowInsetBottom(); lp.leftMargin=margin+insets.getSystemWindowInsetLeft(); lp.rightMargin = margin + insets.getSystemWindowInsetRight();
                 v.setLayoutParams(lp); return insets;
             }
         });
         pill.setVisibility(View.GONE);
     }
 
+    void showRestriction(){
+        if(activity.isFinishing()||activity.isDestroyed())return;
+        main.removeCallbacks(clearNotice);
+        android.text.SpannableString message=new android.text.SpannableString("Super Dark-Mode uses Frosted Glass by Default.\nTurn it off to change styles.");
+        message.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),0,"Super Dark-Mode".length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);notice.setText(message);
+        if(pill.getVisibility()==View.VISIBLE)pill.setVisibility(View.INVISIBLE);
+        boolean already=notice.getVisibility()==View.VISIBLE;
+        stopNoticeAnimation();notice.setVisibility(View.VISIBLE);notice.requestApplyInsets();notice.setScaleX(1);notice.setScaleY(1);notice.setTranslationY(0);
+        if(!already&&status.motion()){
+            notice.setTranslationY(dp(activity.getResources().getDisplayMetrics().density,24));notice.setScaleX(.9f);notice.setScaleY(.9f);
+            notice.animate().translationY(0).scaleX(1).scaleY(1).setDuration(320).setInterpolator(EASE).start();
+        }
+        main.postDelayed(clearNotice,5000);
+    }
+    void dispose(){stopNoticeAnimation();main.removeCallbacks(clearNotice);main.removeCallbacks(finishDone);status.setActive(false);}
+
     /** Shows or hides the pill for the current pending list (call from onResume and after each save). */
     void refresh() {
         if (busy) return;
+        if(showingDone)return;
         String text;
         synchronized (pending) {
             if (pending.isEmpty()) { hide(false); return; }
             text = pending.size() == 1 ? "Restart " + pending.values().iterator().next() : "Restart " + pending.size() + " apps";
         }
-        label.setText(text);
+        main.removeCallbacks(finishDone);
+        pill.animate().cancel();label.animate().cancel();label.setAlpha(1f);label.setTranslationY(0);
+        ViewGroup.LayoutParams width=pill.getLayoutParams();width.width=ViewGroup.LayoutParams.WRAP_CONTENT;pill.setLayoutParams(width);
+        LinearLayout.LayoutParams textSize=(LinearLayout.LayoutParams)label.getLayoutParams();textSize.width=ViewGroup.LayoutParams.WRAP_CONTENT;textSize.weight=0;label.setLayoutParams(textSize);
+        label.setText(text);status.show(0);
         pill.setContentDescription(text + ". Applies your changes. Long-press to dismiss.");
+        if(notice.getVisibility()==View.VISIBLE){pill.setVisibility(View.INVISIBLE);return;}
         if (pill.getVisibility() == View.VISIBLE) return;
         pill.setVisibility(View.VISIBLE);
         if (wasShown) { pill.setAlpha(1f); pill.setTranslationY(0f); pill.setScaleX(1f); pill.setScaleY(1f); return; }   // already there on the previous page
         wasShown = true;
-        pill.setAlpha(0f); pill.setTranslationY(dp(activity.getResources().getDisplayMetrics().density, 24)); pill.setScaleX(.9f); pill.setScaleY(.9f);
-        pill.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(EASE).start();
+        pill.setAlpha(1f); pill.setTranslationY(dp(activity.getResources().getDisplayMetrics().density, 24)); pill.setScaleX(.9f); pill.setScaleY(.9f);
+        pill.animate().translationY(0f).scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(EASE).start();
     }
 
     private void hide(boolean animate) {
         wasShown = false;
+        main.removeCallbacks(finishDone);
         if (pill.getVisibility() != View.VISIBLE) return;
-        if (!animate) { pill.setVisibility(View.GONE); return; }
-        pill.animate().alpha(0f).translationY(dp(activity.getResources().getDisplayMetrics().density, 24)).scaleX(.9f).scaleY(.9f).setDuration(220).setInterpolator(EASE)
-                .withEndAction(new Runnable() { public void run() { pill.setVisibility(View.GONE); } }).start();
+        if (!animate) { pill.setVisibility(View.GONE);status.setActive(false); return; }
+        pill.animate().translationY(dp(activity.getResources().getDisplayMetrics().density, 24)).scaleX(.9f).scaleY(.9f).setDuration(220).setInterpolator(EASE)
+                .withEndAction(new Runnable() { public void run() { pill.setVisibility(View.GONE);status.setActive(false); } }).start();
     }
 
     private void restart() {
@@ -131,20 +188,38 @@ final class RestartPill {
             for (String pkg : pending.keySet()) { if (b.length() > 0) b.append("; "); b.append("am force-stop ").append(pkg); }
             command = b.toString();
         }
-        busy = true; label.setText("Restarting…");
-        final android.animation.ObjectAnimator spin = android.animation.ObjectAnimator.ofFloat(icon, "rotation", 0f, 360f);
-        spin.setDuration(700); spin.setRepeatCount(android.animation.ValueAnimator.INFINITE); spin.setInterpolator(new android.view.animation.LinearInterpolator()); spin.start();
+        busy = true;showingDone=false;main.removeCallbacks(finishDone);
+        // Lock the pill's dimensions for the whole sequence; only its content animates.
+        ViewGroup.LayoutParams width=pill.getLayoutParams();width.width=pill.getWidth();pill.setLayoutParams(width);
+        LinearLayout.LayoutParams textSize=(LinearLayout.LayoutParams)label.getLayoutParams();textSize.width=0;textSize.weight=1;label.setLayoutParams(textSize);label.setGravity(Gravity.CENTER);
+        status.setActive(pill.hasWindowFocus());status.show(1);changeLabel("Restarting…");
+        final long started=android.os.SystemClock.uptimeMillis();
         IO.execute(new Runnable() { public void run() {
             final boolean ok = Root.run(command) != null;
-            main.post(new Runnable() { public void run() {
-                spin.cancel(); icon.setRotation(0f); busy = false;
+            main.postDelayed(new Runnable() { public void run() {
+                busy = false;
                 if (activity.isFinishing() || activity.isDestroyed()) return;
                 if (!ok) { refresh(); Toast.makeText(activity, "Couldn't restart: root access needed", Toast.LENGTH_SHORT).show(); return; }
                 synchronized (pending) { pending.clear(); }
-                label.setText("Done");
-                main.postDelayed(new Runnable() { public void run() { hide(true); } }, 700);
-            }});
+                showingDone=true;status.show(2);changeLabel("Done");
+                main.postDelayed(finishDone,1100);
+            }},Math.max(0,650-(android.os.SystemClock.uptimeMillis()-started)));
         }});
+    }
+
+    private void changeLabel(final String text){
+        pill.setContentDescription(text);
+        label.animate().cancel();
+        if(!status.motion()){label.setText(text);label.setAlpha(1);label.setTranslationY(0);return;}
+        label.animate().alpha(0).translationY(-3*activity.getResources().getDisplayMetrics().density).setDuration(100).setInterpolator(EASE).withEndAction(new Runnable(){public void run(){
+            label.setText(text);label.setTranslationY(3*activity.getResources().getDisplayMetrics().density);
+            label.animate().alpha(1).translationY(0).setDuration(180).setInterpolator(EASE).start();
+        }}).start();
+    }
+
+    private static GradientDrawable outlinedBackground(int color,boolean dark,float density){
+        GradientDrawable background=new GradientDrawable();background.setColor(color|0xff000000);background.setAlpha(255);
+        background.setCornerRadius(dp(density,24));background.setStroke(dp(density,1),dark?0xff55545d:0xff8c8995);return background;
     }
 
     private static int dp(float density, float v) { return Math.round(v * density); }

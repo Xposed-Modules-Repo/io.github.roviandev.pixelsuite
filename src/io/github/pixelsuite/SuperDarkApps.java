@@ -47,14 +47,16 @@ final class SuperDarkApps {
             n += keep(Xp.hookAllMethods(android.graphics.drawable.GradientDrawable.class, "setColors", new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
                     if (p.args.length == 0 || !(p.args[0] instanceof int[]) || !active()) return;
-                    int[] in = (int[]) p.args[0], out = in.clone(); boolean changed = false;
-                    for (int i = 0; i < out.length; i++) { out[i] = remap(in[i]); changed |= out[i] != in[i]; }
-                    if (changed) p.args[0] = out;
+                    int[] in = (int[]) p.args[0], out = null;   // copied only when a colour really changes
+                    for (int i = 0; i < in.length; i++) { int v = remap(in[i]); if (v != in[i]) { if (out == null) out = in.clone(); out[i] = v; } }
+                    if (out != null) p.args[0] = out;
                 }
             }));
         } catch (Throwable t) { Module.log("SuperDark apps: setColors", t); }
-        Module.log("SuperDark apps: " + n + " colour hooks in " + pkg);
+        // Pixel Launcher re-installs these each time one of its settings screens comes to the front: one line is enough.
+        if (!sLogged) { sLogged = true; Module.log("SuperDark apps: " + n + " colour hooks in " + pkg); }
     }
+    private static boolean sLogged;
 
     private static int keep(java.util.Set<Object> handles) { sHandles.addAll(handles); return handles.size(); }
 
@@ -106,7 +108,7 @@ final class SuperDarkApps {
                     // The colour hooks only exist while a settings screen is in front: the home screen, drawer and
                     // folders draw with no extra work at all.
                     if (sForeign && sHandles.isEmpty()) install(cl, "com.google.android.apps.nexuslauncher (settings)");
-                    else if (!sForeign && !sHandles.isEmpty()) { unhookAll(); Module.log("SuperDark apps: launcher colour hooks removed (home screen)"); }
+                    else if (!sForeign && !sHandles.isEmpty()) unhookAll();
                 }
             });
         } catch (Throwable t) { Module.log("SuperDark launcher settings unavailable", t); }
@@ -137,7 +139,7 @@ final class SuperDarkApps {
         sAt = now;
         boolean on = false;
         try {
-            Context ctx = (Context) Class.forName("android.app.ActivityThread").getMethod("currentApplication").invoke(null);
+            Context ctx = app();
             if (ctx != null) {
                 boolean night = (ctx.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
                 on = night && android.provider.Settings.Secure.getInt(ctx.getContentResolver(), SuperDark.KEY, 0) == 1;
@@ -145,6 +147,16 @@ final class SuperDarkApps {
         } catch (Throwable ignored) { }
         sActive = on;
         return on;
+    }
+
+    private static volatile Context sApp;
+    private static java.lang.reflect.Method sCurrentApplication;
+    /** The app's Application (one per process, so kept once found); the lookup method is resolved once. */
+    private static Context app() throws Exception {
+        Context c = sApp;
+        if (c != null) return c;
+        if (sCurrentApplication == null) sCurrentApplication = Class.forName("android.app.ActivityThread").getMethod("currentApplication");
+        return sApp = (Context) sCurrentApplication.invoke(null);
     }
 
     /** Neutral dark greys to black / near-black; everything else unchanged. Alpha is kept. */

@@ -51,7 +51,8 @@ final class StudioNames {
     };
 
     private static Map<String, String> sNames = new HashMap<String, String>();
-    static String source = "none";
+    /** The cache's mark for a scan that found nothing: the Pixel Suite build that made it (a new build scans again). */
+    private static final String NOT_FOUND = "pixelsuite.notFound";
 
     /** The name for this build, or null (the caller's feature then stays off). */
     static String get(String key) { return sNames.get(key); }
@@ -76,29 +77,32 @@ final class StudioNames {
                 boolean exact = t[0].equals(String.valueOf(version));
                 if ((pass == 0) != exact) continue;
                 Map<String, String> m = table(t);
-                if (valid(m, cl)) { sNames = m; source = "table " + t[0]; Module.log("screenshot-editor: Pixel Studio " + version + ", names from " + source); return; }
+                if (valid(m, cl)) { sNames = m; return; }
             }
         }
         // 2. cached scan of this exact APK, else a new scan
         File cache = cacheFile(ai);
         Map<String, String> m = load(cache);
-        if (m != null && valid(m, cl)) { sNames = m; source = "cached scan"; Module.log("screenshot-editor: Pixel Studio " + version + ", names from " + source + " (" + m.size() + ")"); return; }
+        if (m != null && valid(m, cl)) { sNames = m; return; }
+        sNames = new HashMap<String, String>();
+        String build = moduleBuild();
+        if (m != null && build != null && build.equals(m.get(NOT_FOUND))) {   // this APK was read before and nothing was found
+            Module.log("screenshot-editor: Pixel Studio " + version + ": the editor's toolbar was not recognised, features stay off");
+            return;
+        }
         try {
-            long t0 = android.os.SystemClock.uptimeMillis();
             m = DexScan.read(ai.sourceDir).resolve();
-            long ms = android.os.SystemClock.uptimeMillis() - t0;
             if (valid(m, cl)) {
-                sNames = m; source = "scan";
+                sNames = m;
                 save(cache, m);
-                Module.log("screenshot-editor: Pixel Studio " + version + " is new to Pixel Suite; " + m.size() + "/" + KEYS.length
-                        + " names found by reading the app (" + ms + " ms), missing: " + missing(m));
+                if (m.size() < KEYS.length) Module.log("screenshot-editor: Pixel Studio " + version + ": names not found, their features stay off: " + missing(m));
                 return;
             }
-            Module.log("screenshot-editor: Pixel Studio " + version + ": the editor's toolbar was not recognised (" + ms + " ms), features stay off");
+            Module.log("screenshot-editor: Pixel Studio " + version + ": the editor's toolbar was not recognised, features stay off");
+            if (build != null) { Map<String, String> none = new HashMap<String, String>(); none.put(NOT_FOUND, build); save(cache, none); }   // not read again at every launch
         } catch (Throwable t) {
             Module.log("screenshot-editor: Pixel Studio " + version + " could not be read, features stay off", t);
         }
-        sNames = new HashMap<String, String>(); source = "none";
     }
 
     private static Map<String, String> table(String[] t) {
@@ -121,6 +125,15 @@ final class StudioNames {
         StringBuilder b = new StringBuilder();
         for (String k : KEYS) if (!m.containsKey(k)) b.append(b.length() == 0 ? "" : ", ").append(k);
         return b.length() == 0 ? "none" : b.toString();
+    }
+
+    /** This Pixel Suite build (its version code), or null when the framework does not say. */
+    static String moduleBuild() {
+        try {
+            ApplicationInfo me = Xp.x() == null ? null : Xp.x().getModuleApplicationInfo();
+            long v = me == null ? -1 : versionCode(me);
+            return v > 0 ? String.valueOf(v) : null;
+        } catch (Throwable unknown) { return null; }
     }
 
     static long versionCode(ApplicationInfo ai) {

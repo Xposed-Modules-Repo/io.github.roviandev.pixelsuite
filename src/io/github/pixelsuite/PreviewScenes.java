@@ -33,6 +33,7 @@ final class PreviewScenes {
         if("folder_sort".equals(key)||LauncherFeatures.GRID.equals(key)||FolderDrag.TWO_FINGER.equals(key)||MultiDrag.KEY.equals(key))return 4500;
         if(ScreenRecordTidy.KEY.equals(key)||"folder_sort".equals(key)||"folder_reorder".equals(key))return 4800;
         if(LauncherFeatures.ICONS.equals(key))return 5000;
+        if(Feature.PHOTOS_DOODLES.equals(key))return 5000;
         if(LauncherFeatures.DRAG_PILL.equals(key)||LauncherFeatures.GRID.equals(key)||Feature.SCREENSHOT_DOODLES.equals(key))return 4800;
         if(LauncherFeatures.DRAWER.equals(key)||Feature.SCREENSHOT_FREE_CROP.equals(key)||Feature.FILES_SORT.equals(key))return 4500;
         if(LauncherFeatures.RENAME.equals(key)||FolderDrag.TWO_FINGER.equals(key)||ScatterEffect.KEY.equals(key))return 4300;
@@ -112,7 +113,7 @@ final class PreviewScenes {
         path.reset();path.moveTo(x+w*.32f,y+h);path.lineTo(x+w*.73f,y+h*.49f);path.lineTo(x+w,y+h*.77f);path.lineTo(x+w,y+h);path.close();paint(0xff345b68,false,0);c.drawPath(path,p);
     }
     private void noteIcon(Canvas c,float x,float y,float size){
-        c.save();c.translate(x-size/2,y-size/2);c.scale(size/48,size/48);box(c,0,0,48,48,15,0xff7660ca);box(c,12,8,25,32,4,0xfffaf7ff);
+        c.save();c.translate(x-size/2,y-size/2);c.scale(size/48,size/48);circle(c,24,24,24,0xff7660ca);box(c,12,8,25,32,4,0xfffaf7ff);
         path.reset();path.moveTo(29,8);path.lineTo(37,16);path.lineTo(29,16);path.close();paint(0xffd8ccff,false,0);c.drawPath(path,p);line(c,17,22,31,22,0xff7660ca);line(c,17,27,31,27,0xff7660ca);line(c,17,32,26,32,0xff7660ca);c.restore();
     }
     private void torch(Canvas c,float lit){
@@ -152,6 +153,62 @@ final class PreviewScenes {
         box(c,13,233,179,128,14,tint(surface,ink,.07f));photo(c,20,240,165,93);text(c,"How about this spot?",100,350,11,ink);
         box(c,58,382,169,45,14,tint(surface,accent,.25f));text(c,"Perfect. See you there!",143,409,11,ink);box(c,12,447,216,30,15,tint(surface,ink,.07f));text(c,"Message",66,466,11,muted);
     }
+
+    /** Photos-only storyboard: library -> photo -> edit -> Doodles -> save. */
+    private void photosDoodles(Canvas c,float t){
+        box(c,0,0,240,500,0,surface);
+        app(c,3,27,33,22,false);text(c,"Google Photos",117,38,17,ink);circle(c,215,32,11,tint(surface,accent,.24f));
+        text(c,"Today",34,79,13,ink);
+        for(int i=0;i<9;i++)photoTile(c,5+(i%3)*78,94+(i/3)*100,74,96,i);
+        text(c,"Yesterday",43,415,12,muted);
+        box(c,0,444,240,56,0,tint(surface,ink,.04f));
+        String[] nav={"Photos","Collections","Create"};
+        for(int i=0;i<3;i++){float x=40+80*i;if(i==0){box(c,x-22,450,44,22,11,tint(surface,accent,.2f));app(c,3,x,461,17,false);}else if(i==1)outline(c,x-8,455,16,13,3,muted);else{line(c,x-6,461,x+6,461,muted);line(c,x,455,x,467,muted);}text(c,nav[i],x,487,10,i==0?accent:muted);}
+        touch(c,120,142,t,.04f,.05f);
+        float open=e(.10f,.19f,t);
+        if(open>0){
+            alpha(c,open);box(c,0,0,240,500,0,surface);
+            float edit=e(.25f,.32f,t);
+            text(c,"\u2039",20,33,25,ink);text(c,edit>0?"Edit photo":"Today",120,32,14,ink);text(c,"\u22ee",217,33,22,ink);
+            float x=mix(83,12,open),y=mix(94,70,open),w=mix(74,216,open),h=mix(96,306,open);
+            photoTile(c,x,y,w,h,1);
+            if(edit<1){float old=opacity;opacity*=1-edit;box(c,70,416,100,38,19,tint(surface,accent,.18f));text(c,"Edit",120,440,14,accent);opacity=old;}
+            touch(c,120,434,t,.20f,.05f);
+            if(edit>0){
+                alpha(c,edit);
+                box(c,0,453,240,47,0,surface);
+                text(c,"Adjust",45,479,11,muted);text(c,"Crop",112,479,11,muted);
+                float tools=e(.37f,.43f,t)*(1-e(.92f,.96f,t));
+                box(c,148,458,78,30,15,tint(surface,accent,.15f));text(c,"Doodles",187,479,12,accent);
+                touch(c,187,472,t,.32f,.05f);
+                if(tools>0){
+                    c.save();c.translate(0,16*(1-tools));alpha(c,tools);
+                    box(c,5,365,230,83,14,tint(surface,ink,.08f));
+                    for(int i=0;i<7;i++){float xx=24+i*32;if(i==0)outline(c,xx-7,379,14,14,7,ink);else if(i==1)arrow(c,xx-6,393,xx+6,379,1,ink);else if(i==2)outline(c,xx-7,380,14,12,2,ink);else if(i==3){line(c,xx-7,393,xx,379,ink);line(c,xx,379,xx+7,393,ink);line(c,xx+7,393,xx-7,393,ink);}else line(c,xx-6,392,xx+6,380,ink);}
+                    c.save();c.clipRect(12,403,228,426);float scroll=60*e(.66f,.78f,t);for(int i=0;i<12;i++)circle(c,24+i*26-scroll,415,7,DoodleOverlay.COLORS[i]);c.restore();
+                    line(c,20,438,95,438,muted);circle(c,55,438,4,accent);text(c,"Fill",126,441,9,ink);text(c,"Delete",164,441,9,ink);text(c,"Done",210,441,10,accent);
+                    c.restore();c.restore();
+                }
+                touch(c,24,386,t,.40f,.05f);
+                float ring=e(.45f,.67f,t);paint(0xffffce6b,true,3.8f);c.drawArc(145,103,195,153,-90,360*ring,false,p);
+                touch(c,56,386,t,.65f,.05f);
+                float draw=e(.70f,.90f,t);arrow(c,52,287,146,184,draw,0xfff58ab1);
+                if(draw>0&&draw<1){circle(c,mix(52,146,draw),mix(287,184,draw),5,accent);}
+                touch(c,210,438,t,.90f,.04f);
+                if(t>.94f){box(c,163,17,67,29,14,tint(surface,accent,.2f));text(c,t>.99f?"Saved":"Save",196,37,12,accent);touch(c,196,30,t,.95f,.04f);}
+                c.restore();
+            }
+            pill(c,1);c.restore();
+        }
+    }
+    private void photoTile(Canvas c,float x,float y,float w,float h,int variant){
+        c.save();path.reset();path.addRoundRect(x,y,x+w,y+h,5,5,Path.Direction.CW);c.clipPath(path);
+        if(variant%3==0){box(c,x,y,w,h,0,0xffc7b9db);box(c,x,y+h*.55f,w,h*.45f,0,0xff738d80);circle(c,x+w*.48f,y+h*.42f,w*.23f,0xffe4a879);box(c,x+w*.23f,y+h*.65f,w*.52f,h*.4f,w*.18f,0xff425a6e);}
+        else if(variant%3==1){photo(c,x,y,w,h);line(c,x+w*.05f,y+h*.81f,x+w*.8f,y+h*.93f,0xff91bdc2);}
+        else{box(c,x,y,w,h,0,0xffe3c1a0);box(c,x,y+h*.67f,w,h*.33f,0,0xff7d6865);for(int i=0;i<4;i++){float xx=x+w*(.07f+i*.24f);box(c,xx,y+h*(.23f+(i%2)*.15f),w*.2f,h*.55f,2,i%2==0?0xff827c92:0xffac8b7b);}circle(c,x+w*.72f,y+h*.15f,w*.09f,0xffffe4ad);}
+        c.restore();
+    }
+
     private void editor(Canvas c,String title){box(c,0,0,240,500,0,surface);text(c,title,120,31,15,ink);text(c,"Save",207,31,12,accent);photo(c,12,67,216,322);pill(c,1);}
     private void popup(Canvas c,float x,float y,String a,String b,String d,float show){
         if(show<=0)return;c.save();c.translate(0,8*(1-show));alpha(c,show);box(c,x+1,y+4,194,100,15,tint(surface,ink,.14f));box(c,x,y,194,98,15,tint(surface,ink,.07f));text(c,a,x+97,y+25,12,ink);text(c,b,x+97,y+55,12,ink);text(c,d,x+97,y+83,12,ink);c.restore();c.restore();
@@ -171,7 +228,7 @@ final class PreviewScenes {
     }
     private void cellLabel(Canvas c,String value,float x,float y,float width,float size){
         p.setTextSize(size);p.setTypeface(font);String shown=value;
-        if(p.measureText(shown)>width){while(shown.length()>0&&p.measureText(shown+"…")>width)shown=shown.substring(0,shown.length()-1);shown+="…";}
+        if(p.measureText(shown)>width){while(shown.length()>0&&p.measureText(shown+"\u2026")>width)shown=shown.substring(0,shown.length()-1);shown+="\u2026";}
         c.save();c.clipRect(x-width/2,y-size-2,x+width/2,y+3);text(c,shown,x,y,size,ink);c.restore();
     }
     private void heldTouch(Canvas c,float x,float y,float show){
@@ -198,7 +255,7 @@ final class PreviewScenes {
             box(c,12,134,216,220,22,tint(surface,ink,.07f));text(c,"Record your screen",120,167,17,ink);
             text(c,"Entire screen",120,208,14,ink);text(c,"Device audio",120,249,14,ink);text(c,"Show touches",120,290,14,ink);
             box(c,99,321,30,16,8,accent);circle(c,119,329,6,onAccent);
-            box(c,48,368,144,43,21,tint(surface,accent,.25f));text(c,"×",70,396,22,ink);text(c,"Start",143,395,15,ink);
+            box(c,48,368,144,43,21,tint(surface,accent,.25f));text(c,"\u00d7",70,396,22,ink);text(c,"Start",143,395,15,ink);
             touch(c,70,390,t,.72f,.09f);c.restore();pill(c,1);
         }else if("folder_sort".equals(key)){
             drawer(c,-1);box(c,9,83,222,306,22,tint(surface,ink,.07f));
@@ -234,20 +291,22 @@ final class PreviewScenes {
             editor(c,"Crop");float squeeze=e(.12f,.62f,t);float x=mix(20,61,squeeze),top=mix(80,220,squeeze),w=mix(200,118,squeeze),h=mix(294,12,squeeze);
             float old=opacity;opacity=.55f;box(c,12,67,216,top-67,0,0xff101217);box(c,12,top+h,216,389-top-h,0,0xff101217);box(c,12,top,x-12,h,0,0xff101217);box(c,x+w,top,228-x-w,h,0,0xff101217);opacity=old;
             outline(c,x,top,w,h,1,accent);for(int i=0;i<2;i++){float xx=i==0?x:x+w;line(c,xx-7,top,xx+7,top,accent);line(c,xx-7,top+h,xx+7,top+h,accent);}touch(c,x,top,t,.25f,.3f);text(c,"Crop freely",120,438,15,ink);
+        }else if(Feature.PHOTOS_DOODLES.equals(key)){
+            photosDoodles(c,t);
         }else if(Feature.SCREENSHOT_DOODLES.equals(key)){
             editor(c,"Doodles");arrow(c,36,325,193,119,e(.06f,.25f,t),0xffffce6b);float oval=e(.21f,.4f,t);paint(0xfffafafa,true,4);c.drawArc(39,106,115,181,-90,360*oval,false,p);float rectangle=e(.37f,.54f,t);outline(c,120,249,76*rectangle,59*rectangle,7,0xfff58ab1);arrow(c,37,355,199,355,e(.54f,.68f,t),0xffb6e0bc);float tri=e(.66f,.81f,t);if(tri>0){float old=opacity;opacity=tri;path.reset();path.moveTo(147,196);path.lineTo(172,238);path.lineTo(122,238);path.close();paint(0xffffce6b,true,3);c.drawPath(path,p);opacity=old;}box(c,19,414,202,50,20,tint(surface,ink,.07f));for(int i=0;i<5;i++){int color=i%2==0?accent:ink;float xx=41+i*40;if(i==0)arrow(c,xx-7,446,xx+7,432,1,color);else if(i==1)outline(c,xx-7,431,14,14,7,color);else if(i==2)outline(c,xx-7,432,14,13,2,color);else line(c,xx-7,444,xx+7,433,color);}
         }else if(Feature.DOUBLE_TAP_SLEEP.equals(key)){
-            float lock=e(.2f,.32f,t);background(c);text(c,"10:08",120,210,38,ink);float old=opacity;opacity=1-lock;dock(c);pill(c,1);opacity=old;alpha(c,lock);box(c,0,0,240,500,0,0xff111216);text(c,"10:08",120,210,38,0xffc3c4ce);c.restore();touch(c,120,300,t,.07f,.07f);touch(c,120,300,t,.15f,.07f);
+            float lock=e(.2f,.32f,t);background(c);text(c,"10:08",120,210,38,ink);float old=opacity;opacity=1-lock;dock(c);pill(c,1);opacity=old;alpha(c,lock);box(c,0,0,240,500,0,0xff000000);text(c,"10:08",120,210,38,0xffc3c4ce);c.restore();touch(c,120,300,t,.07f,.07f);touch(c,120,300,t,.15f,.07f);
         }else if(Feature.TAP_CHECK.equals(key)){
             float wake=e(.2f,.32f,t);box(c,0,0,240,500,0,tint(0xff000000,0xff17181e,wake));text(c,"10:08",120,210,38,tint(0xff4d4f57,0xfff1f0f5,wake));touch(c,120,300,t,.07f,.07f);touch(c,120,300,t,.15f,.07f);
         }else if(LauncherFeatures.GRID.equals(key)){
             home(c,true);box(c,9,74,222,321,20,tint(surface,ink,.06f));
             // The selected choice changes at the end of the tap, before the grid begins its transition.
             if(t<.49f)morphGrid(c,3,4,e(.25f,.39f,t));else morphGrid(c,4,5,e(.7f,.84f,t));
-            text(c,"Apps",43,374,16,ink);text(c,"⋮",209,374,22,ink);
+            text(c,"Apps",43,374,16,ink);for(int dot=0;dot<3;dot++)circle(c,209,361+dot*6,1.8f,ink);
             float menu=e(.06f,.1f,t)*(1-e(.25f,.29f,t))+e(.51f,.55f,t)*(1-e(.7f,.74f,t));
-            if(menu>0){alpha(c,menu);box(c,107,263,120,105,14,tint(surface,ink,.12f));String selected=t<.24f?"3×3":t<.69f?"4×4":"5×5";
-                text(c,"5×5"+("5×5".equals(selected)?"  ✓":""),165,288,13,ink);text(c,"4×4"+("4×4".equals(selected)?"  ✓":""),165,320,13,ink);text(c,"3×3"+("3×3".equals(selected)?"  ✓":""),165,352,13,ink);c.restore();}
+            if(menu>0){alpha(c,menu);box(c,107,263,120,105,14,tint(surface,ink,.12f));String selected=t<.24f?"3\u00d73":t<.69f?"4\u00d74":"5\u00d75";
+                text(c,"5\u00d75"+("5\u00d75".equals(selected)?"  \u2713":""),165,288,13,ink);text(c,"4\u00d74"+("4\u00d74".equals(selected)?"  \u2713":""),165,320,13,ink);text(c,"3\u00d73"+("3\u00d73".equals(selected)?"  \u2713":""),165,352,13,ink);c.restore();}
             touch(c,209,367,t,.025f,.045f);touch(c,165,315,t,.18f,.06f);touch(c,209,367,t,.475f,.045f);touch(c,165,283,t,.63f,.06f);pill(c,1);
         }else if(LauncherFeatures.DRAWER.equals(key)){
             drawer(c,0,1);float move=e(.14f,.47f,t),merge=e(.48f,.6f,t);float old=opacity;opacity=1-merge;app(c,1,91,104,34,true);app(c,0,mix(33,91,move),104,34,false);opacity=old;touch(c,33,104,t,.04f,.1f);if(merge>0){alpha(c,merge);box(c,71,84,40,40,14,tint(surface,accent,.32f));app(c,0,83,96,14,false);app(c,1,99,96,14,false);text(c,"Apps",91,131,10,ink);c.restore();}pill(c,1);
@@ -293,7 +352,7 @@ final class PreviewScenes {
             box(c,0,0,240,500,0,surface);text(c,"Files",43,35,23,ink);text(c,"Newest first",177,35,12,accent);
             box(c,12,57,216,35,10,tint(surface,accent,.12f));folderIcon(c,32,73);text(c,"Downloads",128,80,13,ink);
             box(c,12,99,216,35,10,tint(surface,accent,.12f));folderIcon(c,32,115);text(c,"Documents",128,122,13,ink);
-            text(c,"Files · date modified",120,151,10,muted);float f=e(.16f,.7f,t);for(int i=0;i<6;i++)if(i!=2)fileRow(c,i,f);fileRow(c,2,f);pill(c,1);
+            text(c,"Files \u00b7 date modified",120,151,10,muted);float f=e(.16f,.7f,t);for(int i=0;i<6;i++)if(i!=2)fileRow(c,i,f);fileRow(c,2,f);pill(c,1);
         }else {home(c,true);pill(c,1);}
     }
 }

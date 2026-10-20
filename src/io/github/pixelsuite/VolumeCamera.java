@@ -47,9 +47,7 @@ final class VolumeCamera {
     // Input-thread state.
     private static long sLastDown;
     private static boolean sConsumingPress;
-    private static String sLastLogged;
-
-    
+    private static boolean sErrorLogged;
 
     static void installSystem(ClassLoader cl) {
         sClassLoader = cl;
@@ -64,11 +62,14 @@ final class VolumeCamera {
                     try {
                         if (onVolumeDown(param.thisObject, ev)) param.setResult(RESULT_CONSUMED);
                     } catch (Throwable t) {
-                        Module.log("volume key handling failed", t);
+                        if (!sErrorLogged) {   // input path: once
+                            sErrorLogged = true;
+                            Module.log("volume key handling failed", t);
+                        }
                     }
                 }
             });
-            Module.log("system hooks installed");
+            Module.log("volume-down camera: system hooks installed");
         } catch (Throwable t) {
             Module.log("system hook setup failed", t);
         }
@@ -86,17 +87,11 @@ final class VolumeCamera {
         }
 
         if (ev.getAction() == KeyEvent.ACTION_DOWN && ev.getRepeatCount() == 0) {
-            String blocked = blockedReason(ctx);
-            sConsumingPress = blocked == null;
+            sConsumingPress = gestureAllowed(ctx);
             if (!sConsumingPress) {
-                if (!"screen is awake".equals(blocked) && !blocked.equals(sLastLogged)) {
-                    Module.log("not active: " + blocked);
-                }
-                sLastLogged = blocked;
                 sLastDown = 0;
                 return false;   // normal volume behaviour
             }
-            sLastLogged = null;
             long t = ev.getEventTime();
             if (sLastDown != 0 && t - sLastDown <= DOUBLE_PRESS_MS) {
                 sLastDown = 0;
@@ -112,39 +107,40 @@ final class VolumeCamera {
 
     // ------------------------------------------------------------------ rules
 
-    /** @return null when both rules allow the gesture, otherwise why not (for the log). */
-    static String blockedReason(Context ctx) {
+    /** @return true when both rules allow the gesture. */
+    private static boolean gestureAllowed(Context ctx) {
         try {
             // Rule 1: AOD on a locked phone (including the lock screen -> AOD animation).
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
-            if (pm == null || pm.isInteractive()) return "screen is awake";
+            if (pm == null || pm.isInteractive()) return false;
 
             DisplayManager dm = (DisplayManager) ctx.getSystemService(Context.DISPLAY_SERVICE);
             Display d = dm == null ? null : dm.getDisplay(Display.DEFAULT_DISPLAY);
-            if (d == null) return "no display";
+            if (d == null) return false;
             int state = d.getState();
             if (state != Display.STATE_ON && state != Display.STATE_DOZE
                     && state != Display.STATE_DOZE_SUSPEND) {
-                return "display off (state " + state + ")";
+                return false;
             }
-            if (!isAodEnabled(ctx)) return "Always On Display is off";
+            if (!isAodEnabled(ctx)) return false;
 
             KeyguardManager km = (KeyguardManager) ctx.getSystemService(Context.KEYGUARD_SERVICE);
-            if (km == null || !km.isKeyguardLocked()) return "not locked";
+            if (km == null || !km.isKeyguardLocked()) return false;
 
             // Rule 2: no media, no call.
             AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
             if (am != null) {
-                if (am.isMusicActive()) return "media playing";
-                if (am.getMode() != AudioManager.MODE_NORMAL) return "call or ringing (audio)";
+                if (am.isMusicActive()) return false;
+                if (am.getMode() != AudioManager.MODE_NORMAL) return false;
             }
             TelecomManager tm = (TelecomManager) ctx.getSystemService(Context.TELECOM_SERVICE);
-            if (tm != null && tm.isInCall()) return "call in progress";
-
-            return null;
+            return tm == null || !tm.isInCall();
         } catch (Throwable t) {
-            Module.log("rule check failed", t);
-            return "rule check failed";
+            if (!sErrorLogged) {   // input path: once
+                sErrorLogged = true;
+                Module.log("volume-down camera: rule check failed", t);
+            }
+            return false;
         }
     }
 
@@ -160,8 +156,6 @@ final class VolumeCamera {
     // ------------------------------------------------------------------ launch
 
     private static void launchCamera(Object pwm, final Context ctx) {
-        Module.log("double press detected, launching camera");
-
         // Same haptic as the flashlight toggle, without delaying the launch.
         Bg.handler().post(new Runnable() {
             @Override
@@ -179,11 +173,9 @@ final class VolumeCamera {
         }
 
         // 1. PhoneWindowManager.handleCameraGesture(): the flags the keyguard reads on wake-up.
-        boolean goingToSleep = false;
         try {
             Xp.setBooleanField(pwm, "mPowerButtonLaunchGestureTriggered", true);
-            goingToSleep = Xp.getBooleanField(pwm, "mRequestedOrSleepingDefaultDisplay");
-            if (goingToSleep) {
+            if (Xp.getBooleanField(pwm, "mRequestedOrSleepingDefaultDisplay")) {
                 Xp.setBooleanField(
                         pwm, "mPowerButtonLaunchGestureTriggeredDuringGoingToSleep", true);
             }
@@ -210,7 +202,6 @@ final class VolumeCamera {
         // 3. Wake the way PWM does for the camera gesture. (With the power button the first
         //    press already woke the phone from AOD; here nothing has, so always wake.)
         wake(pwm, ctx);
-        Module.log("camera launch sent (going to sleep: " + goingToSleep + ")");
     }
 
     private static void wake(Object pwm, Context ctx) {
@@ -235,23 +226,25 @@ final class VolumeCamera {
 
     // ------------------------------------------------------------------ setup
 
-    private static synchronized void ensureInit(final Context ctx) {
+    /** Runs on every volume-down key event: after the first, only the volatile check. */
+    private static void ensureInit(final Context ctx) {
         if (sInitDone) return;
-        try {
-            sEnabled = isEnabled(ctx);
-            ctx.getContentResolver().registerContentObserver(
-                    Settings.Secure.getUriFor(Feature.VOLDOWN_CAMERA), false,
-                    new ContentObserver(Bg.handler()) {
-                        @Override
-                        public void onChange(boolean selfChange) {
-                            sEnabled = isEnabled(ctx);
-                            Module.log("enabled: " + sEnabled);
-                        }
-                    });
-            sInitDone = true;
-            Module.log("initialised, enabled: " + sEnabled);
-        } catch (Throwable t) {
-            Module.log("init failed", t);
+        synchronized (VolumeCamera.class) {
+            if (sInitDone) return;
+            try {
+                sEnabled = isEnabled(ctx);
+                ctx.getContentResolver().registerContentObserver(
+                        Settings.Secure.getUriFor(Feature.VOLDOWN_CAMERA), false,
+                        new ContentObserver(Bg.handler()) {
+                            @Override
+                            public void onChange(boolean selfChange) {
+                                sEnabled = isEnabled(ctx);
+                            }
+                        });
+                sInitDone = true;
+            } catch (Throwable t) {
+                Module.log("volume-down camera: init failed", t);
+            }
         }
     }
 
@@ -312,7 +305,7 @@ final class VolumeCamera {
                     Xp.hookMethod(m, skipWhileSuppressed);
                 }
             }
-            Module.log("SystemUI hooks installed");
+            Module.log("volume-down camera: SystemUI hooks installed");
         } catch (Throwable t) {
             Module.log("SystemUI hook setup failed", t);
         }

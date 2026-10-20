@@ -31,7 +31,6 @@ public class Module extends XposedModule {
     public void onModuleLoaded(ModuleLoadedParam param) {
         Xp.attach(this);
         SuiteLog.hooked = true;
-        log("loaded in " + param.getProcessName());
     }
 
     @Override
@@ -53,6 +52,7 @@ public class Module extends XposedModule {
             VolumeCamera.installSystemUi(cl);
             ScreenRecordTidy.install(cl);
             SuperDark.installSystemUi(cl);
+            SystemToasts.install(cl);
         } else if (LAUNCHER.equals(pkg)) {
             ClearAll.installLauncher(cl);
             LauncherFeatures.install(cl);
@@ -60,6 +60,12 @@ public class Module extends XposedModule {
             SuperDarkApps.installLauncherSettings(cl);
         } else if (FILES.equals(pkg)) {
             FilesSort.install(cl);
+        } else if (PhotosEditor.PACKAGE.equals(pkg)) {
+            PhotosEditor.install(cl);
+            PhotosDarkPanel.install();
+            PhotosToasts.install(cl);
+            // build 197: the video editor's "Saving video..." dialog (opened from the recording preview's Edit) follows the phone's theme and the Themes slider
+            ComposeFrost.install("Google Photos video editor", null, true, "VideoEditorActivity");
         } else if (ScreenshotEditor.PACKAGE.equals(pkg)) {
             ScreenshotEditor.install(cl, param.getApplicationInfo());
         } else if (DocumentsSort.GOOGLE.equals(pkg) || DocumentsSort.AOSP.equals(pkg)) {

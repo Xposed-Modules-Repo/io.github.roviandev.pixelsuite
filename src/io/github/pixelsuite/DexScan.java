@@ -32,7 +32,7 @@ final class DexScan {
         final List<Fld> fields = new ArrayList<Fld>();
         final List<Mth> methods = new ArrayList<Mth>();
     }
-    static final class Fld { String name, type; boolean isStatic; }
+    static final class Fld { String type; boolean isStatic; }
     static final class Mth {
         Dex dex; Cls owner; String name, ret; String[] params; boolean isStatic; int codeOff;
         String sig() { StringBuilder b = new StringBuilder("("); for (String p : params) b.append(p); return b.append(')').append(ret).toString(); }
@@ -41,7 +41,7 @@ final class DexScan {
 
     static final class Dex {
         final byte[] d; String[] strings; String[] types; int[] protoRet; String[][] protoParams;
-        int[] fieldClass, fieldType, fieldName; int[] methodClass, methodProto, methodName;
+        int[] fieldType; int[] methodClass, methodProto, methodName;
         final Map<String, Integer> stringIndex = new HashMap<String, Integer>();
         Dex(byte[] d) { this.d = d; }
         int u16(int o) { return (d[o] & 0xff) | (d[o + 1] & 0xff) << 8; }
@@ -98,8 +98,8 @@ final class DexScan {
         for (int i = 0; i < typesSize; i++) x.types[i] = x.strings[x.u32(typesOff + i * 4)];
         x.protoRet = new int[protosSize]; x.protoParams = new String[protosSize][];
         for (int i = 0; i < protosSize; i++) { int o = protosOff + i * 12; x.protoRet[i] = x.u32(o + 4); x.protoParams[i] = x.typeList(x.u32(o + 8)); }
-        x.fieldClass = new int[fieldsSize]; x.fieldType = new int[fieldsSize]; x.fieldName = new int[fieldsSize];
-        for (int i = 0; i < fieldsSize; i++) { int o = fieldsOff + i * 8; x.fieldClass[i] = x.u16(o); x.fieldType[i] = x.u16(o + 2); x.fieldName[i] = x.u32(o + 4); }
+        x.fieldType = new int[fieldsSize];
+        for (int i = 0; i < fieldsSize; i++) x.fieldType[i] = x.u16(fieldsOff + i * 8 + 2);
         x.methodClass = new int[methodsSize]; x.methodProto = new int[methodsSize]; x.methodName = new int[methodsSize];
         for (int i = 0; i < methodsSize; i++) { int o = methodsOff + i * 8; x.methodClass[i] = x.u16(o); x.methodProto[i] = x.u16(o + 2); x.methodName[i] = x.u32(o + 4); }
         for (int i = 0; i < classesSize; i++) {
@@ -116,7 +116,7 @@ final class DexScan {
                 for (int k = 0; k < sf + inf; k++) {
                     if (k == sf) idx = 0;
                     idx += x.uleb(); x.uleb();
-                    Fld f = new Fld(); f.name = x.strings[x.fieldName[idx]]; f.type = x.types[x.fieldType[idx]]; f.isStatic = k < sf;
+                    Fld f = new Fld(); f.type = x.types[x.fieldType[idx]]; f.isStatic = k < sf;
                     c.fields.add(f);
                 }
                 idx = 0;

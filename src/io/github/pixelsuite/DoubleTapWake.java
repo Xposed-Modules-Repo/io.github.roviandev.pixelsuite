@@ -28,9 +28,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 
-import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 
 /**
  * "Tap or Double Tap to check phone".
@@ -114,16 +112,8 @@ final class DoubleTapWake {
     static final String KEY_TAP_GESTURE = "doze_tap_gesture";
     static final String KEY_DOUBLE_TAP_GESTURE = "doze_pulse_on_double_tap";
 
-    static final String OLD_TITLE = "Tap to check phone";
-    static final String NEW_TITLE = "Tap or Double Tap to check phone";
 
     private static final String KEY_TAP = "pixelsuite_wake_tap";
-    private static final String KEY_DOUBLE = "pixelsuite_wake_double_tap";
-    private static final String KEY_MODDED = "pixelsuite_lock_modded";
-    private static final String KEY_STOCK = "pixelsuite_lock_stock";
-    private static final String KEY_WAKE_GROUP = "pixelsuite_wake_group";
-    private static final String KEY_LOCK_GROUP = "pixelsuite_lock_group";
-    private static final String CLICK = "androidx.preference.Preference$OnPreferenceClickListener";
 
     private static final String PWM = "com.android.server.policy.PhoneWindowManager";
     private static final String PMS = "com.android.server.power.PowerManagerService";
@@ -136,8 +126,6 @@ final class DoubleTapWake {
     /** A touch held longer than this is a press, not a tap. */
     private static final long TAP_MAX_MS = 400L;
     private static final int SLEEP_REASON_POWER_BUTTON = 4;
-    /** The Tap to check phone page is short; bigger pages (Display > Lock screen) are skipped. */
-    private static final int MAX_PAGE_PREFS = 5;
 
     private static volatile boolean sWakeOn, sSleepOn, sInitDone;
     private static volatile long sLastSingle;
@@ -297,22 +285,11 @@ final class DoubleTapWake {
     private static final int MAX_MONITOR_FAILURES = 3;
     private static int sTouchSlop, sDoubleTapSlop;
 
-    private static Handler sMain;
-
-    private interface Action {
-        void run(Object pref, Object value);
-    }
-
     private DoubleTapWake() {}
-
-    /** Not used: System UI does not load the module on this phone. Kept for Module. */
-    static void installSystemUi(ClassLoader cl) { }
 
     // ------------------------------------------------------------------ system_server
 
     static void installSystem(ClassLoader cl) {
-        Module.log("double-tap-wake: v1.1.3 (touch on while held or on the lap, motion sensor on"
-                + " a desk)");
         try {
             sTapReason = PowerManager.class.getField("WAKE_REASON_TAP").getInt(null);
         } catch (Throwable ignored) {
@@ -322,8 +299,9 @@ final class DoubleTapWake {
             sBiometricReason = PowerManager.class.getField("WAKE_REASON_BIOMETRIC").getInt(null);
         } catch (Throwable ignored) { }
 
+        int hooks = 0;
         try {
-            Xp.hookAllMethods(Xp.findClass(PWM, cl), "systemBooted", new Xp.Callback() {
+            hooks += Xp.hookAllMethods(Xp.findClass(PWM, cl), "systemBooted", new Xp.Callback() {
                 @Override
                 protected void afterHookedMethod(Xp.Param param) {
                     try {
@@ -333,7 +311,7 @@ final class DoubleTapWake {
                         Module.log("double-tap-wake: init failed", t);
                     }
                 }
-            });
+            }).size();
         } catch (Throwable t) {
             Module.log("double-tap-wake: systemBooted hook failed", t);
         }
@@ -357,15 +335,17 @@ final class DoubleTapWake {
                 n = Xp.hookAllMethods(Xp.findClass(POWER_GROUP, cl), "wakeUpLocked", wake).size();
             } catch (Throwable ignored) { }
         }
-        Module.log("double-tap-wake: hooked " + n + " wake method(s), tap reason " + sTapReason);
-        installWindowWatch(cl);
-        installSmartspaceWatch(cl);
-        installLaunchGuard(cl);
-        installTapQuiet(cl);
-        installFingerWatch(cl);
-        installAodTouch(cl);
-        installShadeGuard(cl);
-        installUnlockTouchEnd(cl);
+        if (n == 0) Module.log("double-tap-wake: wake hook unavailable");
+        hooks += n;
+        hooks += installWindowWatch(cl);
+        hooks += installSmartspaceWatch(cl);
+        hooks += installLaunchGuard(cl);
+        hooks += installTapQuiet(cl);
+        hooks += installFingerWatch(cl);
+        hooks += installAodTouch(cl);
+        hooks += installShadeGuard(cl);
+        hooks += installUnlockTouchEnd(cl);
+        Module.log("double-tap-wake: " + hooks + " hooks");
     }
 
     /** Finger-down time of the touch we last ended at a fingerprint unlock (one cancel each). */
@@ -392,7 +372,7 @@ final class DoubleTapWake {
      * only the lock screen itself qualifies, never an app over it (camera, Wallet, a
      * fingerprint prompt). The shade guard stays as a fallback.
      */
-    private static void installUnlockTouchEnd(ClassLoader cl) {
+    private static int installUnlockTouchEnd(ClassLoader cl) {
         Xp.Callback cb = new Xp.Callback() {
             @Override
             protected void beforeHookedMethod(Xp.Param param) {
@@ -420,8 +400,8 @@ final class DoubleTapWake {
                 n += Xp.hookAllMethods(Xp.findClass(c, cl), "onAuthenticated", cb).size();
             } catch (Throwable ignored) { }
         }
-        Module.log("double-tap-wake: unlock touch end " + (n > 0 ? "installed (" + n + ")"
-                : "unavailable (shade guard only)"));
+        if (n == 0) Module.log("double-tap-wake: unlock touch end unavailable (shade guard only)");
+        return n;
     }
 
     /**
@@ -442,17 +422,11 @@ final class DoubleTapWake {
         boolean startedAsleep = down > sScreenOffAt && (wakeAt == 0 || down <= wakeAt);
         boolean asleep = startedAsleep
                 && (wakeAt != 0 || (sPm != null && !sPm.isInteractive()));
-        if (!asleep && !lockScreenShowing()) {
-            Module.log("double-tap-wake: fingerprint accepted with a finger down in an app, "
-                    + "left alone");
-            return;
-        }
+        if (!asleep && !lockScreenShowing()) return;   // a finger down in an app: left alone
         sEndedTouchAt = down;
         // From the fingerprint callback (wakeAt 0) the cancel must reach System UI before the
         // unlock does: wait for it, briefly (it takes under a millisecond normally).
-        pilfer("fingerprint unlock with the finger still on the screen, touch ended before "
-                + "waking (no shade pull-down)" + (wakeAt != 0 ? " [wake]" : ""),
-                wakeAt == 0 ? PILFER_WAIT_MS : 0L);
+        pilfer(wakeAt == 0 ? PILFER_WAIT_MS : 0L);
     }
 
     /** How long after an unlock a shade the unlocking touch opened gets closed again. */
@@ -477,8 +451,8 @@ final class DoubleTapWake {
      * progress started before the unlock (so it is the finger that unlocked, not a swipe
      * down), it is closed again once System UI has finished opening it.
      */
-    private static void installShadeGuard(ClassLoader cl) {
-        int n = 0;
+    private static int installShadeGuard(ClassLoader cl) {
+        int n = 0, hidden = 0;
         try {
             Class<?> sbms = Xp.findClass(
                     "com.android.server.statusbar.StatusBarManagerService", cl);
@@ -490,16 +464,17 @@ final class DoubleTapWake {
                     maybeCloseShade(param.thisObject);
                 }
             }).size();
-            Xp.hookAllMethods(sbms, "onPanelHidden", new Xp.Callback() {
+            hidden = Xp.hookAllMethods(sbms, "onPanelHidden", new Xp.Callback() {
                 @Override
                 protected void afterHookedMethod(Xp.Param param) {
                     sShadeOpen = false;
                 }
-            });
+            }).size();
         } catch (Throwable t) {
             Module.log("double-tap-wake: shade guard failed", t);
         }
-        Module.log("double-tap-wake: shade guard " + (n > 0 ? "installed" : "unavailable"));
+        if (n == 0) Module.log("double-tap-wake: shade guard unavailable");
+        return n + hidden;
     }
 
     /** Binder thread (System UI reporting the shade opening): cheap checks only. */
@@ -523,8 +498,6 @@ final class DoubleTapWake {
                     if (keyguardShowing()) return;   // on the lock screen the panel is the lock screen
                     try {
                         Xp.callMethod(statusBarService, "collapsePanels");
-                        Module.log("double-tap-wake: notification shade opened by the unlocking "
-                                + "touch, closing it");
                     } catch (Throwable t) {
                         Module.log("double-tap-wake: could not close the shade", t);
                     }
@@ -576,7 +549,7 @@ final class DoubleTapWake {
      * still: each time System UI asks for it, a short hand-held check (HeldWatch) runs with the
      * touchscreen still on, and while the phone is in the hand it stays on.
      */
-    private static void installAodTouch(ClassLoader cl) {
+    private static int installAodTouch(ClassLoader cl) {
         int n = 0;
         try {
             n = Xp.hookAllMethods(Xp.findClass(PMS, cl), "setDozeOverrideFromDreamManagerInternal",
@@ -595,20 +568,12 @@ final class DoubleTapWake {
                             }
                             int state = (Integer) param.args[0];
                             boolean doze = state == STATE_DOZE || state == STATE_DOZE_SUSPEND;
-                            if (!ours) onAodRequest(prev, param.args, doze, state);
-                            updateRecording(doze ? "always-on display low-power"
-                                    : "always-on display state " + state);
+                            if (!ours) onAodRequest(prev, param.args, doze);
+                            updateRecording();
                             if (!doze) return;
                             boolean keep = aodTouchWanted();
                             if (keep) param.args[0] = STATE_ON;
-                            int now = keep ? 1 : 0;
-                            if (now != sAodTouchLast) {
-                                sAodTouchLast = now;
-                                Module.log(keep
-                                        ? "double-tap-wake: always-on display touchscreen fully on ("
-                                                + aodTouchReason() + ")"
-                                        : "double-tap-wake: always-on display in low-power mode");
-                            }
+                            sAodTouchLast = keep ? 1 : 0;
                             // Low-power: a pickup (if the phone has that sensor) brings touch back.
                             if (!keep) armPickupLater();
                         }
@@ -616,7 +581,8 @@ final class DoubleTapWake {
         } catch (Throwable t) {
             Module.log("double-tap-wake: always-on touch hook failed", t);
         }
-        Module.log("double-tap-wake: always-on touch hooked " + n + " method(s)");
+        if (n == 0) Module.log("double-tap-wake: always-on touch unavailable");
+        return n;
     }
 
     /**
@@ -626,17 +592,6 @@ final class DoubleTapWake {
     private static boolean aodTouchWanted() {
         if (!sWakeOn) return false;
         return sCharging || touchWindowOpen() || shakingOn() || heldOn() || judgingOn();
-    }
-
-    /** Why the touchscreen is fully on, for the log. */
-    private static String aodTouchReason() {
-        if (sCharging) return "charging";
-        if (shakingOn()) return "phone shaking";
-        if (touchWindowOpen()) return "after a first tap";
-        HeldWatch w = sHeldWatch;
-        if (w != null && w.mHeldSeen) return "phone in the hand";
-        return heldOn() ? "checking whether the phone is in the hand"
-                : "judging hand-held from the recording";
     }
 
     private static boolean touchWindowOpen() {
@@ -658,14 +613,13 @@ final class DoubleTapWake {
                     try {
                         sCharging = Intent.ACTION_POWER_CONNECTED.equals(i.getAction());
                         reapplyAodNow();
-                        updateRecording(sCharging ? "charging" : "unplugged");
+                        updateRecording();
                     } catch (Throwable t) {
                         Module.log("double-tap-wake: charging change failed", t);
                     }
                 }
             };
             registerReceiver(ctx, r, f, new Handler(looper));
-            Module.log("double-tap-wake: charging watch on (charging=" + sCharging + ")");
         } catch (Throwable t) {
             Module.log("double-tap-wake: charging watch unavailable", t);
         }
@@ -751,8 +705,6 @@ final class DoubleTapWake {
         sWindowFirstAt = tapAt;
         sPairUntil = until + WINDOW_PAIR_GRACE_MS;
         holdAwake(TOUCH_WINDOW_MS + WINDOW_HOLD_STEP_MS * WINDOW_HOLD_STEPS + 500L);
-        Module.log("double-tap-wake: first tap on the always-on display, touchscreen on for "
-                + TOUCH_WINDOW_MS + " ms" + (alreadyOn ? " (was already coming on)" : ""));
         h.postDelayed(new WindowClose(start, until), TOUCH_WINDOW_MS);
         return true;
     }
@@ -784,9 +736,6 @@ final class DoubleTapWake {
     private static final int MOTION_JOLT_SAMPLES = 2;
     /** After a jolt, how long to wait for a proximity reading before waking anyway. */
     private static final long MOTION_PROX_WAIT_MS = 120L;
-    /** Samples at least this size are listed in the log (calibration). */
-    private static final float MOTION_NOTE = 0.06f;
-    private static final int MOTION_NOTES_MAX = 24;
     /**
      * A tap on a phone that is already moving (just taken out of a pocket, turned in the hand):
      * nothing is ever quiet, so instead a short, sharp bump counts. Its peak is at least
@@ -824,9 +773,6 @@ final class DoubleTapWake {
     private static final long MOTION_LOBE_MS = 50L;
     /** Without the recording tap 1's jolt isn't seen: taken as this long before the window. */
     private static final long TAP1_GUESS_MS = 100L;
-    /** Readings logged when no tap was felt (from this long before the window opened). */
-    private static final long MOTION_TRACE_FROM_MS = 200L;
-    private static final int MOTION_TRACE_MAX = 400;
     private static final long MOTION_SHARP_UNTIL_MS = 300L;
     private static final long MOTION_RISE_FROM_MS = 40L, MOTION_RISE_TO_MS = 20L;
     private static final long MOTION_FALL_MS = 25L;
@@ -885,7 +831,7 @@ final class DoubleTapWake {
 
     /** After tap 1 opened a touch window (worker thread): listen for the next tap's jolt. */
     private static void startMotionTap(long startUptime, long windowUntil) {
-        stopMotionTap("new first tap");
+        stopMotionTap();
         Handler h = sWorker;
         Context ctx = sCtx;
         if (h == null || ctx == null) return;
@@ -895,7 +841,6 @@ final class DoubleTapWake {
             if (acc == null) return;
             final Recorder rec = sRecorder;
             final MotionTap m = new MotionTap(sm, h, startUptime, windowUntil, rec != null);
-            long t0 = SystemClock.uptimeMillis();
             if (rec != null) {
                 // What was recorded already (tap 1, maybe tap 2 in deep sleep), then whatever
                 // the sensor hub still holds (flush), then live: all through the recording, in
@@ -904,14 +849,12 @@ final class DoubleTapWake {
                 rec.replayInto(m, m.mStartNs - MOTION_LOOKBACK_MS * 1000000L);
                 if (sMotion != m || m.mJolted) {
                     // Tap 2 was already in the recording (deep sleep): handled.
-                    m.mStartTook = SystemClock.uptimeMillis() - t0;
                     return;
                 }
                 // The flush and the no-delay registration take 30-70 ms: off this thread, so
                 // the readings they bring are handled here as soon as they come.
                 final SensorManager fsm = sm;
                 final Sensor facc = acc;
-                final long ft0 = t0;
                 sensorThread().post(new Runnable() {
                     @Override
                     public void run() {
@@ -931,7 +874,6 @@ final class DoubleTapWake {
                             } else {
                                 Module.log("double-tap-wake: live motion readings unavailable");
                             }
-                            m.mStartTook = SystemClock.uptimeMillis() - ft0;
                         } catch (Throwable t) {
                             Module.log("double-tap-wake: motion live start failed", t);
                         }
@@ -943,7 +885,6 @@ final class DoubleTapWake {
                     return;
                 }
                 sMotion = m;
-                m.mStartTook = SystemClock.uptimeMillis() - t0;
             }
             h.postDelayed(new Runnable() {
                 @Override
@@ -956,12 +897,12 @@ final class DoubleTapWake {
         }
     }
 
-    /** Ends the listening session, if any, and logs what it saw. Worker thread. */
-    private static void stopMotionTap(String why) {
+    /** Ends the listening session, if any. Worker thread. */
+    private static void stopMotionTap() {
         MotionTap m = sMotion;
         if (m == null) return;
         sMotion = null;
-        m.stop(why);
+        m.stop();
     }
 
     /**
@@ -1053,28 +994,31 @@ final class DoubleTapWake {
         return off != 0 && SystemClock.uptimeMillis() - off < PRE_RECORD_MS;
     }
 
+    /** The posted body of updateRecording (one instance: it carries no state). */
+    private static final Runnable UPDATE_RECORDING = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                boolean want = recordWanted();
+                if (want && sRecorder == null) {
+                    startRecording();
+                } else if (!want && sRecorder != null) {
+                    stopRecording();
+                }
+            } catch (Throwable t) {
+                Module.log("double-tap-wake: motion recording update failed", t);
+            }
+        }
+    };
+
     /** Starts or stops the recording to match recordWanted() (posts to the worker). */
-    private static void updateRecording(final String why) {
+    private static void updateRecording() {
         Handler h = sWorker;
         if (h == null) return;
-        h.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    boolean want = recordWanted();
-                    if (want && sRecorder == null) {
-                        startRecording(why);
-                    } else if (!want && sRecorder != null) {
-                        stopRecording(why);
-                    }
-                } catch (Throwable t) {
-                    Module.log("double-tap-wake: motion recording update failed", t);
-                }
-            }
-        });
+        h.post(UPDATE_RECORDING);
     }
 
-    private static void startRecording(String why) {
+    private static void startRecording() {
         Context ctx = sCtx;
         Handler h = sWorker;
         if (ctx == null || h == null) return;
@@ -1098,20 +1042,16 @@ final class DoubleTapWake {
             return;
         }
         sRecorder = rec;
-        Module.log("double-tap-wake: motion recording on (" + why + ", hub holds " + fifo
-                + ", " + acc.getFifoReservedEventCount() + " reserved)");
     }
 
-    private static void stopRecording(String why) {
+    private static void stopRecording() {
         Recorder rec = sRecorder;
         if (rec == null) return;
         sRecorder = null;
         // A session fed by it stops too (it would get nothing more).
         MotionTap m = sMotion;
-        if (m != null && m.mFromRecording) stopMotionTap("motion recording off");
+        if (m != null && m.mFromRecording) stopMotionTap();
         rec.stop();
-        Module.log("double-tap-wake: motion recording off (" + why + ", " + rec.mCount
-                + " readings)");
     }
 
     /** The recording's listener: keeps the last RECORD_KEEP readings, feeds a session. */
@@ -1121,8 +1061,7 @@ final class DoubleTapWake {
         private final float[] mX = new float[RECORD_KEEP], mY = new float[RECORD_KEEP],
                 mZ = new float[RECORD_KEEP];
         private int mN;
-        long mCount;
-        private boolean mStopped;
+        private boolean mStopped, mErrorLogged;
 
         Recorder(SensorManager sm) {
             mSm = sm;
@@ -1140,12 +1079,14 @@ final class DoubleTapWake {
                 mY[i] = e.values[1];
                 mZ[i] = e.values[2];
                 mN++;
-                mCount++;
                 MotionTap m = sMotion;
                 if (m != null && m.mFromRecording) m.feed(ts, e.values[0], e.values[1],
                         e.values[2]);
             } catch (Throwable t) {
-                Module.log("double-tap-wake: motion recording reading failed", t);
+                if (!mErrorLogged) {   // up to 400 readings a second: once
+                    mErrorLogged = true;
+                    Module.log("double-tap-wake: motion recording reading failed", t);
+                }
             }
         }
 
@@ -1254,7 +1195,7 @@ final class DoubleTapWake {
         private final SensorManager mSm;
         private final Handler mHandler;
         private final long mStartUp, mStartNs, mWindowUntil;
-        private long mFirstNs, mPrevNs, mPeakAt = -1;
+        private long mFirstNs, mPrevNs;
         /** Last over sample, and the current jolt's first one (0 = none). */
         private long mLastOverNs, mJoltNs;
         /** The current jolt started after quiet; its over samples so far; its peak. */
@@ -1262,7 +1203,7 @@ final class DoubleTapWake {
         private int mJoltSamples;
         private float mJoltPeak;
         private final float[] mBase = new float[3];
-        private int mSamples, mOld, mBad, mNoiseN, mJolts, mBlips, mNotQuiet;
+        private int mNoiseN;
         /** Recent high-passed samples (ring buffer, settling ones too), for the rise check. */
         private final long[] mHistNs = new long[MOTION_HISTORY];
         private final float[] mHistHp = new float[MOTION_HISTORY];
@@ -1271,27 +1212,10 @@ final class DoubleTapWake {
         private float mJoltPreMax;
         /** The lowest reading in the 40 ms before it, and the biggest just before that dip. */
         private float mJoltDip, mJoltPrevLobe;
-        /** Readings around the window's start, logged if no tap was felt (hp x100). */
-        private final StringBuilder mTrace = new StringBuilder();
-        private int mTraceN;
-        private long mTraceFromNs;
         /** A sharp peak that rose fast and must now fall fast (0 = none), and its size. */
         private long mSharpNs;
-        private float mSharpPeak, mSharpFrom;
-        /** How long turning the accelerometer on took (ms, log only). */
-        volatile long mStartTook;
-        /** Every jolt judged around tap 1, for the log. */
-        private final StringBuilder mJoltLog = new StringBuilder();
-
-        private void noteJolt(long joltNs, float peak, String what) {
-            if (mJoltLog.length() > 200) return;
-            mJoltLog.append(mJoltLog.length() == 0 ? "" : " ").append(String.format(
-                    java.util.Locale.US, "%+d:%.2f %s", (joltNs - mStartNs) / 1000000L, peak,
-                    what));
-        }
-        private float mNoiseSum, mPeak;
-        private final StringBuilder mNotes = new StringBuilder();
-        private int mNoteCount;
+        private float mSharpPeak;
+        private float mNoiseSum;
         /** A jolt was felt and we are waiting for the proximity reading. */
         private boolean mJolted;
         private boolean mDone;
@@ -1304,8 +1228,6 @@ final class DoubleTapWake {
         private float mTap1Peak;
         /** The current jolt has ended (and was judged if early). */
         private boolean mJoltFinal;
-        /** Recorded readings from before the window opened (log only). */
-        private int mBefore;
         /** High-passed readings from before the window opened (for the floor), oldest first. */
         private final long[] mPreNs = new long[RECORD_KEEP];
         private final float[] mPreHp = new float[RECORD_KEEP];
@@ -1318,8 +1240,6 @@ final class DoubleTapWake {
         private int mSoftN;
         private float mSoftPeak;
         private boolean mSoftFromQuiet;
-        /** Woke on the soft rule: the trace is logged too (calibration). */
-        private boolean mSoftWake;
 
         MotionTap(SensorManager sm, Handler h, long startUptime, long windowUntil,
                   boolean fromRecording) {
@@ -1343,33 +1263,19 @@ final class DoubleTapWake {
          * one is tap 2 if it is TAP_GAP_MS after it and a real tap's size (EARLY_TAP2_*).
          */
         private boolean earlyJoltIsNextTap(long joltNs, float peak) {
-            if (joltNs < mStartNs - TAP1_BEFORE_MS * 1000000L) {
-                noteJolt(joltNs, peak, "old");
-                return false;   // older movement
-            }
+            if (joltNs < mStartNs - TAP1_BEFORE_MS * 1000000L) return false;   // older movement
             if (mTap1Ns == 0) {
                 mTap1Ns = joltNs;
                 mTap1Peak = peak;
-                noteJolt(joltNs, peak, "tap1");
                 return false;
             }
-            if (joltNs - mTap1Ns < TAP_GAP_MS * 1000000L) {
-                if (joltNs - mTap1Ns > 5000000L) noteJolt(joltNs, peak, "tap1-end");
-                return false;
-            }
-            boolean big = peak >= Math.max(EARLY_TAP2_MIN, EARLY_TAP2_RATIO * mTap1Peak);
-            noteJolt(joltNs, peak, big ? "tap2" : "small");
-            return big;
+            if (joltNs - mTap1Ns < TAP_GAP_MS * 1000000L) return false;
+            return peak >= Math.max(EARLY_TAP2_MIN, EARLY_TAP2_RATIO * mTap1Peak);
         }
 
-        /**
-         * A new jolt starting after the window opened: the next tap (tap 1, lift-off included,
-         * was over before the tap sensor reported it). Measured: tap 2 lands as soon as 45 ms
-         * after the window opened, ~100 ms after tap 1's touch.
-         */
-        private boolean lateJoltIsNextTap(long joltNs) {
-            return true;
-        }
+        // A new jolt starting after the window opened is always the next tap (tap 1, lift-off
+        // included, was over before the tap sensor reported it). Measured: tap 2 lands as soon
+        // as 45 ms after the window opened, ~100 ms after tap 1's touch.
 
         /** The current jolt ended (worker): judge it if it was an early one. True if woken. */
         private boolean finishJolt(float limit) {
@@ -1382,11 +1288,6 @@ final class DoubleTapWake {
                             MOTION_STANDOUT_TIMES * mJoltPreMax);
             if (!mJoltFromQuiet && !standsOut) return false;
             if (!earlyJoltIsNextTap(mJoltNs, mJoltPeak)) return false;
-            Module.log(String.format(java.util.Locale.US,
-                    "double-tap-wake: next tap felt by the motion sensor %+d ms after tap 1, from"
-                            + " the recording (peak %.2f, tap 1 %.2f at %+d, limit %.2f),"
-                            + " checking proximity", (mJoltNs - mStartNs) / 1000000L, mJoltPeak,
-                    mTap1Peak, (mTap1Ns - mStartNs) / 1000000L, limit));
             onJolt();
             return true;
         }
@@ -1413,7 +1314,7 @@ final class DoubleTapWake {
 
         /** MOTION_LISTEN_MS passed (a jolt waiting for proximity finishes on its own). */
         void timeUp() {
-            if (!mJolted) stopMotionTap("time up");
+            if (!mJolted) stopMotionTap();
         }
 
         /**
@@ -1468,12 +1369,6 @@ final class DoubleTapWake {
                 return false;
             }
             mSoftJudgedNs = mSoftJoltNs;
-            mSoftWake = true;
-            Module.log(String.format(java.util.Locale.US,
-                    "double-tap-wake: next tap felt by the motion sensor %+d ms after tap 1 (soft"
-                            + " tap on a still phone: jolt from %+d, peak %.2f, %d readings over"
-                            + " %.3f, resting floor %.3f), checking proximity",
-                    (ts - mStartNs) / 1000000L, from, mSoftPeak, mSoftN, mSoftLimit, mFloor));
             onJolt();
             return true;
         }
@@ -1483,10 +1378,7 @@ final class DoubleTapWake {
             if (mDone) return;
             try {
                 if (e.sensor != null && e.sensor.getType() == Sensor.TYPE_PROXIMITY) {
-                    if (mJolted) {
-                        boolean near = e.values[0] < e.sensor.getMaximumRange();
-                        decide(near ? "near" : "far");
-                    }
+                    if (mJolted) decide(e.values[0] < e.sensor.getMaximumRange());
                     return;
                 }
                 // With the recording, this registration only makes readings come at once; they
@@ -1496,7 +1388,7 @@ final class DoubleTapWake {
                 feed(e.timestamp, e.values[0], e.values[1], e.values[2]);
             } catch (Throwable t) {
                 Module.log("double-tap-wake: motion sensor reading failed", t);
-                stopMotionTap("error");
+                stopMotionTap();
             }
         }
 
@@ -1504,29 +1396,22 @@ final class DoubleTapWake {
         void feed(long ts, float x, float y, float z) {
             if (mDone || mJolted) return;
             try {
-                if (sWindowUntil != mWindowUntil) {
-                    stopMotionTap("touch window over");
+                if (sWindowUntil != mWindowUntil) {   // touch window over
+                    stopMotionTap();
                     return;
                 }
-                if (sTouchDownAt >= mStartUp) {
-                    stopMotionTap("touchscreen back");
+                if (sTouchDownAt >= mStartUp) {   // touchscreen back
+                    stopMotionTap();
                     return;
                 }
                 if (ts <= mLastFedNs) return;   // already had it
                 mLastFedNs = ts;
                 long earliest = mFromRecording ? mStartNs - MOTION_LOOKBACK_MS * 1000000L
                         : mStartNs;
-                if (ts < earliest) {   // too old (without the recording: tap 1's own jolt)
-                    mOld++;
-                    return;
-                }
-                if (ts < mStartNs) mBefore++;
+                // Too old (without the recording: tap 1's own jolt).
+                if (ts < earliest) return;
                 float g = (float) Math.sqrt(x * x + y * y + z * z);
-                if (Float.isNaN(g) || g < 2f || g > 40f) {   // not a real reading
-                    mBad++;
-                    return;
-                }
-                mSamples++;
+                if (Float.isNaN(g) || g < 2f || g > 40f) return;   // not a real reading
                 if (mFirstNs == 0) {
                     mFirstNs = ts;
                     mPrevNs = ts;
@@ -1549,14 +1434,7 @@ final class DoubleTapWake {
                 mHistNs[mHistN % MOTION_HISTORY] = ts;
                 mHistHp[mHistN % MOTION_HISTORY] = hp;
                 mHistN++;
-                if (ts >= mStartNs - MOTION_TRACE_FROM_MS * 1000000L
-                        && mTraceN < MOTION_TRACE_MAX) {
-                    if (mTraceN == 0) mTraceFromNs = ts;
-                    mTrace.append(mTraceN == 0 ? "" : ",").append(Math.round(hp * 100f));
-                    mTraceN++;
-                }
                 if (!settling) {
-                    long at = (ts - mStartNs) / 1000000L;   // ms after the window opened
                     if (mJoltNs != 0 && !mJoltFinal
                             && ts - mLastOverNs > MOTION_GAP_MS * 1000000L) {
                         if (finishJolt(limit)) return;
@@ -1570,23 +1448,10 @@ final class DoubleTapWake {
                     } else if (mFromRecording && softTap(ts, hp)) {
                         return;
                     }
-                    if (hp > mPeak) {
-                        mPeak = hp;
-                        mPeakAt = at;
-                    }
-                    if (hp >= (mFromRecording ? Math.max(MOTION_NOTE, limit) : MOTION_NOTE)
-                            && mNoteCount < MOTION_NOTES_MAX) {
-                        mNoteCount++;
-                        mNotes.append(mNotes.length() == 0 ? "" : " ")
-                                .append(at >= 0 ? "+" : "").append(at).append(':')
-                                .append(String.format(java.util.Locale.US, "%.2f", hp));
-                    }
                     if (hp >= limit) {
                         boolean sameJolt = mJoltNs != 0
                                 && ts - mLastOverNs <= MOTION_GAP_MS * 1000000L;
                         if (!sameJolt) {
-                            if (mJoltNs != 0 && mJoltSamples < MOTION_JOLT_SAMPLES) mBlips++;
-                            mJolts++;
                             mJoltNs = ts;
                             mJoltSamples = 0;
                             mJoltPeak = 0f;
@@ -1624,7 +1489,6 @@ final class DoubleTapWake {
                             }
                             mJoltFromQuiet = mNoiseN >= MOTION_NOISE_MIN_N && (mLastOverNs == 0
                                     || ts - mLastOverNs > MOTION_QUIET_MS * 1000000L);
-                            if (!mJoltFromQuiet) mNotQuiet++;
                         }
                         mLastOverNs = ts;
                         mJoltSamples++;
@@ -1634,42 +1498,23 @@ final class DoubleTapWake {
                         if (mJoltFromQuiet && mJoltSamples >= MOTION_JOLT_SAMPLES
                                 && mJudgedJoltNs != mJoltNs && !early(mJoltNs)) {
                             mJudgedJoltNs = mJoltNs;
-                            if (lateJoltIsNextTap(mJoltNs)) {
-                                Module.log(String.format(java.util.Locale.US,
-                                        "double-tap-wake: next tap felt by the motion sensor %+d"
-                                                + " ms after tap 1 (jolt from %+d, peak %.2f"
-                                                + " m/s^2, limit %.2f), checking proximity", at,
-                                        (mJoltNs - mStartNs) / 1000000L, mJoltPeak, limit));
-                                onJolt();
-                                return;
-                            }
+                            onJolt();   // a late jolt from quiet is the next tap
+                            return;
                         }
+                        // Not from quiet, but standing out from what came just before.
                         if (!mJoltFromQuiet && !early(mJoltNs) && mJudgedJoltNs != mJoltNs
                                 && mJoltSamples >= MOTION_JOLT_SAMPLES
                                 && mNoiseN >= MOTION_NOISE_MIN_N
                                 && mJoltPeak >= Math.max(Math.max(limit, MOTION_STANDOUT_MIN),
                                         MOTION_STANDOUT_TIMES * mJoltPreMax)) {
                             mJudgedJoltNs = mJoltNs;
-                            Module.log(String.format(java.util.Locale.US,
-                                    "double-tap-wake: next tap felt by the motion sensor %+d ms"
-                                            + " after tap 1 (jolt from %+d standing out: peak"
-                                            + " %.2f, %.2f in the 40 ms before, limit %.2f),"
-                                            + " checking proximity", at,
-                                    (mJoltNs - mStartNs) / 1000000L, mJoltPeak, mJoltPreMax,
-                                    limit));
                             onJolt();
                             return;
                         }
+                        // Not from quiet, but growing back after a dip in tap 1's wobble.
                         if (!mJoltFromQuiet && !early(mJoltNs) && mJudgedJoltNs != mJoltNs
                                 && regrows(limit)) {
                             mJudgedJoltNs = mJoltNs;
-                            Module.log(String.format(java.util.Locale.US,
-                                    "double-tap-wake: next tap felt by the motion sensor %+d ms"
-                                            + " after tap 1 (jolt from %+d growing back: peak"
-                                            + " %.2f after a dip to %.2f, bump before %.2f,"
-                                            + " limit %.2f), checking proximity", at,
-                                    (mJoltNs - mStartNs) / 1000000L, mJoltPeak, mJoltDip,
-                                    mJoltPrevLobe, limit));
                             onJolt();
                             return;
                         }
@@ -1685,14 +1530,14 @@ final class DoubleTapWake {
                 mNoiseN++;
             } catch (Throwable t) {
                 Module.log("double-tap-wake: motion sensor reading failed", t);
-                stopMotionTap("error");
+                stopMotionTap();
             }
         }
 
         /**
          * The sharp-bump check (see MOTION_SHARP_MIN), on each new sample: first a peak that
          * rose fast (the sample before the newest one), then the fall within MOTION_FALL_MS.
-         * When both hold, logs and handles it as the next tap.
+         * When both hold, handles it as the next tap.
          */
         private boolean sharpPeak(float limit) {
             int n = mHistN;
@@ -1707,15 +1552,9 @@ final class DoubleTapWake {
                 } else if (hp <= mSharpPeak / MOTION_SHARP_RATIO) {
                     long tp = mSharpNs;
                     mSharpNs = 0;
-                    boolean next = early(tp) ? earlyJoltIsNextTap(tp, mSharpPeak)
-                            : lateJoltIsNextTap(tp);
-                    if (!next) return false;   // tap 1's own bump, or its lift-off
-                    Module.log(String.format(java.util.Locale.US,
-                            "double-tap-wake: next tap felt by the motion sensor %+d ms after"
-                                    + " tap 1 (sharp jolt on a moving phone: %.2f, at most %.2f"
-                                    + " before, %.2f %d ms after), checking proximity",
-                            (tp - mStartNs) / 1000000L, mSharpPeak, mSharpFrom, hp,
-                            (ts - tp) / 1000000L));
+                    // A late one is always the next tap; an early one may be tap 1's own bump,
+                    // or its lift-off.
+                    if (early(tp) && !earlyJoltIsNextTap(tp, mSharpPeak)) return false;
                     onJolt();
                     return true;
                 } else if (ts - mSharpNs > MOTION_FALL_MS * 1000000L) {
@@ -1739,7 +1578,6 @@ final class DoubleTapWake {
             if (high < 0f || high > p / MOTION_SHARP_RATIO) return false;
             mSharpNs = tp;   // rose fast; now it has to fall fast
             mSharpPeak = p;
-            mSharpFrom = high;
             if (hp <= p / MOTION_SHARP_RATIO) return sharpPeak(limit);   // already fell
             return false;
         }
@@ -1762,26 +1600,23 @@ final class DoubleTapWake {
                 prox = null;
             }
             if (prox == null) {
-                decide("no sensor");
+                decide(false);   // no sensor
                 return;
             }
             mHandler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    if (!mDone) decide("no reading");
+                    if (!mDone) decide(false);   // no reading
                 }
             }, MOTION_PROX_WAIT_MS);
         }
 
         /** After a jolt: wake unless the screen is covered or the phone already woke. */
-        private void decide(String proximity) {
+        private void decide(boolean near) {
             if (mDone) return;
             if (sMotion == this) sMotion = null;
-            stop("tap felt, proximity " + proximity);
-            if ("near".equals(proximity)) {
-                Module.log("double-tap-wake: screen covered, motion tap ignored");
-                return;
-            }
+            stop();
+            if (near) return;   // screen covered: ignored
             if (sPm == null || sPm.isInteractive() || sWindowUntil != mWindowUntil) return;
             wakeForMotionTap();
         }
@@ -1789,39 +1624,15 @@ final class DoubleTapWake {
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) { }
 
-        void stop(String why) {
+        void stop() {
             if (mDone) return;
             mDone = true;
             dropLiveKick();
             try {
                 mSm.unregisterListener(this);
             } catch (Throwable ignored) { }
-            long firstAfter = mFirstNs == 0 ? -1 : (mFirstNs - mStartNs) / 1000000L;
-            long span = mFirstNs == 0 ? 0 : (mPrevNs - mFirstNs) / 1000000L;
             float noise = mNoiseN == 0 ? 0f : mNoiseSum / mNoiseN;
-            if (mJoltNs != 0 && !mJolted && mJoltSamples < MOTION_JOLT_SAMPLES) mBlips++;
-            Module.log(String.format(java.util.Locale.US,
-                    "double-tap-wake: motion sensor off (%s): %d samples in %d ms (%s, %d from"
-                            + " before tap 1, tap 1 %s, jolts {%s}), on in %d ms, first %+d ms"
-                            + " after tap 1,"
-                            + " peak %.2f at %+d, noise %.3f, limit %.2f, resting floor %s,"
-                            + " jolts %d (blips %d, not after quiet %d), old %d, bad %d [%s]",
-                    why, mSamples, span, mFromRecording ? "recorded" : "live", mBefore,
-                    mTap1Ns == 0 ? "not felt" : String.format(java.util.Locale.US, "felt at %+d",
-                            (mTap1Ns - mStartNs) / 1000000L), mJoltLog,
-                    mStartTook, firstAfter, mPeak, mPeakAt, noise,
-                    Math.max(MOTION_MIN, MOTION_NOISE_TIMES * noise),
-                    Float.isNaN(mFloor) ? "n/a" : String.format(java.util.Locale.US,
-                            "%.3f (soft limit %.3f%s)", mFloor, mSoftLimit,
-                            mFloor > MOTION_SOFT_FLOOR_MAX ? ", moving: off" : ""),
-                    mJolts, mBlips, mNotQuiet, mOld, mBad, mNotes));
-            // Also after a soft-rule wake, so its calls can be checked against the readings.
-            if ((!mJolted || mSoftWake) && mTraceN > 0) {
-                Module.log(String.format(java.util.Locale.US,
-                        "double-tap-wake: motion trace from %+d ms (x100, %d readings): %s",
-                        (mTraceFromNs - mStartNs) / 1000000L, mTraceN, mTrace));
-            }
-            if (shaking(noise, mNoiseN)) onMovingTap(noise);
+            if (shaking(noise, mNoiseN)) onMovingTap();
         }
     }
 
@@ -1900,7 +1711,7 @@ final class DoubleTapWake {
                     done.done(noise, probe.samples());
                 } catch (Throwable t) {
                     Module.log("double-tap-wake: motion listen failed", t);
-                    endShaking("error");
+                    endShaking();
                 }
             }
         }, SHAKING_PROBE_MS);
@@ -1912,19 +1723,16 @@ final class DoubleTapWake {
     }
 
     /** A tap's motion session found the phone moving a lot (worker thread): watch it. */
-    private static void onMovingTap(float noise) {
+    private static void onMovingTap() {
         try {
             Handler h = sWorker;
             if (h == null || !sWakeOn || shakingOn()) return;
             final long at = SystemClock.uptimeMillis();
             sMovingSeenAt = at;
-            Module.log(String.format(java.util.Locale.US,
-                    "double-tap-wake: phone moving at the tap (noise %.3f), checking whether it"
-                            + " keeps shaking", noise));
             h.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    if (sMovingSeenAt == at) confirmShaking("10 s after the tap");
+                    if (sMovingSeenAt == at) confirmShaking();   // 10 s after the tap
                 }
             }, SHAKING_RECHECK_MS);
         } catch (Throwable t) {
@@ -1958,7 +1766,7 @@ final class DoubleTapWake {
             h.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    if (sMovingSeenAt == at) confirmShaking("after locking");
+                    if (sMovingSeenAt == at) confirmShaking();   // after locking
                 }
             }, SHAKING_AFTER_OFF_MS);
         } catch (Throwable t) {
@@ -1967,7 +1775,7 @@ final class DoubleTapWake {
     }
 
     /** While watching: is the phone still shaking? Asked on the always-on display only. */
-    private static void confirmShaking(final String when) {
+    private static void confirmShaking() {
         try {
             if (!sWakeOn || sPm == null || shakingOn()) return;
             // In use, or the always-on display is off (pocket): ask after the next lock.
@@ -1977,13 +1785,8 @@ final class DoubleTapWake {
                 void done(float noise, int samples) {
                     if (shakingOn()) return;
                     sMovingSeenAt = 0;
-                    if (shaking(noise, samples)) {
-                        startShaking(noise, when);
-                    } else {
-                        Module.log(String.format(java.util.Locale.US,
-                                "double-tap-wake: phone not shaking %s (noise %.3f), always-on"
-                                        + " display stays low-power", when, noise));
-                    }
+                    // Not shaking: the always-on display stays low-power.
+                    if (shaking(noise, samples)) startShaking();
                 }
             });
         } catch (Throwable t) {
@@ -1992,14 +1795,10 @@ final class DoubleTapWake {
     }
 
     /** The phone keeps shaking (worker thread): touchscreen on for the always-on display. */
-    private static void startShaking(float noise, String when) {
+    private static void startShaking() {
         extendShaking(SHAKING_MS);
-        Module.log(String.format(java.util.Locale.US,
-                "double-tap-wake: phone shaking %s (noise %.3f), touchscreen kept on for the"
-                        + " always-on display, checking again in %d min", when, noise,
-                SHAKING_MS / 60000L));
         reapplyAodNow();
-        updateRecording("phone shaking");
+        updateRecording();
     }
 
     /** Shaking mode for {@code ms} more, with its end check scheduled. Worker thread. */
@@ -2019,8 +1818,8 @@ final class DoubleTapWake {
     /** Shaking mode time is up (worker thread): still shaking? Asked on the always-on display. */
     private static void shakingCheck() {
         try {
-            if (!sWakeOn || sPm == null) {
-                endShaking("double tap to wake off");
+            if (!sWakeOn || sPm == null) {   // double tap to wake off
+                endShaking();
                 return;
             }
             if (sPm.isInteractive()) {
@@ -2029,8 +1828,8 @@ final class DoubleTapWake {
                 extendShaking(SHAKING_MS);
                 return;
             }
-            if (!aodDozing(sAodArgs)) {
-                endShaking("always-on display off");
+            if (!aodDozing(sAodArgs)) {   // always-on display off
+                endShaking();
                 return;
             }
             // Keep the touchscreen on while asking (a doze request meanwhile would drop it).
@@ -2039,35 +1838,30 @@ final class DoubleTapWake {
             boolean started = runProbe(new ProbeDone() {
                 @Override
                 void done(float noise, int samples) {
-                    if (shaking(noise, samples)) {
+                    if (shaking(noise, samples)) {   // still shaking: touchscreen stays on
                         extendShaking(SHAKING_MS);
                         reapplyAodNow();
-                        Module.log(String.format(java.util.Locale.US,
-                                "double-tap-wake: phone still shaking (noise %.3f), touchscreen"
-                                        + " stays on %d more min", noise, SHAKING_MS / 60000L));
                     } else {
-                        endShaking(String.format(java.util.Locale.US, "phone still (noise %.3f,"
-                                + " %d samples)", noise, samples));
+                        endShaking();   // phone still
                     }
                 }
             });
-            if (!started) endShaking("motion sensor unavailable");
+            if (!started) endShaking();   // motion sensor unavailable
         } catch (Throwable t) {
             Module.log("double-tap-wake: shaking check failed", t);
-            endShaking("error");
+            endShaking();
         }
     }
 
-    private static void endShaking(String why) {
+    private static void endShaking() {
         if (sProbe != null) {
             sProbe.cancel();
             sProbe = null;
         }
         if (sShakingUntil == 0) return;
         sShakingUntil = 0;
-        Module.log("double-tap-wake: shaking mode over (" + why + ")");
         reapplyAodNow();
-        updateRecording("shaking over");
+        updateRecording();
     }
 
     /** A short accelerometer listen: the resting noise, measured like MotionTap's. */
@@ -2208,11 +2002,10 @@ final class DoubleTapWake {
 
     /** End (uptimeMillis) of hand-held mode or its check, 0 = off. */
     private static volatile long sHeldUntil;
-    /** The running watch, or null. Worker thread (read from others for the log). */
+    /** The running watch, or null. Worker thread (read from others). */
     private static volatile HeldWatch sHeldWatch;
     /** Time spent in hand-held mode since the screen last went off (ms). */
     private static volatile long sHeldSpentMs;
-    private static volatile boolean sHeldBudgetLogged;
     /** The thread re-sending System UI's request in reapplyAodNow, null otherwise. */
     private static volatile Thread sReapplyThread;
 
@@ -2226,9 +2019,9 @@ final class DoubleTapWake {
      * posts only. Going low-power (from anything else) or a changed low-power request (new
      * brightness) starts a hand-held check; anything else (pulse, off) ends hand-held mode.
      */
-    private static void onAodRequest(Object[] prev, Object[] args, boolean doze, int state) {
+    private static void onAodRequest(Object[] prev, Object[] args, boolean doze) {
         if (!doze) {
-            if (sHeldUntil != 0 || sHeldWatch != null) postEndHeld("always-on display state " + state);
+            if (sHeldUntil != 0 || sHeldWatch != null) postEndHeld();
             postDisarmPickup();
             return;
         }
@@ -2262,12 +2055,10 @@ final class DoubleTapWake {
 
     private static final class Judge {
         final String trigger;
-        final boolean keptTouch;
         final Recorder rec;
 
-        Judge(String trigger, boolean keptTouch, Recorder rec) {
+        Judge(String trigger, Recorder rec) {
             this.trigger = trigger;
-            this.keptTouch = keptTouch;
             this.rec = rec;
         }
     }
@@ -2287,14 +2078,14 @@ final class DoubleTapWake {
         if (heldOn()) return true;   // a live check or hand-held mode is already running
         final Recorder rec = sRecorder;
         if (rec == null || (budgetApplies(trigger) && sHeldSpentMs >= HELD_BUDGET_MS)) {
-            return startHeldCheck(trigger);   // the live check (it also logs a spent budget)
+            return startHeldCheck(trigger);   // the live check (it also handles a spent budget)
         }
         if (keepTouch) sJudgeUntil = SystemClock.uptimeMillis() + JUDGE_MAX_MS + 200L;
         h.post(new Runnable() {
             @Override
             public void run() {
                 try {
-                    final Judge j = new Judge(trigger, keepTouch, rec);
+                    final Judge j = new Judge(trigger, rec);
                     sJudge = j;
                     sensorThread().post(new Runnable() {
                         @Override
@@ -2305,16 +2096,16 @@ final class DoubleTapWake {
                                 SensorManager sm = ctx == null ? null
                                         : (SensorManager) ctx.getSystemService(
                                                 Context.SENSOR_SERVICE);
-                                if (sm == null || !sm.flush(rec)) postJudgeFallback(j, "no flush");
+                                if (sm == null || !sm.flush(rec)) postJudgeFallback(j);
                             } catch (Throwable t) {
-                                postJudgeFallback(j, "flush failed");
+                                postJudgeFallback(j);
                             }
                         }
                     });
                     h.postDelayed(new Runnable() {
                         @Override
                         public void run() {
-                            if (sJudge == j) judgeFallback(j, "no flush in time");
+                            if (sJudge == j) judgeFallback(j);   // no flush in time
                         }
                     }, JUDGE_MAX_MS);
                 } catch (Throwable t) {
@@ -2327,24 +2118,22 @@ final class DoubleTapWake {
         return keepTouch;
     }
 
-    private static void postJudgeFallback(final Judge j, final String why) {
+    private static void postJudgeFallback(final Judge j) {
         Handler h = sWorker;
         if (h == null) return;
         h.post(new Runnable() {
             @Override
             public void run() {
-                if (sJudge == j) judgeFallback(j, why);
+                if (sJudge == j) judgeFallback(j);
             }
         });
     }
 
     /** The recording can't answer (worker thread): the live check decides instead. */
-    private static void judgeFallback(Judge j, String why) {
+    private static void judgeFallback(Judge j) {
         sJudge = null;
-        boolean live = startHeldCheck(j.trigger);   // sets its own touch-on time first
+        startHeldCheck(j.trigger);   // sets its own touch-on time first
         sJudgeUntil = 0;
-        Module.log("double-tap-wake: hand-held judgement from the recording not possible ("
-                + why + "), " + (live ? "checking live" : "low-power"));
         reapplyAodNow();
     }
 
@@ -2359,26 +2148,20 @@ final class DoubleTapWake {
             return;
         }
         float[] r = rec.stillness(HELD_SETTLE_MS + HELD_WINDOW_MS);
-        if (r == null || r[2] < JUDGE_MIN_READINGS) {
-            judgeFallback(j, r == null ? "no readings" : "too few readings: " + (int) r[2]);
+        if (r == null || r[2] < JUDGE_MIN_READINGS) {   // no readings, or too few
+            judgeFallback(j);
             return;
         }
-        String m = String.format(java.util.Locale.US, "noise %.3f, tilt %.2f deg, %d readings",
-                r[0], r[1], (int) r[2]);
         boolean still = r[0] < STILL_NOISE && r[1] < STILL_TILT_DEG;
-        if (still) {
+        if (still) {   // lying still: the always-on display goes low-power
             sJudgeUntil = 0;
-            Module.log("double-tap-wake: phone lying still (" + m + ", from the recording; "
-                    + j.trigger + ")" + (j.keptTouch ? ", always-on display low-power" : ""));
             reapplyAodNow();
             return;
         }
         // Moving: the live check takes over (touch on while it runs; it starts before the
         // judgement's own touch-on time ends, so the display doesn't blink to low-power).
-        boolean live = startHeldCheck(j.trigger);
+        startHeldCheck(j.trigger);
         sJudgeUntil = 0;
-        Module.log("double-tap-wake: phone moving (" + m + ", from the recording; " + j.trigger
-                + ")" + (live ? ", touchscreen on while checking" : ""));
         reapplyAodNow();
     }
 
@@ -2401,14 +2184,9 @@ final class DoubleTapWake {
         final Handler h = sWorker;
         if (h == null || !sWakeOn || sCharging || shakingOn()) return false;
         if (heldOn()) return true;   // a check or hand-held mode is already running
-        if (budgetApplies(trigger) && sHeldSpentMs >= HELD_BUDGET_MS) {
-            if (!sHeldBudgetLogged) {
-                sHeldBudgetLogged = true;
-                Module.log("double-tap-wake: hand-held time used up until the next screen-off ("
-                        + HELD_BUDGET_MS / 60000L + " min), always-on display stays low-power");
-            }
-            return false;
-        }
+        // Hand-held time used up until the next screen-off: the always-on display stays
+        // low-power.
+        if (budgetApplies(trigger) && sHeldSpentMs >= HELD_BUDGET_MS) return false;
         final long until = SystemClock.uptimeMillis() + HELD_SETTLE_MS + HELD_WINDOW_MS
                 + HELD_MARGIN_MS;
         sHeldUntil = until;
@@ -2420,7 +2198,7 @@ final class DoubleTapWake {
                     startHeldWatch(trigger, until);
                 } catch (Throwable t) {
                     Module.log("double-tap-wake: hand-held check failed", t);
-                    endHeld("error", true);
+                    endHeld(true);
                 }
             }
         });
@@ -2436,18 +2214,18 @@ final class DoubleTapWake {
         SensorManager sm = ctx == null ? null
                 : (SensorManager) ctx.getSystemService(Context.SENSOR_SERVICE);
         Sensor acc = sm == null ? null : sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        if (acc == null) {
-            endHeld("no motion sensor", true);
+        if (acc == null) {   // no motion sensor
+            endHeld(true);
             return;
         }
         HeldWatch w = new HeldWatch(sm, trigger);
         if (!sm.registerListener(w, acc, HELD_PERIOD_US, 0, sWorker)) {
-            endHeld("motion sensor unavailable", true);
+            endHeld(true);
             return;
         }
         sHeldWatch = w;
         holdAwake(until - SystemClock.uptimeMillis() + 500L);
-        updateRecording("hand-held check");   // the recording isn't needed while touch is on
+        updateRecording();   // the recording isn't needed while touch is on
         watchHeldUntil(until);
     }
 
@@ -2458,19 +2236,19 @@ final class DoubleTapWake {
         h.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (sHeldUntil == until) endHeld("no motion readings", true);
+                if (sHeldUntil == until) endHeld(true);
             }
         }, Math.max(0L, until - SystemClock.uptimeMillis()) + 50L);
     }
 
-    private static void postEndHeld(final String why) {
+    private static void postEndHeld() {
         Handler h = sWorker;
         if (h == null) return;
         h.post(new Runnable() {
             @Override
             public void run() {
                 // The always-on display left low-power: nothing to re-apply.
-                endHeld(why, false);
+                endHeld(false);
             }
         });
     }
@@ -2479,7 +2257,7 @@ final class DoubleTapWake {
      * Ends hand-held mode or its check (worker thread), counts its time, and (if
      * {@code reapply}) lets the always-on display go back to low-power.
      */
-    private static void endHeld(String why, boolean reapply) {
+    private static void endHeld(boolean reapply) {
         HeldWatch w = sHeldWatch;
         sHeldWatch = null;
         boolean was = sHeldUntil != 0 || sJudgeUntil != 0;
@@ -2489,18 +2267,10 @@ final class DoubleTapWake {
         if (w != null) {
             w.cancel();
             sHeldSpentMs += SystemClock.uptimeMillis() - w.mStartUp;
-            if (w.mHeldSeen) {
-                Module.log("double-tap-wake: hand-held mode over (" + why + ", "
-                        + (SystemClock.uptimeMillis() - w.mStartUp) / 1000L + " s)");
-            } else if (!w.mDecided) {
-                Module.log("double-tap-wake: hand-held check stopped (" + why + ")");
-            }
-        } else if (was && !"screen on".equals(why)) {
-            Module.log("double-tap-wake: hand-held check stopped (" + why + ")");
         }
         if (reapply && was) {
             reapplyAodNow();
-            updateRecording("hand-held over");
+            updateRecording();
         }
     }
 
@@ -2517,9 +2287,6 @@ final class DoubleTapWake {
         private long mFirstNs, mPrevNs, mWinNs;
         private int mN;
         private float mSum, mMaxTilt;
-        /** A window found the phone moving (in the hand); a decision was made. */
-        volatile boolean mHeldSeen;
-        boolean mDecided;
         private boolean mDone;
 
         HeldWatch(SensorManager sm, String trigger) {
@@ -2577,7 +2344,7 @@ final class DoubleTapWake {
                 }
             } catch (Throwable t) {
                 Module.log("double-tap-wake: hand-held reading failed", t);
-                endHeld("error", true);
+                endHeld(true);
             }
         }
 
@@ -2585,39 +2352,28 @@ final class DoubleTapWake {
         public void onAccuracyChanged(Sensor sensor, int accuracy) { }
 
         private void windowDone(float noise, float tilt, int n) {
-            String m = String.format(java.util.Locale.US, "noise %.3f, tilt %.2f deg, %d readings",
-                    noise, tilt, n);
+            // Double tap to wake off, or the touchscreen is on anyway.
             if (!sWakeOn || sCharging || shakingOn()) {
-                endHeld(!sWakeOn ? "double tap to wake off" : "touchscreen on anyway", true);
+                endHeld(true);
                 return;
             }
             if (n < HELD_MIN_SAMPLES) {
                 // Readings too sparse to judge (shouldn't happen at 400 a second): err on the
                 // battery's side.
-                endHeld("too few motion readings, " + m, true);
+                endHeld(true);
                 return;
             }
             boolean still = noise < STILL_NOISE && tilt < STILL_TILT_DEG;
             long now = SystemClock.uptimeMillis();
-            if (still) {
-                mDecided = true;
-                if (!mHeldSeen) {
-                    Module.log("double-tap-wake: phone lying still (" + m + "; " + mTrigger
-                            + "), always-on display low-power");
-                }
-                endHeld("phone put down: " + m, true);
+            if (still) {   // lying still or put down: the always-on display goes low-power
+                endHeld(true);
                 return;
             }
-            if (!mHeldSeen) {
-                mHeldSeen = true;
-                mDecided = true;
-                Module.log("double-tap-wake: phone in the hand (" + m + "; " + mTrigger
-                        + "), touchscreen stays on for the always-on display");
-            }
+            // In the hand: the touchscreen stays on for the always-on display, until time is up.
             long spent = now - mStartUp;
             if (spent >= HELD_EPISODE_MS || (budgetApplies(mTrigger)
                     && sHeldSpentMs + spent >= HELD_BUDGET_MS)) {
-                endHeld("time up, " + m, true);
+                endHeld(true);
                 return;
             }
             long until = now + HELD_WINDOW_MS + HELD_MARGIN_MS;
@@ -2650,8 +2406,7 @@ final class DoubleTapWake {
      * The phone's pickup sensor (the one "Lift to check phone" uses: a wake-up sensor in the
      * sensor hub, no cost while nothing happens), if it has one. Armed while the always-on
      * display is low-power; picking the phone up starts a hand-held check, so the touchscreen
-     * is back before the double tap that usually follows. Looked up once; the sensors there
-     * are logged so the next version can use what the phone has.
+     * is back before the double tap that usually follows. Looked up once.
      */
     private static final int TYPE_PICK_UP_GESTURE = 25;
     private static Sensor sPickupSensor;   // worker thread
@@ -2757,39 +2512,29 @@ final class DoubleTapWake {
         }
         if (!sWakeOn || sPm == null || sPm.isInteractive() || !aodDozing(sAodArgs)) return;
         if (aodTouchWanted()) return;   // touch is on already
-        if (startHeldCheck("phone picked up")) {
-            Module.log("double-tap-wake: phone picked up, touchscreen on for the always-on"
-                    + " display while checking");
-            reapplyAodNow();
-        }
+        // Touchscreen on for the always-on display while checking.
+        if (startHeldCheck("phone picked up")) reapplyAodNow();
     }
 
     /** The wake-up pickup sensor, looked up once (worker thread). */
     private static Sensor pickupSensor(SensorManager sm) {
         if (sPickupLooked) return sPickupSensor;
         sPickupLooked = true;
-        StringBuilder wake = new StringBuilder();
         try {
             for (Sensor s : sm.getSensorList(Sensor.TYPE_ALL)) {
                 if (!s.isWakeUpSensor()) continue;
                 String st = s.getStringType();
                 boolean pickup = s.getType() == TYPE_PICK_UP_GESTURE
                         || (st != null && st.toLowerCase(java.util.Locale.US).contains("pick"));
-                if (pickup && sPickupSensor == null) sPickupSensor = s;
-                if (wake.length() < 600) {
-                    wake.append(wake.length() == 0 ? "" : ", ").append(s.getName()).append(" (")
-                            .append(s.getType()).append(')');
+                if (pickup) {
+                    sPickupSensor = s;
+                    break;
                 }
             }
         } catch (Throwable t) {
             Module.log("double-tap-wake: sensor list unavailable", t);
         }
-        Sensor p = sPickupSensor;
-        Module.log(p != null
-                ? "double-tap-wake: pickup sensor: " + p.getName() + " (" + p.getStringType()
-                        + ", mode " + p.getReportingMode() + ")"
-                : "double-tap-wake: no pickup sensor; wake-up sensors: " + wake);
-        return p;
+        return sPickupSensor;
     }
 
     /** Wakes for a tap felt by the motion sensor (our wake hook lets it through as a wake). */
@@ -2852,11 +2597,8 @@ final class DoubleTapWake {
                 // next double tap is caught by touch, not by the motion sensor.
                 // Judged from the recording first, the touchscreen still on meanwhile (lying
                 // still, low-power right after; moving, the live check keeps it on).
-                boolean check = sWindowUntil == 0 && judgeHeld(AFTER_A_TAP, true);
-                if (reapplyAodNow() || check) {
-                    Module.log("double-tap-wake: touch window closed" + (check
-                            ? ", judging whether the phone is in the hand" : ""));
-                }
+                if (sWindowUntil == 0) judgeHeld(AFTER_A_TAP, true);
+                reapplyAodNow();
             } catch (Throwable t) {
                 Module.log("double-tap-wake: touch window close failed", t);
             }
@@ -2882,7 +2624,7 @@ final class DoubleTapWake {
      * Unlock moments (TrustManagerService tells keystore the device is unlocked) and activity
      * starts (ActivityStarter.executeRequest), to cancel a queued card launch.
      */
-    private static void installLaunchGuard(ClassLoader cl) {
+    private static int installLaunchGuard(ClassLoader cl) {
         Xp.Callback unlock = new Xp.Callback() {
             @Override
             protected void beforeHookedMethod(Xp.Param param) {
@@ -2922,8 +2664,11 @@ final class DoubleTapWake {
         } catch (Throwable t) {
             Module.log("double-tap-wake: launch guard failed", t);
         }
-        Module.log("double-tap-wake: launch guard " + (a > 0 && u > 0 ? "installed"
-                : "incomplete (starts " + a + ", unlock " + u + ")"));
+        if (a == 0 || u == 0) {
+            Module.log("double-tap-wake: launch guard incomplete (starts " + a + ", unlock " + u
+                    + ")");
+        }
+        return a + u;
     }
 
     /**
@@ -2931,7 +2676,7 @@ final class DoubleTapWake {
      * (View haptics come straight here or via PhoneWindowManager, which calls in with the
      * app's uid).
      */
-    private static void installTapQuiet(ClassLoader cl) {
+    private static int installTapQuiet(ClassLoader cl) {
         int n = 0;
         try {
             Class<?> c = Xp.findClass(VMS, cl);
@@ -2949,8 +2694,8 @@ final class DoubleTapWake {
         } catch (Throwable t) {
             Module.log("double-tap-wake: tap vibration guard failed", t);
         }
-        Module.log("double-tap-wake: tap vibration guard "
-                + (n > 0 ? "installed (" + n + ")" : "unavailable"));
+        if (n == 0) Module.log("double-tap-wake: tap vibration guard unavailable");
+        return n;
     }
 
     /**
@@ -3021,7 +2766,7 @@ final class DoubleTapWake {
      * UI (onPointerDown) and from the sensor itself (onAcquired). Either marks the moment, so
      * the unlock / try-again haptics that follow never wait for a tap.
      */
-    private static void installFingerWatch(ClassLoader cl) {
+    private static int installFingerWatch(ClassLoader cl) {
         Xp.Callback finger = new Xp.Callback() {
             @Override
             protected void beforeHookedMethod(Xp.Param param) {
@@ -3041,8 +2786,11 @@ final class DoubleTapWake {
                 n += Xp.hookAllMethods(Xp.findClass(t[0], cl), t[1], finger).size();
             } catch (Throwable ignored) { }
         }
-        Module.log("double-tap-wake: fingerprint watch " + (n > 0 ? "installed (" + n + ")"
-                : "unavailable (fingerprint haptics may wait up to " + DOWN_WAIT_MS + " ms)"));
+        if (n == 0) {
+            Module.log("double-tap-wake: fingerprint watch unavailable (fingerprint haptics may"
+                    + " wait up to " + DOWN_WAIT_MS + " ms)");
+        }
+        return n;
     }
 
     /** Waits up to {@code max} ms for a new finger down after {@code seq}. */
@@ -3083,12 +2831,9 @@ final class DoubleTapWake {
         boolean haptic = method.startsWith("performHapticFeedback");
         String pkg = null;
         int usage = haptic ? USAGE_TOUCH : 0;   // vibrate() without attributes: USAGE_UNKNOWN
-        int constant = -1, ints = 0;
         for (Object a : param.args) {
             if (a instanceof String) {
                 if (pkg == null) pkg = (String) a;
-            } else if (a instanceof Integer) {
-                if (++ints == 3 && haptic) constant = (Integer) a;   // uid, deviceId, constant
             } else if (!haptic && a != null
                     && "android.os.VibrationAttributes".equals(a.getClass().getName())) {
                 Object u = Xp.callMethod(a, "getUsage");
@@ -3097,32 +2842,15 @@ final class DoubleTapWake {
         }
         boolean touch = usage == 0 || ((usage & USAGE_CLASS_MASK) == USAGE_CLASS_FEEDBACK
                 && usage != USAGE_ACCESSIBILITY);
+        if (!touch) return;   // alarm, ringtone, notification, accessibility: kept
         long now = SystemClock.uptimeMillis();
-        if (!touch) {
-            if (tapActive(now) && quietPlace()) {
-                Module.log("double-tap-wake: lock screen tap, vibration kept ("
-                        + describeVibration(pkg, method, constant, usage) + ")");
-            }
-            return;
-        }
-        long waited = -1;
         if (!tapActive(now)) {
             if (!SYSTEMUI.equals(pkg) || !mayAwaitDown(now) || !quietPlace()) return;
             if (!awaitDown(seq, DOWN_WAIT_MS)) return;   // no touch: not a tap's vibration
-            long after = SystemClock.uptimeMillis();
-            waited = after - now;
-            if (!tapActive(after)) return;
+            if (!tapActive(SystemClock.uptimeMillis())) return;
         }
         if (!quietPlace()) return;
-        param.setResult(null);
-        Module.log("double-tap-wake: lock screen tap vibration blocked ("
-                + describeVibration(pkg, method, constant, usage)
-                + (waited >= 0 ? ", waited " + waited + " ms for the touch" : "") + ")");
-    }
-
-    private static String describeVibration(String pkg, String method, int constant, int usage) {
-        return pkg + " " + method + (constant >= 0 ? " constant=" + constant : "")
-                + " usage=0x" + Integer.toHexString(usage);
+        param.setResult(null);   // a lock screen tap's vibration: dropped
     }
 
     /** The device was just unlocked (any method). */
@@ -3135,10 +2863,7 @@ final class DoubleTapWake {
             @Override
             public void run() {
                 // The queued action runs right at unlock; past the window it's gone either way.
-                if (sDropArmed && sUnlockedAt == at) {
-                    sDropArmed = false;
-                    Module.log("double-tap-wake: no queued card launch after unlock");
-                }
+                if (sDropArmed && sUnlockedAt == at) sDropArmed = false;
             }
         }, LAUNCH_DROP_MS + 100);
     }
@@ -3151,27 +2876,15 @@ final class DoubleTapWake {
         Object real = Xp.getObjectField(req, "realCallingUid");
         if (!(real instanceof Integer) || (Integer) real != sSystemUiUid || sSystemUiUid < 0) return;
         sDropArmed = false;
-        Object intent = null;
         try {
-            intent = Xp.getObjectField(req, "intent");
             Object opts = Xp.getObjectField(req, "activityOptions");
             if (opts != null) Xp.callMethod(opts, "abort");   // cancels a pending launch animation
         } catch (Throwable ignored) { }
-        param.setResult(START_CANCELED);
-        Module.log("double-tap-wake: queued lock screen card launch cancelled ("
-                + describeIntent(intent) + ")");
-    }
-
-    private static String describeIntent(Object o) {
-        if (!(o instanceof android.content.Intent)) return "?";
-        android.content.Intent i = (android.content.Intent) o;
-        android.content.ComponentName c = i.getComponent();
-        return (i.getAction() != null ? i.getAction() : "") + " "
-                + (c != null ? c.flattenToShortString() : String.valueOf(i.getPackage()));
+        param.setResult(START_CANCELED);   // the queued lock screen card launch
     }
 
     /** Sees lock screen card taps (alarm, weather, date) as System UI reports them. */
-    private static void installSmartspaceWatch(ClassLoader cl) {
+    private static int installSmartspaceWatch(ClassLoader cl) {
         int n = 0;
         try {
             n = Xp.hookAllMethods(Xp.findClass(SMARTSPACE_STUB, cl), "notifySmartspaceEvent",
@@ -3191,7 +2904,8 @@ final class DoubleTapWake {
         } catch (Throwable t) {
             Module.log("double-tap-wake: smartspace watch failed", t);
         }
-        Module.log("double-tap-wake: smartspace watch " + (n > 0 ? "installed" : "unavailable"));
+        if (n == 0) Module.log("double-tap-wake: smartspace watch unavailable");
+        return n;
     }
 
     private static boolean undoingChips() {
@@ -3248,11 +2962,11 @@ final class DoubleTapWake {
         if (shown == 0 || shown < tap - 300 || shown > tap + CHIP_PROMPT_MAX_MS) return;
         sHandledChipAt = tap;
         long wait = Math.max(0, shown + BACK_DELAY_MS - SystemClock.uptimeMillis());
-        sWorker.postDelayed(backFor(tap, "lock screen card tap undone"), wait);
+        sWorker.postDelayed(backFor(tap), wait);   // the lock screen card tap is undone
     }
 
     /** One Back per card tap, only while the lock screen and its prompt are still up. */
-    private static Runnable backFor(final long tap, final String why) {
+    private static Runnable backFor(final long tap) {
         return new Runnable() {
             @Override
             public void run() {
@@ -3261,7 +2975,6 @@ final class DoubleTapWake {
                 sBackSentFor = tap;
                 pressBack();
                 sDropArmed = true;   // its "open after unlock" may still be queued
-                Module.log("double-tap-wake: " + why);
             }
         };
     }
@@ -3288,7 +3001,7 @@ final class DoubleTapWake {
     }
 
     /** Watches the fingerprint icon window's visibility (PIN pad open = icon hidden). */
-    private static void installWindowWatch(ClassLoader cl) {
+    private static int installWindowWatch(ClassLoader cl) {
         int n = 0;
         try {
             n = Xp.hookAllMethods(Xp.findClass("com.android.server.wm.WindowState", cl),
@@ -3310,10 +3023,10 @@ final class DoubleTapWake {
                                 relayoutFallback(param);
                             }
                         }).size();
-                if (n > 0) Module.log("double-tap-wake: watching windows via relayoutWindow");
             } catch (Throwable ignored) { }
         }
-        Module.log("double-tap-wake: window watch " + (n > 0 ? "installed" : "unavailable"));
+        if (n == 0) Module.log("double-tap-wake: window watch unavailable");
+        return n;
     }
 
     private static void relayoutFallback(Xp.Param param) {
@@ -3340,9 +3053,10 @@ final class DoubleTapWake {
         try {
             Object attrs = attrsOf(windowState);
             if (!(attrs instanceof android.view.WindowManager.LayoutParams)) return;
-            CharSequence title = ((android.view.WindowManager.LayoutParams) attrs).getTitle();
-            if (title == null) return;
-            if (title.toString().contains(ALT_BOUNCER_WINDOW)) {
+            CharSequence cs = ((android.view.WindowManager.LayoutParams) attrs).getTitle();
+            if (cs == null) return;
+            String title = cs.toString();   // runs for every window: converted once
+            if (title.contains(ALT_BOUNCER_WINDOW)) {
                 int id = System.identityHashCode(windowState);
                 if (id != sAltWindowId || visibility != sAltVisibility) {
                     sAltWindowId = id;
@@ -3365,7 +3079,7 @@ final class DoubleTapWake {
                 }
                 return;
             }
-            if (!title.toString().contains(UDFPS_WINDOW)) return;
+            if (!title.contains(UDFPS_WINDOW)) return;
             sUdfpsSeen = true;
             if (visibility == sUdfpsVisibility) return;
             sUdfpsVisibility = visibility;
@@ -3377,7 +3091,7 @@ final class DoubleTapWake {
                 public void run() {
                     // The icon shows on the lock screen (also when it comes up without the
                     // screen going off first, e.g. lockdown).
-                    if (visible) ensureMonitor("lock screen shown");
+                    if (visible) ensureMonitor();
                     Receiver r = sReceiver;
                     if (r != null) r.onFingerprintIcon(visible);
                 }
@@ -3431,8 +3145,6 @@ final class DoubleTapWake {
                 readFlags();
                 repairTapSensor();
                 updateMonitorForFlags();
-                Module.log("double-tap-wake: on=" + sMasterOn + " doubleTapWake=" + sWakeOn
-                        + " lockScreen=" + (sLockShortcuts ? "stock" : "modded"));
             }
         };
         ContentResolver cr = ctx.getContentResolver();
@@ -3464,24 +3176,23 @@ final class DoubleTapWake {
                     sLastSingle = 0;
                     sLooseUpAt = 0;
                     sLoosePairAt = 0;
-                    stopMotionTap("screen on");
-                    endHeld("screen on", false);
+                    stopMotionTap();
+                    endHeld(false);
                     disarmPickup();
                     sHeldSpentMs = 0;
-                    updateRecording("screen on");
+                    updateRecording();
                 } else {
                     sScreenOffAt = SystemClock.uptimeMillis();
                     sHeldSpentMs = 0;   // a new time allowance for each time the screen goes off
-                    sHeldBudgetLogged = false;
-                    ensureMonitor("screen off");
+                    ensureMonitor();
                     onScreenOffForShaking();
-                    updateRecording("screen off");
+                    updateRecording();
                     // The recording since screen-off ends here unless low-power started.
                     final long off = sScreenOffAt;
                     sWorker.postDelayed(new Runnable() {
                         @Override
                         public void run() {
-                            if (sScreenOffAt == off) updateRecording("screen off a while");
+                            if (sScreenOffAt == off) updateRecording();
                         }
                     }, PRE_RECORD_MS + 100L);
                 }
@@ -3492,10 +3203,7 @@ final class DoubleTapWake {
         sWorker.post(new Runnable() {
             @Override
             public void run() {
-                ensureMonitor("boot");   // boots to the lock screen
-                Module.log("double-tap-wake: initialised, on=" + sMasterOn + " doubleTapWake="
-                        + sWakeOn + " lockScreen=" + (sLockShortcuts ? "stock" : "modded")
-                        + " monitor=" + (sReceiver != null));
+                ensureMonitor();   // boots to the lock screen
             }
         });
     }
@@ -3506,7 +3214,7 @@ final class DoubleTapWake {
     }
 
     /** Creates the lock screen touch monitor if it is wanted and missing. Worker thread. */
-    private static void ensureMonitor(String why) {
+    private static void ensureMonitor() {
         if (sReceiver != null || sCtx == null || sWorker == null || !monitorWanted()) return;
         if (sMonitorFailures >= MAX_MONITOR_FAILURES) return;
         Object monitor = null;
@@ -3519,7 +3227,6 @@ final class DoubleTapWake {
             sMonitor = monitor;
             sChannel = channel;
             sReceiver = r;
-            Module.log("double-tap-wake: lock screen touch monitor on (" + why + ")");
         } catch (Throwable e) {
             sMonitorFailures++;
             if (monitor != null) {
@@ -3532,7 +3239,7 @@ final class DoubleTapWake {
     }
 
     /** Removes the monitor: the input system stops copying touches to it. Worker thread. */
-    private static void releaseMonitor(String why) {
+    private static void releaseMonitor() {
         Receiver r = sReceiver;
         Object monitor = sMonitor;
         if (r == null && monitor == null) return;
@@ -3551,15 +3258,14 @@ final class DoubleTapWake {
         } catch (Throwable t) {
             Module.log("double-tap-wake: monitor dispose failed", t);
         }
-        Module.log("double-tap-wake: lock screen touch monitor off (" + why + ")");
     }
 
     /** After a settings change: monitor off if nothing needs it, on if the lock screen is up. */
     private static void updateMonitorForFlags() {
         if (!monitorWanted()) {
-            releaseMonitor("switched off");
+            releaseMonitor();
         } else if (sPm != null && (!sPm.isInteractive() || keyguardShowing())) {
-            ensureMonitor("switched on");
+            ensureMonitor();
         }
     }
 
@@ -3598,13 +3304,13 @@ final class DoubleTapWake {
             sWorker.post(new Runnable() {
                 @Override
                 public void run() {
-                    endHeld("double tap to wake off", false);   // re-applied just below
+                    endHeld(false);   // re-applied just below
                     disarmPickup();
                 }
             });
         }
         reapplyAodState();       // double tap to wake switched: touchscreen policy may change
-        updateRecording("settings");
+        updateRecording();
     }
 
     /** Double tap to wake needs the stock tap sensor on (the double-tap sensor depends on it). */
@@ -3614,12 +3320,21 @@ final class DoubleTapWake {
             if (sWakeOn && Settings.Secure.getInt(r, KEY_TAP_GESTURE, 1) == 0) {
                 Settings.Secure.putInt(r, KEY_TAP_GESTURE, 1);
                 Settings.Secure.putInt(r, KEY_DOUBLE_TAP_GESTURE, 1);
-                Module.log("double-tap-wake: tap sensor switched back on");
             }
         } catch (Throwable e) {
             Module.log("double-tap-wake: settings check failed", e);
         }
     }
+
+    /** Posted at every wake (one instance: it carries no state). Worker thread. */
+    private static final Runnable REARM_AT_WAKE = new Runnable() {
+        @Override
+        public void run() {
+            ensureMonitor();
+            Receiver r = sReceiver;
+            if (r != null) r.rearm();
+        }
+    };
 
     /**
      * Runs inside PowerManagerService's lock: no settings reads, no blocking. Every wake re-arms
@@ -3627,16 +3342,7 @@ final class DoubleTapWake {
      */
     private static void onWakeRequest(Xp.Param param) {
         Handler h = sWorker;
-        if (h != null) {
-            h.post(new Runnable() {
-                @Override
-                public void run() {
-                    ensureMonitor("wake");
-                    Receiver r = sReceiver;
-                    if (r != null) r.rearm();
-                }
-            });
-        }
+        if (h != null) h.post(REARM_AT_WAKE);
         int reason = -1;
         String details = null;
         for (Object a : param.args) {
@@ -3667,7 +3373,6 @@ final class DoubleTapWake {
                 // A tap reported just after we woke for one (the last of three quick taps, or
                 // System UI catching up after Pixel Suite's own wake): not a new first tap.
                 param.setResult(null);
-                Module.log("double-tap-wake: tap right after a tap wake, ignored (" + details + ")");
                 return;
             }
             // During a touch window (opened by tap 1 on the always-on display) any tap that
@@ -3677,9 +3382,8 @@ final class DoubleTapWake {
             long first = sLastSingle;
             boolean windowPair = first != 0 && first == sWindowFirstAt && now <= sPairUntil;
             if (first != 0 && (windowPair || now - first <= SINGLE_PAIR_MS)) {
-                sLastSingle = 0;
+                sLastSingle = 0;   // the second tap: waking
                 sTapWakeAt = now;
-                Module.log("double-tap-wake: second tap, waking (" + details + ")");
             } else if (!isGestureEngineTap(details) && sLoosePairAt != 0
                     && now - sLoosePairAt >= 0 && now - sLoosePairAt <= LOOSE_REPORT_MS) {
                 // Its first tap moved a little, so System UI didn't count it (see
@@ -3688,18 +3392,14 @@ final class DoubleTapWake {
                 sLooseUpAt = 0;
                 sLastSingle = 0;
                 sTapWakeAt = now;
-                Module.log("double-tap-wake: second tap, waking (first tap moved a little; "
-                        + details + ")");
             } else {
-                sLastSingle = now;
+                sLastSingle = now;   // a single tap: ignored
                 param.setResult(null);
-                Module.log("double-tap-wake: single tap ignored (" + details + ")");
                 if (isGestureEngineTap(details)) afterGestureTap(now);
             }
         } else {
             sLastSingle = 0;
             sTapWakeAt = now;
-            Module.log("double-tap-wake: waking (" + details + ")");
         }
     }
 
@@ -3759,7 +3459,6 @@ final class DoubleTapWake {
                     // UserHandle.ALL is a system API, not in the android-23 compile jar.
                     UserHandle all = (UserHandle) UserHandle.class.getField("ALL").get(null);
                     ctx.sendBroadcastAsUser(i, all);
-                    Module.log("double-tap-wake: pulse requested to re-arm taps");
                 } catch (Throwable t) {
                     Module.log("double-tap-wake: pulse request failed", t);
                 }
@@ -3786,8 +3485,7 @@ final class DoubleTapWake {
             public void run() {
                 if (sPm == null || sPm.isInteractive() || sLastSingle != tapAt) return;
                 if (aodShowing(sAodArgs)) return;   // the pulse (or the always-on display) came
-                Module.log("double-tap-wake: no pulse (always-on display paused), waking on"
-                        + " the tap");
+                // No pulse (always-on display paused): wake on the tap.
                 sLastSingle = 0;
                 wakeForTap();
             }
@@ -3807,8 +3505,8 @@ final class DoubleTapWake {
             public void run() {
                 // System UI woke the phone after all (its double tap, or a paired single).
                 if (sPm == null || sPm.isInteractive() || sLastSingle != single) return;
-                Module.log("double-tap-wake: System UI missed the second tap (lock screen was "
-                        + "still coming up), waking from Pixel Suite's own double tap");
+                // System UI missed the second tap (lock screen still coming up): wake from
+                // Pixel Suite's own double tap.
                 wakeForTap();
             }
         }, BACKUP_WAIT_MS);
@@ -3908,33 +3606,17 @@ final class DoubleTapWake {
                     sLooseUpAt = shortTouch ? up : 0;
                     sLooseX = mDzX;
                     sLooseY = mDzY;
-                    // Every touch on the sleeping screen is logged: when a tap "does nothing",
-                    // this shows whether the touchscreen got it at all.
-                    if (!mDzTap) {
-                        Module.log("double-tap-wake: touch while asleep, not a tap ("
-                                + (mDzMulti ? "second finger or taken by another window"
-                                        : "moved " + Math.round(mDzMove) + " px, slop "
-                                                + sTouchSlop + ", in " + held + " ms") + ")");
-                        return;
-                    }
-                    if (up - mDzDownAt > TAP_MAX_MS) {
-                        Module.log("double-tap-wake: touch while asleep, not a tap (held "
-                                + (up - mDzDownAt) + " ms)");
+                    if (!mDzTap) return;   // not a tap (moved, second finger, taken away)
+                    if (held > TAP_MAX_MS) {   // held: not a tap
                         mDzPrevUpAt = 0;
                         return;
                     }
-                    Module.log("double-tap-wake: tap while asleep (" + (up - mDzDownAt) + " ms)");
                     float dx = mDzX - mDzPrevX, dy = mDzY - mDzPrevY;
                     boolean close = dx * dx + dy * dy <= (float) sDoubleTapSlop * sDoubleTapSlop;
                     if (mDzPrevUpAt != 0 && close && mDzDownAt - mDzPrevUpAt <= DOUBLE_GAP_MS) {
                         mDzPrevUpAt = 0;
-                        long late = SystemClock.uptimeMillis() - up;
-                        if (late > STALE_TOUCH_MS) {
-                            Module.log("double-tap-wake: double tap while asleep ignored (seen "
-                                    + late + " ms late)");
-                        } else {
-                            onDozeDoubleTap();
-                        }
+                        // A double tap seen too late is ignored.
+                        if (SystemClock.uptimeMillis() - up <= STALE_TOUCH_MS) onDozeDoubleTap();
                     } else {
                         mDzPrevUpAt = up;
                         mDzPrevX = mDzX;
@@ -3951,13 +3633,15 @@ final class DoubleTapWake {
         public void onInputEvent(InputEvent event) {
             try {
                 if (event instanceof MotionEvent) {
-                    noteLag((MotionEvent) event);
                     trackQuietTap((MotionEvent) event);
                     if (sWakeOn) onDozeTouch((MotionEvent) event);
                     if (sSleepOn || sWakeOn) onTouch((MotionEvent) event);
                 }
             } catch (Throwable t) {
-                Module.log("double-tap-wake: touch handling failed", t);
+                if (!sTouchErrorLogged) {   // the touch path: logged once
+                    sTouchErrorLogged = true;
+                    Module.log("double-tap-wake: touch handling failed", t);
+                }
             } finally {
                 finishInputEvent(event, false);   // read-only: never block input
             }
@@ -3982,11 +3666,10 @@ final class DoubleTapWake {
                         mArmed = true;
                         return;
                     }
-                    if (!mArmed) Module.log("double-tap-wake: back at the lock screen, double tap on");
-                    rearm();
+                    rearm();   // back at the lock screen: double tap on
                 }
             } else if (!chip) {
-                disarm("PIN pad or fingerprint prompt open");
+                disarm();   // PIN pad or fingerprint prompt open
             } else {
                 checkIconAfterChip();
             }
@@ -4005,12 +3688,11 @@ final class DoubleTapWake {
         }
 
         void disarmFromIcon() {
-            disarm("PIN pad or fingerprint prompt open");
+            disarm();   // PIN pad or fingerprint prompt open
         }
 
-        private void disarm(String why) {
-            if (mArmed) Module.log("double-tap-wake: lock screen double tap off until next wake ("
-                    + why + ")");
+        /** Lock screen double tap off until the next wake. */
+        private void disarm() {
             mArmed = false;
             mPrevUpAt = 0;
         }
@@ -4040,7 +3722,7 @@ final class DoubleTapWake {
                             sWorker.post(new Runnable() {
                                 @Override
                                 public void run() {
-                                    if (sReceiver == self) releaseMonitor("unlocked");
+                                    if (sReceiver == self) releaseMonitor();
                                 }
                             });
                         }
@@ -4053,7 +3735,7 @@ final class DoubleTapWake {
                             && undoingChips() && chipTapRecent()) {
                         // Second tap after a card tap: its prompt may be up; tapping it would
                         // open the PIN pad. Keep this tap off it (it still counts for us).
-                        if (pilfer("second tap kept off the card prompt")) mPilfered = true;
+                        if (pilfer(0L)) mPilfered = true;
                     }
                     if (mPrevUpAt != 0 && down - mPrevUpAt > DOUBLE_GAP_MS) {
                         // The fingerprint icon tells us when the PIN pad opens; without it,
@@ -4061,7 +3743,7 @@ final class DoubleTapWake {
                         if (sUdfpsSeen) {
                             mPrevUpAt = 0;
                         } else {
-                            disarm("single tap");
+                            disarm();
                         }
                     }
                     mDownAt = down;
@@ -4074,7 +3756,7 @@ final class DoubleTapWake {
                     if (!mIgnore) {
                         mTap = false;
                         mPrevUpAt = 0;   // not a tap: no double tap across it
-                        if (offWithoutIcon()) disarm("two fingers");
+                        if (offWithoutIcon()) disarm();   // two fingers
                     }
                     break;
                 case MotionEvent.ACTION_MOVE:
@@ -4082,7 +3764,7 @@ final class DoubleTapWake {
                             || Math.abs(ev.getY() - mDownY) > sTouchSlop)) {
                         mTap = false;
                         mPrevUpAt = 0;   // not a tap: no double tap across it
-                        if (offWithoutIcon()) disarm("swipe");
+                        if (offWithoutIcon()) disarm();   // swipe
                     }
                     break;
                 case MotionEvent.ACTION_CANCEL:
@@ -4094,7 +3776,7 @@ final class DoubleTapWake {
                     long up = ev.getEventTime();
                     if (up - mDownAt > TAP_MAX_MS) {
                         mPrevUpAt = 0;   // not a tap: no double tap across it
-                        if (offWithoutIcon()) disarm("long press");
+                        if (offWithoutIcon()) disarm();   // long press
                         return;
                     }
                     if (mLeftover) {
@@ -4105,17 +3787,11 @@ final class DoubleTapWake {
                     boolean close = dx * dx + dy * dy <= (float) sDoubleTapSlop * sDoubleTapSlop;
                     if (mPrevUpAt != 0 && close && mDownAt - mPrevUpAt <= DOUBLE_GAP_MS) {
                         mPrevUpAt = 0;
-                        long late = SystemClock.uptimeMillis() - up;
-                        if (late > STALE_TOUCH_MS) {
-                            // Seen too late to act on: the user has moved on (turning the
-                            // screen off now would come out of nowhere).
-                            Module.log("double-tap-wake: lock screen double tap ignored (seen "
-                                    + late + " ms late)");
-                        } else if (mArmed) {
+                        // Seen too late to act on, the user has moved on (turning the screen
+                        // off now would come out of nowhere); not armed, the PIN pad, a prompt
+                        // or the shade was open: ignored.
+                        if (SystemClock.uptimeMillis() - up <= STALE_TOUCH_MS && mArmed) {
                             onLockDoubleTap();
-                        } else {
-                            Module.log("double-tap-wake: lock screen double tap ignored "
-                                    + "(PIN pad, prompt or shade was open)");
                         }
                     } else {
                         mPrevUpAt = up;
@@ -4136,10 +3812,9 @@ final class DoubleTapWake {
      */
     private static boolean cancelIfLeftoverAfterTapWake(MotionEvent ev) {
         if (!isLeftoverAfterTapWake(ev, WAKE_GUARD_MS)) return false;
-        long since = ev.getEventTime() - sTapWakeAt;
         int height = screenHeight();
         if (height > 0 && ev.getY() > height * WAKE_GUARD_TOP) return false;
-        return pilfer("leftover tap " + since + " ms after tap wake cancelled");
+        return pilfer(0L);
     }
 
     /** The touch started within {@code ms} after a tap wake. */
@@ -4151,53 +3826,37 @@ final class DoubleTapWake {
     }
 
     /**
-     * Cancels the current touch for every window (our monitor keeps receiving it). Returns
-     * true if it was cancelled.
+     * Cancels the current touch for every window (our monitor keeps receiving it), waiting up
+     * to {@code waitMs} for the cancel to be done. Returns true if it was cancelled.
      */
-    private static boolean pilfer(String why) {
-        return pilfer(why, 0L);
-    }
-
-    /** As pilfer(why), waiting up to {@code waitMs} for the cancel to be done. */
-    private static boolean pilfer(final String why, long waitMs) {
+    private static boolean pilfer(long waitMs) {
         final Object monitor = sMonitor;
         if (monitor == null) return false;
-        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch done =
+                waitMs > 0 ? new java.util.concurrent.CountDownLatch(1) : null;
         // On its own thread: the call can block for seconds (seen once: 4.4 s, which held up
         // every touch behind it, so a lock screen double tap ran 4 s late and the taps meant
         // for it reached the lock screen). Only the touch it was asked for is cancelled, and
         // only while that finger is still down: a later one must never be.
         final long down = sTouchDownAt;
-        final long asked = SystemClock.uptimeMillis();
         pilferThread().post(new Runnable() {
             @Override
             public void run() {
-                long start = SystemClock.uptimeMillis();
-                long up = sTouchUpAt, cancel = sTouchCancelAt;
-                if (sTouchDownAt != down || (up != 0 && up >= down) || cancel >= down) {
-                    done.countDown();
-                    Module.log("double-tap-wake: " + why + ": too late, the touch was over ("
-                            + (start - asked) + " ms)");
-                    return;
-                }
                 try {
+                    long up = sTouchUpAt, cancel = sTouchCancelAt;
+                    // Too late: the touch was over.
+                    if (sTouchDownAt != down || (up != 0 && up >= down) || cancel >= down) return;
                     Xp.callMethod(monitor, "pilferPointers");
-                    done.countDown();
-                    long took = SystemClock.uptimeMillis() - start, waited = start - asked;
-                    Module.log("double-tap-wake: " + why + (took + waited > 100
-                            ? " (cancel took " + took + " ms, waited " + waited + " ms)" : ""));
                 } catch (Throwable t) {
-                    done.countDown();
-                    Module.log("double-tap-wake: could not cancel touch (" + why + ")", t);
+                    Module.log("double-tap-wake: could not cancel touch", t);
+                } finally {
+                    if (done != null) done.countDown();
                 }
             }
         });
-        if (waitMs > 0) {
+        if (done != null) {
             try {
-                if (!done.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                    Module.log("double-tap-wake: cancel not done within " + waitMs + " ms ("
-                            + why + ")");
-                }
+                done.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS);
             } catch (InterruptedException ignored) { }
         }
         return true;
@@ -4206,53 +3865,10 @@ final class DoubleTapWake {
     /** How long the fingerprint callback waits for its cancel (see endTouchAtUnlock). */
     private static final long PILFER_WAIT_MS = 50L;
 
-    /**
-     * Stall check, only around touches (nothing runs otherwise): at each finger down a marker
-     * is posted to the touch thread; if it hasn't run STALL_CHECK_MS later, the thread's stack
-     * is logged, naming what held it up.
-     */
-    private static final long STALL_CHECK_MS = 1000L;
-    private static volatile long sPingSeq, sPongSeq;
-    private static long sStallLoggedAt;
-
-    /** At a finger down (touch thread). */
-    private static void checkStall() {
-        final Handler w = sWorker;
-        if (w == null) return;
-        final long seq = ++sPingSeq;
-        w.post(new Runnable() {
-            @Override
-            public void run() {
-                sPongSeq = seq;
-            }
-        });
-        sensorThread().postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (sPongSeq >= seq) return;
-                long now = SystemClock.uptimeMillis();
-                if (now - sStallLoggedAt < 10000L) return;
-                sStallLoggedAt = now;
-                StringBuilder sb = new StringBuilder();
-                try {
-                    StackTraceElement[] st = w.getLooper().getThread().getStackTrace();
-                    for (int i = 0; i < st.length && i < 18; i++) {
-                        sb.append("\n  at ").append(st[i]);
-                    }
-                } catch (Throwable t) {
-                    sb.append(" (stack unavailable: ").append(t).append(')');
-                }
-                Module.log("double-tap-wake: touch thread held up over " + STALL_CHECK_MS
-                        + " ms:" + sb);
-            }
-        }, STALL_CHECK_MS);
-    }
-
     /** Touch events handled later than this after they happened aren't acted on. */
     private static final long STALE_TOUCH_MS = 600L;
-    /** Touch events handled this late are logged (diagnosis of a held-up thread). */
-    private static final long TOUCH_LAG_LOG_MS = 250L;
-    private static long sLagLoggedAt;
+    /** A failure in the touch path was logged (once: it would repeat on every touch). */
+    private static volatile boolean sTouchErrorLogged;
     private static volatile Handler sPilferThread;
 
     private static Handler pilferThread() {
@@ -4268,19 +3884,6 @@ final class DoubleTapWake {
         }
     }
 
-    /** Logs a finger down or up handled late (at most once a second). Touch thread. */
-    private static void noteLag(MotionEvent ev) {
-        int a = ev.getActionMasked();
-        if (a == MotionEvent.ACTION_DOWN) checkStall();
-        if (a != MotionEvent.ACTION_DOWN && a != MotionEvent.ACTION_UP) return;
-        long now = SystemClock.uptimeMillis();
-        long lag = now - ev.getEventTime();
-        if (lag < TOUCH_LAG_LOG_MS || now - sLagLoggedAt < 1000L) return;
-        sLagLoggedAt = now;
-        Module.log("double-tap-wake: touch " + (a == MotionEvent.ACTION_DOWN ? "down" : "up")
-                + " handled " + lag + " ms late");
-    }
-
     /** Presses Back: closes the fingerprint prompt and clears its queued "open after unlock". */
     private static void pressBack() {
         try {
@@ -4294,7 +3897,6 @@ final class DoubleTapWake {
                         InputDevice.SOURCE_KEYBOARD);
                 Xp.callMethod(im, "injectInputEvent", ev, 0 /* async */);
             }
-            Module.log("double-tap-wake: fingerprint prompt closed, queued app cancelled");
         } catch (Throwable t) {
             Module.log("double-tap-wake: could not close the fingerprint prompt", t);
         }
@@ -4318,10 +3920,7 @@ final class DoubleTapWake {
 
     private static void onLockDoubleTap() {
         boolean screenOn = sPm != null && sPm.isInteractive();
-        boolean lockShowing = lockScreenShowing();
-        Module.log("double-tap-wake: lock screen double tap, screenOn=" + screenOn
-                + " lockScreen=" + lockShowing);
-        if (!screenOn || !lockShowing) return;
+        if (!screenOn || !lockScreenShowing()) return;
         long tap = sChipTapAt;
         Handler h = sWorker;
         if (h != null && undoingChips() && chipTapRecent() && sBackSentFor != tap) {
@@ -4331,7 +3930,7 @@ final class DoubleTapWake {
             long now = SystemClock.uptimeMillis();
             long wait = (shown != 0 && shown >= tap - 300)
                     ? Math.max(0, shown + BACK_DELAY_MS - now) : BACK_DELAY_MS;
-            h.postDelayed(backFor(tap, "card prompt closed before sleeping"), wait);
+            h.postDelayed(backFor(tap), wait);   // the card prompt closed before sleeping
             h.postDelayed(new Runnable() {
                 @Override
                 public void run() {
@@ -4348,7 +3947,6 @@ final class DoubleTapWake {
         try {
             PowerManager.class.getMethod("goToSleep", long.class, int.class, int.class)
                     .invoke(sPm, SystemClock.uptimeMillis(), SLEEP_REASON_POWER_BUTTON, 0);
-            Module.log("double-tap-wake: screen off");
         } catch (Throwable t) {
             Module.log("double-tap-wake: goToSleep failed", t);
         }
@@ -4380,317 +3978,4 @@ final class DoubleTapWake {
         }
     }
 
-    // ------------------------------------------------------------------ Settings
-
-    static void installSettings(ClassLoader cl) {
-        Xp.Callback rename = new Xp.Callback() {
-            @Override
-            protected void afterHookedMethod(Xp.Param param) {
-                Object r = param.getResult();
-                if (r instanceof CharSequence) {
-                    CharSequence s = (CharSequence) r;
-                    if (s.length() == OLD_TITLE.length() && OLD_TITLE.contentEquals(s)
-                            && masterOnInSettings()) {
-                        param.setResult(NEW_TITLE);
-                    }
-                }
-            }
-        };
-        hookQuiet(cl, "android.content.res.Resources", "getText", rename);
-        hookQuiet(cl, "android.content.res.TypedArray", "getText", rename);
-        hookQuiet(cl, "android.content.res.TypedArray", "getString", rename);
-
-        try {
-            final Class<?> prefFragment =
-                    Xp.findClass("androidx.preference.PreferenceFragmentCompat", cl);
-            Class<?> fragment = Xp.findClass("androidx.fragment.app.Fragment", cl);
-            int n = Xp.hookAllMethods(fragment, "onResume", new Xp.Callback() {
-                @Override
-                protected void afterHookedMethod(Xp.Param param) {
-                    if (prefFragment.isInstance(param.thisObject)) schedule(param.thisObject);
-                }
-            }).size();
-            Module.log("double-tap-wake: settings hooks installed (" + n + ")");
-        } catch (Throwable t) {
-            Module.log("double-tap-wake: settings page hook failed", t);
-        }
-    }
-
-    private static final Feature.Cached sMasterCached = new Feature.Cached(Feature.TAP_CHECK);
-
-    /** Master switch, read in the Settings process (throttled: the rename hook is hot). */
-    private static boolean masterOnInSettings() {
-        try {
-            Object app = Class.forName("android.app.ActivityThread")
-                    .getMethod("currentApplication").invoke(null);
-            return !(app instanceof Context) || sMasterCached.on((Context) app);
-        } catch (Throwable t) {
-            return true;
-        }
-    }
-
-    private static void writeReal(ContentResolver cr, String key, int value) {
-        Settings.Secure.putInt(cr, key, value);
-    }
-
-    private static void hookQuiet(ClassLoader cl, String cls, String method, Xp.Callback cb) {
-        try {
-            Xp.hookAllMethods(Xp.findClass(cls, cl), method, cb);
-        } catch (Throwable t) {
-            Module.log("double-tap-wake: rename hook skipped for " + cls + "." + method, t);
-        }
-    }
-
-    private static Handler main() {
-        if (sMain == null) sMain = new Handler(Looper.getMainLooper());
-        return sMain;
-    }
-
-    private static void schedule(final Object fragment) {
-        main().postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    Object screen = Xp.callMethod(fragment, "getPreferenceScreen");
-                    if (screen != null) scan(screen, screen);
-                } catch (Throwable t) {
-                    Module.log("double-tap-wake: page scan failed", t);
-                }
-            }
-        }, 200L);
-    }
-
-    private static boolean scan(Object root, Object group) throws Exception {
-        int n = (Integer) Xp.callMethod(group, "getPreferenceCount");
-        for (int i = 0; i < n; i++) {
-            Object p = Xp.callMethod(group, "getPreference", i);
-            if (p == null) continue;
-            if (isTapCheckSwitch(p)) {
-                int total = (Integer) Xp.callMethod(root, "getPreferenceCount");
-                if (total <= MAX_PAGE_PREFS || find(group, KEY_TAP) != null) {
-                    inject(group, p);
-                } else {
-                    Module.log("double-tap-wake: skipped a page with " + total + " items");
-                }
-                return true;
-            }
-            if (has(p, "getPreferenceCount") && scan(root, p)) return true;
-        }
-        return false;
-    }
-
-    private static boolean isTapCheckSwitch(Object p) {
-        Object t = Xp.callMethod(p, "getTitle");
-        if (t == null) return false;
-        String s = t.toString();
-        if (!OLD_TITLE.equals(s) && !NEW_TITLE.equals(s)) return false;
-        if (!has(p, "setChecked", boolean.class)) return false;   // links to the page are not
-        return Xp.callMethod(p, "getFragment") == null;
-    }
-
-    private static void inject(final Object group, final Object mainSwitch) throws Exception {
-        final Context ctx = (Context) Xp.callMethod(mainSwitch, "getContext");
-        if (find(group, KEY_TAP) == null) {
-            ClassLoader loader = mainSwitch.getClass().getClassLoader();
-            Class<?> radio = radioClass(loader);
-            Object tap = make(radio, ctx, KEY_TAP, "Tap to wake",
-                    "Tap the screen once to wake it.");
-            Object dbl = make(radio, ctx, KEY_DOUBLE, "Double tap to wake",
-                    "Tap the screen twice to wake it. A single tap does nothing.\n\n"
-                            + "Works on the Always On Display: the motion sensor feels the second "
-                            + "tap, even before the touchscreen is back. If it doesn't wake right "
-                            + "away, one more tap within 3 seconds does it.\n\n"
-                            + "While you're holding the phone or it rests on your lap, the "
-                            + "touchscreen stays on instead (up to 90 seconds at a time), so both "
-                            + "taps are real touches.\n\n"
-                            + "When the phone shakes too much to feel taps (in a car mount, "
-                            + "say), the touchscreen stays on until it's still again, so double "
-                            + "taps keep working.");
-            Object modded = make(radio, ctx, KEY_MODDED, "Modded behavior (recommended)",
-                    "Double-tap anywhere on the lock screen to turn the screen off, even on the "
-                            + "alarm, weather or date under the clock: they act like empty "
-                            + "space, so a double tap never opens them by mistake. Taps on the "
-                            + "lock screen don't vibrate.");
-            Object stock = make(radio, ctx, KEY_STOCK, "Stock behavior",
-                    "Double-tap the lock screen to turn the screen off, and keep the lock screen "
-                            + "as Google made it: the alarm, weather and date under the clock "
-                            + "open their apps, and taps vibrate.\n\n"
-                            + "Trade-off: a double tap that lands on one of them can open it "
-                            + "instead of turning the screen off.");
-
-            Object radioClick = listener(loader, CLICK, "onPreferenceClick", new Action() {
-                @Override
-                public void run(Object pref, Object value) {
-                    String key = String.valueOf(Xp.callMethod(pref, "getKey"));
-                    ContentResolver cr = ctx.getContentResolver();
-                    if (KEY_TAP.equals(key) || KEY_DOUBLE.equals(key)) {
-                        writeReal(cr, Feature.DOUBLE_TAP_WAKE, KEY_DOUBLE.equals(key) ? 1 : 0);
-                        // Picking a mode also turns the feature on (both need the tap sensor).
-                        writeReal(cr, KEY_TAP_GESTURE, 1);
-                        Xp.callMethod(mainSwitch, "setChecked", true);
-                    } else {
-                        writeReal(cr, Feature.LOCK_SHORTCUTS, KEY_STOCK.equals(key) ? 1 : 0);
-                    }
-                    refresh(group, ctx);
-                }
-            });
-            for (Object p : new Object[]{tap, dbl, modded, stock}) {
-                Xp.callMethod(p, "setOnPreferenceClickListener", radioClick);
-            }
-
-            // Two headed groups ("Wake the screen", "Double tap lock screen to sleep"), so the
-            // two choices read as separate questions. Without the category class the four rows
-            // go in flat.
-            int order = (Integer) Xp.callMethod(mainSwitch, "getOrder");
-            boolean ordered = order < Integer.MAX_VALUE - 10;
-            Class<?> category = categoryClass(loader);
-            if (category != null) {
-                Object wake = make(category, ctx, KEY_WAKE_GROUP, "Wake the screen", null);
-                Object lock = make(category, ctx, KEY_LOCK_GROUP,
-                        "Double tap lock screen to sleep", null);
-                if (ordered) {
-                    Xp.callMethod(wake, "setOrder", order + 1);
-                    Xp.callMethod(lock, "setOrder", order + 2);
-                }
-                // A group must be on the page before rows are added to it.
-                Xp.callMethod(group, "addPreference", wake);
-                Xp.callMethod(group, "addPreference", lock);
-                addInOrder(wake, tap, dbl);
-                addInOrder(lock, modded, stock);
-            } else {
-                if (ordered) {
-                    Xp.callMethod(tap, "setOrder", order + 1);
-                    Xp.callMethod(dbl, "setOrder", order + 2);
-                    Xp.callMethod(modded, "setOrder", order + 3);
-                    Xp.callMethod(stock, "setOrder", order + 4);
-                }
-                for (Object p : new Object[]{tap, dbl, modded, stock}) {
-                    Xp.callMethod(group, "addPreference", p);
-                }
-            }
-            Module.log("double-tap-wake: options added (" + radio.getSimpleName()
-                    + (category != null ? ", grouped" : "") + ")");
-        }
-        refresh(group, ctx);
-    }
-
-    private static void addInOrder(Object category, Object... prefs) {
-        for (int i = 0; i < prefs.length; i++) {
-            Xp.callMethod(prefs[i], "setOrder", i);
-            Xp.callMethod(category, "addPreference", prefs[i]);
-        }
-    }
-
-    private static Class<?> categoryClass(ClassLoader loader) {
-        try {
-            return Class.forName("androidx.preference.PreferenceCategory", false, loader);
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    private static Object make(Class<?> c, Context ctx, String key, String title, String summary) {
-        Object p = Xp.newInstance(c, ctx);
-        Xp.callMethod(p, "setKey", key);
-        Xp.callMethod(p, "setTitle", (CharSequence) title);
-        if (summary != null) Xp.callMethod(p, "setSummary", (CharSequence) summary);
-        Xp.callMethod(p, "setPersistent", false);
-        return p;
-    }
-
-    private static void refresh(Object group, Context ctx) {
-        boolean master = Feature.on(ctx, Feature.TAP_CHECK);
-        boolean d = Feature.on(ctx, Feature.DOUBLE_TAP_WAKE);
-        boolean stock = Feature.on(ctx, Feature.LOCK_SHORTCUTS);
-        Object tap = find(group, KEY_TAP), dbl = find(group, KEY_DOUBLE);
-        Object mod = find(group, KEY_MODDED), stk = find(group, KEY_STOCK);
-        check(tap, !d);
-        check(dbl, d);
-        check(mod, !stock);
-        check(stk, stock);
-        // Pixel Suite's "Tap or Double tap to wake" off: the page is back to stock.
-        for (Object p : new Object[]{find(group, KEY_WAKE_GROUP), find(group, KEY_LOCK_GROUP),
-                tap, dbl, mod, stk}) {
-            visible(p, master);
-        }
-    }
-
-    private static void visible(Object pref, boolean on) {
-        if (pref != null && has(pref, "setVisible", boolean.class)) {
-            Xp.callMethod(pref, "setVisible", on);
-        }
-    }
-
-    private static Object find(Object group, String key) {
-        return Xp.callMethod(group, "findPreference", (CharSequence) key);
-    }
-
-    private static void check(Object pref, boolean on) {
-        if (pref != null) Xp.callMethod(pref, "setChecked", on);
-    }
-
-    /** Cached per class: the page scan asks this of every row on every Settings page. */
-    private static final java.util.concurrent.ConcurrentHashMap<Class<?>,
-            java.util.concurrent.ConcurrentHashMap<String, Boolean>> sHas =
-            new java.util.concurrent.ConcurrentHashMap<Class<?>,
-                    java.util.concurrent.ConcurrentHashMap<String, Boolean>>();
-
-    private static boolean has(Object o, String name, Class<?>... types) {
-        Class<?> c = o.getClass();
-        java.util.concurrent.ConcurrentHashMap<String, Boolean> byName = sHas.get(c);
-        if (byName == null) {
-            byName = new java.util.concurrent.ConcurrentHashMap<String, Boolean>();
-            sHas.put(c, byName);
-        }
-        String sig = types.length == 0 ? name : name + java.util.Arrays.toString(types);
-        Boolean hit = byName.get(sig);
-        if (hit == null) {
-            boolean found;
-            try {
-                c.getMethod(name, types);
-                found = true;
-            } catch (Throwable t) {
-                found = false;
-            }
-            hit = found;
-            byName.put(sig, hit);
-        }
-        return hit;
-    }
-
-    private static Class<?> radioClass(ClassLoader loader) throws ClassNotFoundException {
-        String[] names = {
-                "com.android.settingslib.widget.SelectorWithWidgetPreference",
-                "com.android.settingslib.widget.RadioButtonPreference"
-        };
-        for (String n : names) {
-            try {
-                return Class.forName(n, false, loader);
-            } catch (ClassNotFoundException ignored) { }
-        }
-        return Class.forName("androidx.preference.CheckBoxPreference", false, loader);
-    }
-
-    private static Object listener(ClassLoader loader, String iface, final String method,
-                                   final Action action) throws ClassNotFoundException {
-        Class<?> type = Class.forName(iface, false, loader);
-        return Proxy.newProxyInstance(loader, new Class<?>[]{type}, new InvocationHandler() {
-            @Override
-            public Object invoke(Object proxy, Method m, Object[] a) {
-                String name = m.getName();
-                if (method.equals(name)) {
-                    try {
-                        action.run(a != null && a.length > 0 ? a[0] : null,
-                                a != null && a.length > 1 ? a[1] : null);
-                    } catch (Throwable t) {
-                        Module.log("double-tap-wake: saving failed", t);
-                    }
-                    return Boolean.TRUE;
-                }
-                if ("equals".equals(name)) return proxy == a[0];
-                if ("hashCode".equals(name)) return System.identityHashCode(proxy);
-                return "PixelSuite.DoubleTapWake";
-            }
-        });
-    }
 }

@@ -48,8 +48,6 @@ final class BackdropSurface extends GradientDrawable {
     final Context context;
     boolean failed;
     boolean allowed;
-    boolean parentBlur;
-    boolean reported;
     int night,radiusPx;
     WeakReference<View> host=new WeakReference<View>(null);
     /** Blurred copy of the views under the panel, in DragLayer coordinates. */
@@ -90,7 +88,6 @@ final class BackdropSurface extends GradientDrawable {
 
     /** Ties this surface to the view it is drawn for (the folder, menu or pill). */
     void bind(final View view){
-        parentBlur=true;
         if(!allowed)setColor(FrostedSurface.tone(context)|0xff000000);
         if(host.get()==view)return;
         unwatch();
@@ -110,7 +107,7 @@ final class BackdropSurface extends GradientDrawable {
             try{drawFrost(canvas,view);}
             catch(Throwable unsupported){
                 failed=true;refresh();
-                SuiteLog.log("Local frost unavailable, using an opaque panel",unsupported);
+                if(!frostErrorLogged){frostErrorLogged=true;SuiteLog.log("Local frost unavailable, using an opaque panel",unsupported);}
             }
         }
         super.draw(canvas);
@@ -152,10 +149,6 @@ final class BackdropSurface extends GradientDrawable {
                 RectF area=new RectF(bounds);toLayer.mapRect(area);
                 int under=recordUnder(layer,top,area,blur);
                 if(under>0){canvas.concat(toLocal);DRAW_NODE.invoke(canvas,node);}
-                if(!reported){
-                    reported=true;
-                    if(reportedTypes.add(view.getClass().getName()))SuiteLog.log("Local frost: "+view.getClass().getSimpleName()+" frame="+Math.round(bounds.width())+"x"+Math.round(bounds.height())+", under="+under+", radius="+radiusPx+", wallpaper region="+(wallpaper!=null));
-                }
             }
         }finally{canvas.restoreToCount(save);}
         lastFrame.set(frameInLayer(view,this,layer,null));lastAlpha=alpha;
@@ -183,15 +176,40 @@ final class BackdropSurface extends GradientDrawable {
             for(int i=0;i<layer.getChildCount();i++){
                 View child=layer.getChildAt(i);
                 if(!drawnUnder(layer,child,top)||child.getVisibility()!=View.VISIBLE||child.getAlpha()<=0f)continue;
-                // Another frosted panel (a folder under a long-press menu) is not copied: its
-                // wallpaper region node must be drawn exactly once, or the region would jump.
-                if(panels.contains(child))continue;
+                // Another frosted panel (a folder under a long-press menu) is not copied whole: its
+                // wallpaper region node must be drawn exactly once, or the region would jump. Its
+                // tint and its contents are copied instead (2.0.4, owner: the shortcuts menu over a
+                // home folder showed the folder's icons sharp through it, with no blur).
+                if(panels.contains(child)){count+=recordPanel(recording,child);continue;}
                 Object childNode=RENDER_NODE.get(child);
                 if(childNode==null)continue;
                 DRAW_NODE.invoke(recording,childNode);count++;
             }
         }finally{END.invoke(node);}
         return count;
+    }
+
+    /** A frosted panel under this one: a plain copy of its tint, then its children, never its own node. */
+    private static int recordPanel(Canvas recording,View panel)throws Exception{
+        if(!(panel instanceof ViewGroup)||panel.getVisibility()!=View.VISIBLE||panel.getAlpha()<.99f)return 0;
+        ViewGroup group=(ViewGroup)panel;
+        int save=recording.save();
+        try{
+            recording.translate(panel.getLeft(),panel.getTop());
+            recording.concat(panel.getMatrix());
+            Drawable bg=panel.getBackground();
+            if(bg!=null&&bg.getConstantState()!=null){
+                Drawable tint=bg.getConstantState().newDrawable();   // a plain GradientDrawable: no frost, no region
+                if(!(tint instanceof BackdropSurface)){tint.setBounds(bg.getBounds());tint.draw(recording);}
+            }
+            recording.translate(-panel.getScrollX(),-panel.getScrollY());
+            for(int i=0;i<group.getChildCount();i++){
+                View c=group.getChildAt(i);
+                if(c.getVisibility()!=View.VISIBLE||c.getAlpha()<=0f)continue;
+                Object n=RENDER_NODE.get(c);if(n!=null)DRAW_NODE.invoke(recording,n);
+            }
+            return 1;
+        }finally{recording.restoreToCount(save);}
     }
 
     /** The framework BackgroundBlurDrawable for this panel's window, created once per window. */
@@ -207,7 +225,7 @@ final class BackdropSurface extends GradientDrawable {
             }
             return region;
         }catch(Throwable unavailable){
-            if(regionRoot!=Boolean.FALSE){regionRoot=Boolean.FALSE;SuiteLog.log("Local frost: wallpaper region unavailable",unavailable);}
+            if(regionRoot!=Boolean.FALSE){regionRoot=Boolean.FALSE;if(!regionErrorLogged){regionErrorLogged=true;SuiteLog.log("Local frost: wallpaper region unavailable",unavailable);}}
             return null;
         }
     }
@@ -320,7 +338,7 @@ final class BackdropSurface extends GradientDrawable {
 
     static final Map<View,BackdropSurface> hosts=new WeakHashMap<View,BackdropSurface>();
     private static final ArrayDeque<Integer> saves=new ArrayDeque<Integer>();
-    private static boolean clipErrorLogged;
+    private static boolean clipErrorLogged,frostErrorLogged,regionErrorLogged;
 
     /**
      * Before DragLayer draws a child: clip it out of every frosted frame drawn above it, so its
@@ -329,17 +347,17 @@ final class BackdropSurface extends GradientDrawable {
      */
     /** Active frosted panels in this DragLayer, by the DragLayer child that holds each. */
     static Map<View,View> active(ViewGroup layer){
-        Map<View,View> out=new java.util.HashMap<View,View>();
+        Map<View,View> out=null;   // created only when a panel is active: this runs for every DragLayer child draw
         ArrayList<Map.Entry<View,BackdropSurface>> list;
-        synchronized(hosts){list=new ArrayList<Map.Entry<View,BackdropSurface>>(hosts.entrySet());}
+        synchronized(hosts){if(hosts.isEmpty())return java.util.Collections.emptyMap();list=new ArrayList<Map.Entry<View,BackdropSurface>>(hosts.entrySet());}
         for(Map.Entry<View,BackdropSurface> entry:list){
             View view=entry.getKey();BackdropSurface surface=entry.getValue();
             if(view==null||surface==null||surface.host.get()!=view||!surface.allowed||surface.failed)continue;
             if(!view.isAttachedToWindow()||!view.isShown()||dragLayerOf(view)!=layer||!surface.owns(view))continue;
             Matrix toLayer=new Matrix();View top=mapToLayer(view,layer,toLayer);
-            if(top!=null)out.put(view,top);
+            if(top!=null){if(out==null)out=new java.util.HashMap<View,View>();out.put(view,top);}
         }
-        return out;
+        return out==null?java.util.Collections.<View,View>emptyMap():out;
     }
     static java.util.Set<View> activeTops(ViewGroup layer){return new java.util.HashSet<View>(active(layer).values());}
 
@@ -347,10 +365,11 @@ final class BackdropSurface extends GradientDrawable {
         int save=-1;
         try{
             Map<View,View> panels=canvas.isHardwareAccelerated()?active(layer):null;
-            // A frosted panel under another one keeps its own pixels (it is not copied either).
-            if(panels!=null&&!panels.isEmpty()&&!panels.containsValue(child)){
+            // A frosted panel under another one is clipped out of it too: its blurred copy is drawn there (recordPanel).
+            if(panels!=null&&!panels.isEmpty()){
                 for(Map.Entry<View,View> entry:panels.entrySet()){
                     View view=entry.getKey(),top=entry.getValue();
+                    if(top==child)continue;
                     BackdropSurface surface;synchronized(hosts){surface=hosts.get(view);}
                     if(surface==null)continue;
                     if(!drawnUnder(layer,child,top))continue;
@@ -409,7 +428,6 @@ final class BackdropSurface extends GradientDrawable {
 
     // ------------------------------------------------------------------ reflection (API 29+ classes)
 
-    private static final java.util.Set<String> reportedTypes=new java.util.HashSet<String>();
     private static Class<?> folderType;private static boolean folderMissing;
     static boolean isFolder(View view){
         if(folderType==null&&!folderMissing){try{folderType=LauncherFeatures.type("folder.Folder");}catch(Throwable t){folderMissing=true;}}
