@@ -11,9 +11,6 @@ import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.LinearGradient;
 import android.graphics.drawable.GradientDrawable;
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.AnimatorSet;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.UserHandle;
@@ -23,13 +20,10 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -69,11 +63,14 @@ final class LauncherFeatures {
         Map<String,Boolean> next=new java.util.HashMap<String,Boolean>();
         for(String key:new String[]{GRID,DRAWER,RENAME,ICONS,DRAG_PILL,HIDE_SHORTCUTS,LABEL_SIZE,FolderDrag.TWO_FINGER,MultiDrag.KEY})next.put(key,Feature.on(a,key));
         labelLevel=IconLabelScale.level(Settings.Secure.getInt(a.getContentResolver(),LABEL_LEVEL,2));
+        SurfaceStyle.refresh();restyle=SurfaceStyle.restyled(a);styleDisc=restyle||!FrostedSurface.dark(a);
         enabled=next;
     }
-    static boolean frosted(){return on(GRID)||on(DRAWER)||on(RENAME)||on(ICONS)||on(DRAG_PILL);}
+    static volatile boolean restyle=true;
+    static volatile boolean styleDisc=true;
+    static boolean frosted(){return restyle&&(on(GRID)||on(DRAWER)||on(RENAME)||on(ICONS)||on(DRAG_PILL));}
     static void install(ClassLoader cl) {
-        loader = cl;
+        loader = cl; types.clear();
         try {
             Xp.hookAllMethods(type("Launcher"), "onCreate", new Xp.Callback() {
                 protected void beforeHookedMethod(Xp.Param p) {
@@ -90,7 +87,7 @@ final class LauncherFeatures {
                             refresh();
                         }
                     };
-                    for(String key:new String[]{GRID,DRAWER,RENAME,ICONS,DRAG_PILL,HIDE_SHORTCUTS,LABEL_SIZE,LABEL_LEVEL,GRID_SIZE,DRAWER_GRID_SIZE,FolderDrag.TWO_FINGER,MultiDrag.KEY})
+                    for(String key:new String[]{GRID,DRAWER,RENAME,ICONS,DRAG_PILL,HIDE_SHORTCUTS,LABEL_SIZE,LABEL_LEVEL,GRID_SIZE,DRAWER_GRID_SIZE,FolderDrag.TWO_FINGER,MultiDrag.KEY,SurfaceStyle.KEY})
                         a.getContentResolver().registerContentObserver(Settings.Secure.getUriFor(key),false,observer);
                     Xp.setAdditionalInstanceField(a,"pixelsuite_settings_observer",observer);
                     GoogleAliases.publish();
@@ -126,14 +123,19 @@ final class LauncherFeatures {
             installGrid();
             installBackdropDrawing();
             DrawerFolders.install();
-            DrawerDrag.install();DrawerHomeTarget.install();FolderDrag.install();installFolderDropSettle();ScatterEffect.install();MultiDrag.install();ShapeWatch.install();
+            DrawerDrag.install();DrawerHomeTarget.install();FolderDrag.install();installFolderDropSettle();Balloon.install();ScatterEffect.install();MultiDrag.install();ShapeWatch.install();
             ThemeFolderRestore.install();
             installMenus();
             try{HomeOptions.install();}catch(Throwable error){Module.log("Pixel Suite settings row unavailable",error);}
-            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.3)");
+            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.4)");
         } catch (Throwable error) { Module.log("Launcher customization unavailable", error); }
     }
-    static Class<?> type(String name) { return Xp.findClass(ROOT + name, loader); }
+    private static final java.util.concurrent.ConcurrentHashMap<String,Class<?>> types=new java.util.concurrent.ConcurrentHashMap<String,Class<?>>();
+    static Class<?> type(String name) {
+        Class<?> found=types.get(name);
+        if(found==null){found=Xp.findClass(ROOT + name, loader);types.put(name,found);}
+        return found;
+    }
     static void installBackdropDrawing(){
         final Class<?> folderClass=type("folder.Folder");
         final Class<?> dragLayerClass=type("dragndrop.DragLayer");
@@ -141,13 +143,21 @@ final class LauncherFeatures {
             View folder=(View)p.thisObject;Object bg=get(folder,"mBackground");
             if(bg instanceof BackdropSurface&&folder.getParent() instanceof View)((View)folder.getParent()).invalidate();
         }});
-        Xp.hookAllMethods(ViewGroup.class,"drawChild",new Xp.Callback(){
-            protected void beforeHookedMethod(Xp.Param p){
-                DropIndicator.beforeDrawChild((ViewGroup)p.thisObject,(android.graphics.Canvas)p.args[0],(View)p.args[1]);
-                if(dragLayerClass.isInstance(p.thisObject))BackdropSurface.beforeDrawChild((ViewGroup)p.thisObject,(android.graphics.Canvas)p.args[0],(View)p.args[1]);
-            }
-            protected void afterHookedMethod(Xp.Param p){if(dragLayerClass.isInstance(p.thisObject))BackdropSurface.afterDrawChild((android.graphics.Canvas)p.args[0]);}
-        });
+        try{
+            for(Method m:ViewGroup.class.getDeclaredMethods())if(m.getName().equals("drawChild"))Xp.x().hook(m).intercept(new XposedInterface.Hooker(){
+                public Object intercept(XposedInterface.Chain chain)throws Throwable{
+                    ViewGroup parent=(ViewGroup)chain.getThisObject();List<Object> args=chain.getArgs();android.graphics.Canvas canvas=(android.graphics.Canvas)args.get(0);
+                    boolean layer=dragLayerClass.isInstance(parent);
+                    try{
+                        DropIndicator.beforeDrawChild(parent,canvas,(View)args.get(1));
+                        if(layer)BackdropSurface.beforeDrawChild(parent,canvas,(View)args.get(1));
+                    }catch(Throwable error){logOnce("Panel draw hook failed",error);}
+                    Object result=chain.proceed();
+                    if(layer)try{BackdropSurface.afterDrawChild(canvas);}catch(Throwable error){logOnce("Panel draw hook failed",error);}
+                    return result;
+                }
+            });
+        }catch(Throwable error){Module.log("Panel drawing hook unavailable",error);}
     }
     static Object get(Object o, String name) { return Xp.getObjectField(o, name); }
     static void set(Object o, String name, Object v) { Xp.setObjectField(o, name, v); }
@@ -202,7 +212,7 @@ final class LauncherFeatures {
             View decor = a.getWindow().getDecorView(); refreshLabels(decor);
             Object ah = get(call(a, "getAppsView"), "mAH");
             for (Object holder : (List<?>) ah) if (holder != null) call(get(holder, "mAppsList"), "onAppsUpdated");
-        } catch (Throwable e) { Module.log("Launcher refresh failed", e); }
+        } catch (Throwable e) { logOnce("Launcher refresh failed", e); }
         DrawerFolders.scheduleRebind();
         GoogleAliases.publish();
     }
@@ -212,7 +222,7 @@ final class LauncherFeatures {
         try {
             Object ah = get(call(a, "getAppsView"), "mAH");
             for (Object holder : (List<?>) ah) if (holder != null) call(get(holder, "mAppsList"), "onAppsUpdated");
-        } catch (Throwable e) { Module.log("Launcher refresh failed", e); refresh(); }
+        } catch (Throwable e) { logOnce("Launcher refresh failed", e); refresh(); }
     }
     static void refreshLabels(View v) {
         if(type("BubbleTextView").isInstance(v)){
@@ -359,7 +369,15 @@ final class LauncherFeatures {
             folderTitleMinimum.set(new int[]{c.getResources().getIdentifier("folder_title_min_width","dimen",c.getPackageName()),dp(c,40)});
             try{return chain.proceed();}finally{if(previous==null)folderTitleMinimum.remove();else folderTitleMinimum.set(previous);}
         }});
-        Xp.hookAllMethods(android.content.res.Resources.class,"getDimensionPixelSize",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){int[] minimum=folderTitleMinimum.get();if(minimum!=null&&minimum[0]!=0&&((Number)p.args[0]).intValue()==minimum[0])p.setResult(minimum[1]);}});
+        try{
+            for(Method method:android.content.res.Resources.class.getDeclaredMethods())if(method.getName().equals("getDimensionPixelSize"))Xp.x().hook(method).intercept(new XposedInterface.Hooker(){public Object intercept(XposedInterface.Chain chain)throws Throwable{
+                int[] minimum=folderTitleMinimum.get();
+                if(minimum==null||minimum[0]==0)return chain.proceed();
+                List<Object> args=chain.getArgs();
+                if(args.size()>0&&args.get(0) instanceof Number&&((Number)args.get(0)).intValue()==minimum[0])return minimum[1];
+                return chain.proceed();
+            }});
+        }catch(Throwable error){Module.log("Folder title width hook unavailable",error);}
         Xp.hookAllMethods(type("folder.Folder"), "closeComplete", new Xp.Callback() {
             protected void afterHookedMethod(Xp.Param p) {
                 if(Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_hidden_close"))){Xp.setAdditionalInstanceField(p.thisObject,"pixelsuite_hidden_close",false);((View)p.thisObject).setAlpha(1f);}
@@ -371,7 +389,7 @@ final class LauncherFeatures {
             protected void beforeHookedMethod(Xp.Param p){
                 Object background=p.thisObject;Object delegate=get(background,"mInvalidateDelegate");
                 if(!(delegate instanceof View))return;
-                Object info=((View)delegate).getTag();boolean styled=DrawerFolders.isFolder(info)||on(GRID);
+                Object info=((View)delegate).getTag();boolean styled=styleDisc&&(DrawerFolders.isFolder(info)||on(GRID));
                 Paint paint=(Paint)get(background,"mPaint");
                 Xp.setAdditionalInstanceField(background,"pixelsuite_original_shader",paint.getShader());
                 Xp.setAdditionalInstanceField(background,"pixelsuite_draw_original_color",get(background,"mBgColor"));
@@ -420,7 +438,8 @@ final class LauncherFeatures {
                     View animatedFolder=(View)get(chain.getThisObject(),"folder");
                     activePreviewColor.set(styledPreview(get(animatedFolder,"mInfo"))?FrostedSurface.closedFolderColor(animatedFolder.getContext()):null);
                     try{
-                    Integer previousColors=activeFolderColors.get();Object folderBackground=get(get(chain.getThisObject(),"folder"),"mBackground");int color=FrostedSurface.colors(((View)get(chain.getThisObject(),"folder")).getContext())[0];if(folderBackground instanceof BackdropSurface&&(!((BackdropSurface)folderBackground).allowed||((BackdropSurface)folderBackground).failed))color|=0xff000000;activeFolderColors.set(frosted()?color:null);
+                    Integer previousColors=activeFolderColors.get();Object folderBackground=get(get(chain.getThisObject(),"folder"),"mBackground");int color=FrostedSurface.colors(((View)get(chain.getThisObject(),"folder")).getContext())[0];if(folderBackground instanceof BackdropSurface&&(!((BackdropSurface)folderBackground).allowed||((BackdropSurface)folderBackground).failed))color|=0xff000000;
+                    activeFolderColors.set(frosted()?color:(FrostedSurface.colors(((View)get(chain.getThisObject(),"folder")).getContext())[0]|0xff000000));
                     if (n == 0) {try{return chain.proceed();}finally{if(previousColors==null)activeFolderColors.remove();else activeFolderColors.set(previousColors);}}
                     Activity a = activity.get(); Object profile = call(a, "getDeviceProfile"); Object old = get(profile,"mFolderProfile");
                     Object animated = get(chain.getThisObject(),"folder");
@@ -435,9 +454,9 @@ final class LauncherFeatures {
             });
         }
         Xp.hookAllMethods(type("icons.GraphicsUtils"),"getAttrColor",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){
-            if(activeFolderColors.get()==null||p.args.length!=2||!(p.args[1] instanceof Context))return;
+            if((activeFolderColors.get()==null&&activePreviewColor.get()==null)||p.args.length!=2||!(p.args[1] instanceof Context))return;
             Context c=(Context)p.args[1];int attr=((Number)p.args[0]).intValue();
-            if(attr==c.getResources().getIdentifier("folderBackgroundColor","attr",c.getPackageName()))p.setResult(activeFolderColors.get());
+            if(activeFolderColors.get()!=null&&attr==c.getResources().getIdentifier("folderBackgroundColor","attr",c.getPackageName()))p.setResult(activeFolderColors.get());
             else if(activePreviewColor.get()!=null&&attr==c.getResources().getIdentifier("folderPreviewColor","attr",c.getPackageName()))p.setResult(activePreviewColor.get());
         }});
         Xp.hookAllMethods(type("folder.PreviewBackground"),"getBgColor",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
@@ -482,7 +501,7 @@ final class LauncherFeatures {
             try { call(content, "snapToPageImmediately", ((Number) call(content, "getDestinationPage")).intValue()); } catch (Throwable ignored) { }
         } catch (Throwable ignored) { }
         if (DrawerFolders.drawerFolderView(folder)) return;
-        settleHomePage("close");
+        settleHomePage();
     }
 
     static Object launcherState(Object manager) {
@@ -493,13 +512,13 @@ final class LauncherFeatures {
             for (java.lang.reflect.Field f : manager.getClass().getDeclaredFields()) {
                 f.setAccessible(true);
                 Object v = f.get(manager);
-                if (state.isInstance(v)) { logOnce("Launcher state read from StateManager." + f.getName(), null); return v; }
+                if (state.isInstance(v)) return v;
             }
         } catch (Throwable ignored) { }
         return null;
     }
 
-    static void settleHomePage(String when) {
+    static void settleHomePage() {
         try {
             Activity a = activity.get(); if (a == null) return;
             Object manager = call(a, "getStateManager"), state = launcherState(manager);
@@ -512,7 +531,7 @@ final class LauncherFeatures {
     static final ThreadLocal<Boolean> drawerDrop = new ThreadLocal<Boolean>();
     static void installFolderDropSettle() {
         try {
-            int drops = Xp.hookAllMethods(type("folder.Folder"), "onDrop", new Xp.Callback() {
+            Xp.hookAllMethods(type("folder.Folder"), "onDrop", new Xp.Callback() {
                 protected void beforeHookedMethod(Xp.Param p) {
                     folderDrop.set(Boolean.TRUE);
                     if (DrawerFolders.drawerFolderView((View) p.thisObject)) drawerDrop.set(Boolean.TRUE);
@@ -520,10 +539,10 @@ final class LauncherFeatures {
                 protected void afterHookedMethod(Xp.Param p) {
                     boolean drawer = drawerDrop.get() != null;
                     folderDrop.remove(); drawerDrop.remove();
-                    if (!drawer) new Handler(Looper.getMainLooper()).post(new Runnable() { public void run() { settleHomePage("drop"); } });
+                    if (!drawer) new Handler(Looper.getMainLooper()).post(new Runnable() { public void run() { settleHomePage(); } });
                 }
-            }).size();
-            int states = Xp.hookAllMethods(type("statemanager.StateManager"), "goToState", new Xp.Callback() {
+            });
+            Xp.hookAllMethods(type("statemanager.StateManager"), "goToState", new Xp.Callback() {
                 protected void beforeHookedMethod(Xp.Param p) {
                     if (folderDrop.get() == null || p.args.length < 1) return;
                     try {
@@ -533,8 +552,7 @@ final class LauncherFeatures {
                         else if (p.args.length >= 2 && p.args[1] instanceof Integer) p.args[1] = 0;
                     } catch (Throwable ignored) { }
                 }
-            }).size();
-            Module.log("Folder drop settle: " + drops + " drop hooks, " + states + " state hooks");
+            });
         } catch (Throwable error) { logOnce("Folder drop settle unavailable", error); }
     }
     static boolean isOpening(XposedInterface.Chain chain,View folder){
@@ -542,7 +560,6 @@ final class LauncherFeatures {
         if(args.size()>0&&args.get(0) instanceof Boolean)return (Boolean)args.get(0);
         try{return Boolean.TRUE.equals(get(folder,"mIsOpen"));}catch(Throwable unknown){return false;}
     }
-    static int dockLine(Activity a,ViewGroup drag,int[] dock){return dockLine(a,drag,dock,DOCK_GAP_DP);}
     static int dockLine(Activity a,ViewGroup drag,int[] dock,int gapDp){
         View hotseat;
         try{hotseat=(View)get(a,"mHotseat");}catch(Throwable olderLauncher){hotseat=(View)call(a,"getHotseat");}
@@ -577,13 +594,7 @@ final class LauncherFeatures {
         }
         return current==ancestor?y:Integer.MIN_VALUE;
     }
-    static boolean styledPreview(Object info){return info!=null&&(DrawerFolders.isFolder(info)||on(GRID));}
-    static void decorateAnimator(Object result,final XposedInterface.Chain chain){
-        if(result instanceof AnimatorSet && Boolean.TRUE.equals(chain.getArgs().get(0))){
-            final Object folder=get(chain.getThisObject(),"folder");
-            ((AnimatorSet)result).addListener(new AnimatorListenerAdapter(){public void onAnimationEnd(Animator a){styleFolder(folder);}});
-        }
-    }
+    static boolean styledPreview(Object info){return styleDisc&&info!=null&&(DrawerFolders.isFolder(info)||on(GRID));}
     static void afterClose(Object folder,Runnable task){
         Xp.setAdditionalInstanceField(folder,"pixelsuite_after_close",task);call(folder,"close",true);
     }
@@ -621,8 +632,10 @@ final class LauncherFeatures {
         ((BackdropSurface)background).bind(view);
         view.invalidate();
     }
+    private static final java.util.concurrent.ConcurrentHashMap<String,Integer> systemColors=new java.util.concurrent.ConcurrentHashMap<String,Integer>();
     static int surface(Context c,String name,int fallback){
-        int id=c.getResources().getIdentifier(name,"color","android");
+        Integer known=systemColors.get(name);
+        int id;if(known!=null)id=known;else{id=c.getResources().getIdentifier(name,"color","android");systemColors.put(name,id);}
         try{return id==0?fallback:c.getResources().getColor(id,c.getTheme());}catch(Throwable ignored){return fallback;}
     }
     static int gridFor(Object info) {
@@ -788,13 +801,16 @@ final class LauncherFeatures {
     static final Map<Object,Long> openingUntil = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Object,Long>());
     private static void installMenus() {
         try {
-            Xp.hookAllMethods(View.class, "setAlpha", new Xp.Callback() {
-                protected void beforeHookedMethod(Xp.Param p) {
-                    if (openingUntil.isEmpty() || !(p.thisObject instanceof ViewGroup) || p.args.length != 1 || !(p.args[0] instanceof Float)) return;
-                    Long until = openingUntil.get(p.thisObject);
-                    if (until == null) return;
-                    if (android.os.SystemClock.uptimeMillis() > until) { openingUntil.remove(p.thisObject); return; }
-                    if (((Float) p.args[0]).floatValue() < 1f) p.args[0] = Float.valueOf(1f);
+            for (Method m : View.class.getDeclaredMethods()) if (m.getName().equals("setAlpha")) Xp.x().hook(m).intercept(new XposedInterface.Hooker() {
+                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                    if (openingUntil.isEmpty()) return chain.proceed();
+                    Object view = chain.getThisObject(); List<Object> args = chain.getArgs();
+                    if (!(view instanceof ViewGroup) || args.size() != 1 || !(args.get(0) instanceof Float)) return chain.proceed();
+                    Long until = openingUntil.get(view);
+                    if (until == null) return chain.proceed();
+                    if (android.os.SystemClock.uptimeMillis() > until) { openingUntil.remove(view); return chain.proceed(); }
+                    if (((Float) args.get(0)).floatValue() < 1f) return chain.proceed(new Object[]{Float.valueOf(1f)});
+                    return chain.proceed();
                 }
             });
         } catch (Throwable error) { logOnce("Menu open fade unavailable", error); }
@@ -807,7 +823,7 @@ final class LauncherFeatures {
         });
         Xp.hookAllMethods(type("popup.ArrowPopup"),"assignMarginsAndBackgrounds",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
             if(p.args.length>0&&p.args[0]==p.thisObject&&type("popup.PopupContainer").isInstance(p.thisObject)&&!privateItem(get(p.thisObject,"itemInfo"))){
-                try{DrawerPopupLayout.compact((ViewGroup)p.thisObject);}catch(Throwable error){Module.log("Drawer compact menu unavailable",error);}
+                try{DrawerPopupLayout.compact((ViewGroup)p.thisObject);}catch(Throwable error){logOnce("Drawer compact menu unavailable",error);}
                 try{MenuFont.match((ViewGroup)p.thisObject);}catch(Throwable error){logOnce("Menu font matching unavailable",error);}
                 FrostedSurface.popup((ViewGroup)p.thisObject);
             }
@@ -816,7 +832,7 @@ final class LauncherFeatures {
             if(Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_compact_menu")!=null)DrawerPopupLayout.place((ViewGroup)p.thisObject);
         }});
         Xp.hookAllMethods(type("popup.ArrowPopup"),"addArrow",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
-            if(frosted()&&type("popup.PopupContainer").isInstance(p.thisObject)&&!privateItem(get(p.thisObject,"itemInfo"))){View arrow=(View)get(p.thisObject,"mArrow");if(arrow.getBackground()!=null)arrow.getBackground().setColorFilter(FrostedSurface.colors(arrow.getContext())[0],android.graphics.PorterDuff.Mode.SRC_IN);}
+            if(type("popup.PopupContainer").isInstance(p.thisObject)&&!privateItem(get(p.thisObject,"itemInfo"))){View arrow=(View)get(p.thisObject,"mArrow");if(arrow.getBackground()!=null)arrow.getBackground().setColorFilter(FrostedSurface.colors(arrow.getContext())[0],android.graphics.PorterDuff.Mode.SRC_IN);}
         }});
         Xp.hookAllMethods(type("popup.ArrowPopup"), "show", new Xp.Callback() {
             protected void beforeHookedMethod(Xp.Param p) {
@@ -881,6 +897,7 @@ final class LauncherFeatures {
                 r.setPadding(r.getPaddingLeft() + FrostedSurface.dp(c, 14), r.getPaddingTop(), r.getPaddingRight(), r.getPaddingBottom());
                 r.getLayoutParams().height = 0; r.setAlpha(0f);
                 if (Xp.getAdditionalInstanceField(popup, "pixelsuite_panel") != null) FrostedSurface.clearRow(r);
+                else matchRow(r, sortRow);
             }
         }
         final View[] choices = {auto, custom};
@@ -902,6 +919,17 @@ final class LauncherFeatures {
             rows.requestLayout();
         }});
         anim.start();
+    }
+    static void matchRow(View row, View like) {
+        Integer colour = null;
+        try { android.content.res.ColorStateList tint = like.getBackgroundTintList(); if (tint != null) colour = tint.getColorForState(like.getDrawableState(), tint.getDefaultColor()); } catch (Throwable ignored) { }
+        if (colour == null) colour = ComposeFrost.fillOf(like.getBackground());
+        if (colour == null) { android.view.ViewParent parent = like.getParent(); if (parent instanceof View) colour = ComposeFrost.fillOf(((View) parent).getBackground()); }
+        if (colour == null) return;
+        android.graphics.drawable.ColorDrawable fill = new android.graphics.drawable.ColorDrawable(colour | 0xff000000);
+        row.setBackgroundTintList(null);
+        row.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(FrostedSurface.dark(row.getContext()) ? 0x22ffffff : 0x14000000), fill, null));
+        row.setElevation(0); row.setTranslationZ(0); row.setOutlineProvider(null); row.setClipToOutline(false);
     }
     static void addFolderRow(ViewGroup rows, String title, String tag, int glyph, int index, View.OnClickListener listener) {
         Context context = rows.getContext();

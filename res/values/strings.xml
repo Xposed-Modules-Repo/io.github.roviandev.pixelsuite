@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Pixel Suite</string>
-    <string name="description">Pixel gestures and customization: flashlight and camera shortcuts, screenshots, sleep and wake gestures, launcher folders, app names and icons, label sizes, recents controls, newest-first files, and free crop and doodles in Pixel Studio. All controls are inside Pixel Suite. Enable the recommended LSPosed scope for the features you use, including Pixel Studio for screenshot editing, then restart the affected apps or reboot.</string>
+    <string name="description">Pixel gestures, launcher customization, file sorting, free screenshot crop and Doodles in Pixel Studio and Google Photos. All controls are inside Pixel Suite. Enable the recommended LSPosed scopes, including the editor you use, then restart the affected apps or reboot.</string>
 </resources>

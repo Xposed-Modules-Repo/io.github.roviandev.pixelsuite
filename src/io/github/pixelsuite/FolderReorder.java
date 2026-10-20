@@ -121,45 +121,33 @@ final class FolderReorder {
         for (View v : original) if (v != source && !picked(v)) r.add(v);
         return r;
     }
+    private int restCount() {
+        int n = 0;
+        for (View v : original) if (v != source && !picked(v)) n++;
+        return n;
+    }
     private static boolean picked(View v) { return Boolean.TRUE.equals(Xp.getAdditionalInstanceField(v, "pixelsuite_picked")); }
     private int lastGroupSize = 1;
     private boolean groupChanged() { return group().size() != lastGroupSize; }
 
+    private final int[] dragAt = new int[2], parentAt = new int[2], contentAt = new int[2];
+
     private int targetRank(Object dragObject, int x, int y) {
         try {
             int cx = x, cy = y;
+            ((View) folder.getParent()).getLocationOnScreen(parentAt);
             try {
                 View drag = (View) LauncherFeatures.get(dragObject, "dragView");
                 if (drag != null && drag.getWidth() > 0) {
-                    int[] at = new int[2]; drag.getLocationOnScreen(at);
-                    int[] base = new int[2]; ((View) folder.getParent()).getLocationOnScreen(base);
-                    cx = at[0] - base[0] + Math.round(drag.getWidth() * drag.getScaleX() / 2f);
-                    cy = at[1] - base[1] + Math.round(drag.getHeight() * drag.getScaleY() / 2f);
+                    drag.getLocationOnScreen(dragAt);
+                    cx = dragAt[0] - parentAt[0] + Math.round(drag.getWidth() * drag.getScaleX() / 2f);
+                    cy = dragAt[1] - parentAt[1] + Math.round(drag.getHeight() * drag.getScaleY() / 2f);
                 }
             } catch (Throwable ignored) { }
-            int[] content = new int[2]; paged.getLocationOnScreen(content);
-            int[] base = new int[2]; ((View) folder.getParent()).getLocationOnScreen(base);
-            int px = cx - (content[0] - base[0]), py = cy - (content[1] - base[1]);
-            int rank;
-            try { rank = ((Number) LauncherFeatures.call(paged, "findNearestArea", px, py)).intValue(); }
-            catch (Throwable noLegacyMethod) {
-                int next = page(); View cell = paged.getChildAt(next);
-                if (cell == null) return -1;
-                int[] at = new int[2]; cell.getLocationOnScreen(at);
-                int[] nearest = new int[2];
-                float scaleX = 1f, scaleY = 1f;
-                for (View v = cell; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null) {
-                    scaleX *= v.getScaleX(); scaleY *= v.getScaleY();
-                }
-                if (scaleX <= 0f || scaleY <= 0f) return -1;
-                int cellX = Math.round((cx + base[0] - at[0]) / scaleX);
-                int cellY = Math.round((cy + base[1] - at[1]) / scaleY);
-                LauncherFeatures.call(cell, "findNearestArea", cellX, cellY, 1, 1, 1, 1, true, nearest, null);
-                int countX = ((Number) LauncherFeatures.get(paged, "mGridCountX")).intValue();
-                if (Boolean.TRUE.equals(LauncherFeatures.call(folder, "isLayoutRtl"))) nearest[0] = countX - nearest[0] - 1;
-                rank = next * itemsPerPage() + nearest[1] * countX + nearest[0];
-            }
-            return Math.max(0, Math.min(rank, rest().size()));
+            paged.getLocationOnScreen(contentAt);
+            int px = cx - (contentAt[0] - parentAt[0]), py = cy - (contentAt[1] - parentAt[1]);
+            int rank = ((Number) LauncherFeatures.call(paged, "findNearestArea", px, py)).intValue();
+            return Math.max(0, Math.min(rank, restCount()));
         } catch (Throwable error) { LauncherFeatures.logOnce("Drawer folder target slot unavailable", error); return -1; }
     }
 
@@ -174,7 +162,7 @@ final class FolderReorder {
 
     private void layout(List<View> order) {
         final int visible = page();
-        int per = itemsPerPage();
+        int per; try { per = ((Number) LauncherFeatures.call(paged, "itemsPerPage")).intValue(); } catch (Throwable t) { per = Integer.MAX_VALUE; }
         final int perPage = Math.max(1, per);
         final Map<View, int[]> before = new IdentityHashMap<View, int[]>();
         for (View v : original) {
@@ -255,11 +243,6 @@ final class FolderReorder {
     }
 
     private int page() { try { return ((Number) LauncherFeatures.call(paged, "getNextPage")).intValue(); } catch (Throwable t) { return 0; } }
-
-    private int itemsPerPage() {
-        try { return Math.max(1, ((Number) LauncherFeatures.get(LauncherFeatures.get(paged, "mOrganizer"), "mMaxItemsPerPage")).intValue()); }
-        catch (Throwable noField) { return Math.max(1, ((Number) LauncherFeatures.call(paged, "itemsPerPage")).intValue()); }
-    }
 
     private int pageOf(View v) {
         try {

@@ -44,13 +44,24 @@ final class GoogleAliases {
                     exportedIcons.put(item.getValue(),hash.toString());
                 }
                 String json=root.toString();if(json.equals(published))return;
-                Bundle data=new Bundle();data.putString("aliases",json);owner.getContentResolver().call(AliasProvider.URI,"replace",null,data);published=json;Module.log("Google app customization sync updated: "+root.length()+" apps");
+                Bundle data=new Bundle();data.putString("aliases",json);owner.getContentResolver().call(AliasProvider.URI,"replace",null,data);published=json;
                 Set<String> active=new HashSet<String>();Iterator<String> keys=root.keys();while(keys.hasNext())active.add(root.getJSONObject(keys.next()).optString("icon"));
                 Iterator<Map.Entry<android.graphics.Bitmap,String>> cached=exportedIcons.entrySet().iterator();while(cached.hasNext())if(!active.contains(cached.next().getValue()))cached.remove();
             }catch(Throwable error){Module.log("Google app customization sync unavailable",error);}}});
         }catch(Throwable error){Module.log("Google app label sync unavailable",error);}
     }
-    static Context context(){try{return (Context)Class.forName("android.app.ActivityThread").getDeclaredMethod("currentApplication").invoke(null);}catch(Throwable ignored){return null;}}
+    private static volatile Context sContext;
+    static Context context(){
+        Context c=sContext;if(c!=null)return c;
+        try{c=(Context)Class.forName("android.app.ActivityThread").getDeclaredMethod("currentApplication").invoke(null);}catch(Throwable ignored){return null;}
+        if(c!=null)sContext=c;return c;
+    }
+    private static final java.util.concurrent.ConcurrentHashMap<UserHandle,Long> serials=new java.util.concurrent.ConcurrentHashMap<UserHandle,Long>();
+    static long serial(Context c,UserHandle user){
+        Long known=serials.get(user);if(known!=null)return known;
+        long serial=((UserManager)c.getSystemService(Context.USER_SERVICE)).getSerialNumberForUser(user);
+        if(serial>=0)serials.put(user,serial);return serial;
+    }
     static synchronized void reload(){
         long now=SystemClock.uptimeMillis();if(now-loaded<2000)return;Context c=context();if(c==null)return;
         try{
@@ -66,12 +77,12 @@ final class GoogleAliases {
         }catch(Throwable ignored){loaded=now;}
     }
     static String alias(ComponentName component,String pkg,Object user){
-        reload();Context c=context();if(c==null)return null;
+        reload();org.json.JSONObject map=aliases;if(map.length()==0)return null;
+        Context c=context();if(c==null)return null;
         try{
             if(user==null)user=android.os.Process.myUserHandle();
-            long serial=((UserManager)c.getSystemService(Context.USER_SERVICE)).getSerialNumberForUser((UserHandle)user);
+            long serial=serial(c,(UserHandle)user);
             if(serial<0)return null;
-            org.json.JSONObject map=aliases;
             if(component!=null){org.json.JSONObject entry=map.optJSONObject(serial+"|"+component.flattenToString());return entry==null?null:entry.optString("alias",null);}
             String single=null;Iterator<String> keys=map.keys();
             while(keys.hasNext()){
@@ -87,8 +98,9 @@ final class GoogleAliases {
             LauncherActivityInfo info=(LauncherActivityInfo)p.thisObject;String value=alias(info.getComponentName(),info.getComponentName().getPackageName(),info.getUser());if(value!=null&&!value.isEmpty())p.setResult(value);
         }});
         Xp.hookAllMethods(PackageItemInfo.class,"loadLabel",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
-            PackageItemInfo info=(PackageItemInfo)p.thisObject;if(info.packageName==null)return;ComponentName component=info instanceof ActivityInfo&&info.name!=null?new ComponentName(info.packageName,info.name):null;
+            PackageItemInfo info=(PackageItemInfo)p.thisObject;if(info.packageName==null)return;
             if(!(info instanceof ApplicationInfo)&&!(info instanceof ActivityInfo))return;
+            ComponentName component=info instanceof ActivityInfo&&info.name!=null?new ComponentName(info.packageName,info.name):null;
             String value=alias(component,info.packageName,null);if(value!=null&&!value.isEmpty())p.setResult(value);
         }});
         Xp.hookAllMethods(Instrumentation.class,"callActivityOnResume",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){loaded=0;reload();}});

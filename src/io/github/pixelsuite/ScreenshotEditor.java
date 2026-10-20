@@ -44,6 +44,26 @@ final class ScreenshotEditor {
         installFreeCrop(cl);
         installDoodles(cl);
         installUndoRedo(cl);
+        try {
+            Xp.hookMethod(android.app.Activity.class.getDeclaredMethod("onResume"), new Xp.Callback() {
+                @Override protected void afterHookedMethod(Xp.Param p) { if (SuperDark.inEffectNow()) DarkChips.on("Pixel Studio"); }
+            });
+        } catch (Throwable error) { logOnce("dark tool bar unavailable", error); }
+        try {
+            Xp.hookMethod(android.app.Activity.class.getDeclaredMethod("onCreate", android.os.Bundle.class), new Xp.Callback() {
+                @Override protected void afterHookedMethod(Xp.Param p) {
+                    String name = p.thisObject.getClass().getName();
+                    Activity a = (Activity) p.thisObject;
+                    boolean edit = false; try { edit = a.getIntent() != null && android.content.Intent.ACTION_EDIT.equals(a.getIntent().getAction()); } catch (Throwable ignored) { }
+                    if (name.endsWith("GandalfActivity") || name.endsWith("ExternalEditActivity") || edit) {
+                        boolean superDark = SuperDark.inEffect(a);
+                        if (!superDark) WindowFrost.frost(a, "screenshot editor");
+                        ComposeFrost.editor(a, SurfaceStyle.restyled(a) && !superDark);
+                    }
+                }
+            });
+        } catch (Throwable error) { logOnce("editor window frost unavailable", error); }
+        ComposeFrost.install("Pixel Studio", null, true);
     }
 
     private static WeakReference<Object> sHistoryOwner = new WeakReference<Object>(null);
@@ -156,7 +176,6 @@ final class ScreenshotEditor {
         if (sDoodles == null) {
             if (app() == null) return true;
             sDoodles = setting(new Feature.Cached(Feature.SCREENSHOT_DOODLES), Feature.SCREENSHOT_DOODLES);
-            Module.log("screenshot-editor: doodles " + (sDoodles ? "on" : "off") + " for this editor process");
         }
         return sDoodles;
     }
@@ -229,9 +248,7 @@ final class ScreenshotEditor {
                     remember(sRectStates, p.args[0]);
                     remember(sHandleStates, p.args[1]);
                     if (!setting(sFreeCrop, Feature.SCREENSHOT_FREE_CROP)) return;
-                    float stock = ((Number) p.args[3]).floatValue();
                     p.args[3] = 1f;
-                    logOnce("free crop on: minimum crop size " + Math.round(stock) + " px -> 1 px", null);
                 }
             });
             installCropHandles(cl, rect, state);
@@ -370,14 +387,14 @@ final class ScreenshotEditor {
                 @Override protected void afterHookedMethod(Xp.Param p) {
                     Integer which;
                     synchronized (painterIds) { which = painterIds.get(p.args[1]); }
-                    track("stroke" + which, Boolean.TRUE.equals(p.args[4]));
-                    if (which == null || which != normalPen() || !doodlesOn() || !fromToolbarRow()) return;
+                    boolean row = fromToolbarRow();
+                    if (row) track("stroke" + which, Boolean.TRUE.equals(p.args[4]));
+                    if (which == null || which != normalPen() || !doodlesOn() || !row) return;
                     try {
                         Object composer = p.args[6];
                         boolean selected = Boolean.TRUE.equals(readState.invoke(selectedState));
                         if (spacer != null && width != null) spacer.invoke(null, width.invoke(null, emptyModifier, 4f), composer);
                         toolButton.invoke(null, ICON_ID, click(), selected, emptyModifier, composer, 0);
-                        logOnce("doodles button added after the pen", null);
                     } catch (Throwable error) { logOnce("doodles button could not be added", error); }
                 }
             });
@@ -393,7 +410,7 @@ final class ScreenshotEditor {
                     try {
                         Context c = app();
                         int id = c == null ? 0 : c.getResources().getIdentifier("edit_menu_icon_done_accessibility", "string", PACKAGE);
-                        if (id != 0 && c.getString(id).equals(p.args[0])) doneClick = p.args[2];
+                        if (id != 0 && c.getString(id).equals(p.args[0])) { doneClick = p.args[2]; doneSeen = android.os.SystemClock.uptimeMillis(); }
                     } catch (Throwable ignored) { }
                 }
             });
@@ -461,7 +478,6 @@ final class ScreenshotEditor {
             try {
                 int painters = 0;
                 for (Field f : Class.forName(caller, false, loader).getDeclaredFields()) if (f.getType() == painterClass) painters++;
-                logOnce("toolbar row told apart by shape (" + caller + ")", null);
                 return painters < 2;
             } catch (Throwable ignored) { }
         }
@@ -469,9 +485,12 @@ final class ScreenshotEditor {
         return false;
     }
 
+    static long openedAt;
     static void track(String key, boolean selected) {
         Boolean before = nativeSelected.put(key, selected);
-        if (selected && !Boolean.TRUE.equals(before) && DoodleOverlay.active()) {
+        if (!selected || !Boolean.FALSE.equals(before)) { if (selected && before == null) toolOnAt = android.os.SystemClock.uptimeMillis(); return; }
+        toolOnAt = android.os.SystemClock.uptimeMillis();
+        if (DoodleOverlay.active() && toolOnAt - openedAt > 700) {
             main.post(new Runnable() { public void run() { DoodleOverlay.leave(false); } });
         }
     }
@@ -500,9 +519,13 @@ final class ScreenshotEditor {
         return clickProxy;
     }
 
+    static long doneSeen, toolOnAt;
     static void closeNativeTool() {
         Object done = doneClick;
-        if (done == null || !anyNativeToolOn()) return;
+        openedAt = android.os.SystemClock.uptimeMillis();
+        if (done == null || !anyNativeToolOn() || doneSeen < toolOnAt) { doneClick = null; return; }
+        doneClick = null;
+        for (Map.Entry<String, Boolean> e : nativeSelected.entrySet()) e.setValue(Boolean.FALSE);
         try { sam(svfType).invoke(done); } catch (Throwable error) { logOnce("native tool could not be closed", error); }
     }
 
@@ -514,13 +537,11 @@ final class ScreenshotEditor {
         Class<?> area = StudioNames.cls("area", cl);
         rendererCanvas = fieldOfType(renderer, area);
         canvasMatrix = method(area, StudioNames.m("area.matrix"));
-        Field export = null;
-        try { export = fieldOfType(config, boolean.class); } catch (Throwable onlyForTheLog) { }
-        final Field toExport = export;
         Xp.hookMethod(method(renderer, StudioNames.m("renderer.picture"), config), new Xp.Callback() {
             @Override protected void afterHookedMethod(Xp.Param p) {
+                if (!(p.getResult() instanceof Picture) || !DoodleOverlay.hasShapes(p.thisObject)) return;
                 List<Doodle> shapes = DoodleOverlay.snapshot(p.thisObject);
-                if (shapes.isEmpty() || !(p.getResult() instanceof Picture)) return;
+                if (shapes.isEmpty()) return;
                 try {
                     Picture original = (Picture) p.getResult();
                     Picture out = new Picture();
@@ -533,12 +554,18 @@ final class ScreenshotEditor {
                     canvas.restoreToCount(save);
                     out.endRecording();
                     p.setResult(out);
-                    if (toExport != null && toExport.getBoolean(p.args[0])) Module.log("screenshot-editor: " + shapes.size() + " doodles saved into the image");
                 } catch (Throwable error) { logOnce("doodles could not be drawn into the image", error); }
             }
         });
         Xp.hookAllConstructors(view, new Xp.Callback() {
-            @Override protected void afterHookedMethod(Xp.Param p) { canvasView = new WeakReference<View>((View) p.thisObject); }
+            @Override protected void afterHookedMethod(Xp.Param p) {
+                canvasView = new WeakReference<View>((View) p.thisObject);
+                main.postDelayed(new Runnable() { public void run() {
+                    if (!DoodleOverlay.active() || !DoodleOverlay.studioCanvasGone()) return;
+                    DoodleOverlay.leave(false);
+                    if (android.os.SystemClock.uptimeMillis() - openedAt < 1500) main.post(new Runnable() { public void run() { if (!DoodleOverlay.active()) DoodleOverlay.enter(); } });
+                } }, 300);
+            }
         });
     }
 

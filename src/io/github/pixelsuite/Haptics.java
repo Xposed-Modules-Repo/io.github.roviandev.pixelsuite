@@ -7,41 +7,36 @@ import java.lang.reflect.Method;
 
 final class Haptics {
     private static final int EFFECT_CLICK = 0;
+    private static final int EFFECT_TICK = 2;
 
-    private static volatile Object sClick;
+    private static volatile Object sClick, sTick;
     private static volatile Method sVibrate;
     private static volatile boolean sResolved;
 
     private Haptics() {}
 
     static void click(Context ctx) {
+        play(ctx, true, 30L);
+    }
+
+    static void tick(Context ctx) {
+        play(ctx, false, 12L);
+    }
+
+    private static void play(Context ctx, boolean click, long fallbackMs) {
         try {
             Vibrator v = (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
             if (v == null || !v.hasVibrator()) return;
             resolve();
-            Object click = sClick;
+            Object effect = click ? sClick : sTick;
             Method vibrate = sVibrate;
-            if (click != null && vibrate != null) {
+            if (effect != null && vibrate != null) {
                 try {
-                    vibrate.invoke(v, click);
+                    vibrate.invoke(v, effect);
                     return;
                 } catch (Throwable ignored) { }
             }
-            v.vibrate(30L);
-        } catch (Throwable ignored) { }
-    }
-
-    static void tick(Context ctx) {
-        try {
-            Vibrator v = (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
-            if (v == null || !v.hasVibrator()) return;
-            try {
-                Class<?> effect = Class.forName("android.os.VibrationEffect");
-                Object tick = effect.getMethod("createPredefined", int.class).invoke(null, 2);
-                Vibrator.class.getMethod("vibrate", effect).invoke(v, tick);
-                return;
-            } catch (Throwable ignored) { }
-            v.vibrate(12L);
+            v.vibrate(fallbackMs);
         } catch (Throwable ignored) { }
     }
 
@@ -49,10 +44,13 @@ final class Haptics {
         if (sResolved) return;
         try {
             Class<?> effect = Class.forName("android.os.VibrationEffect");
-            sClick = effect.getMethod("createPredefined", int.class).invoke(null, EFFECT_CLICK);
+            Method create = effect.getMethod("createPredefined", int.class);
+            sClick = create.invoke(null, EFFECT_CLICK);
+            sTick = create.invoke(null, EFFECT_TICK);
             sVibrate = Vibrator.class.getMethod("vibrate", effect);
         } catch (Throwable ignored) {
             sClick = null;
+            sTick = null;
             sVibrate = null;
         }
         sResolved = true;

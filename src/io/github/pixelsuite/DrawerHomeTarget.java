@@ -2,13 +2,11 @@ package io.github.pixelsuite;
 import android.app.Activity;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
-import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
-import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -17,7 +15,7 @@ final class DrawerHomeTarget {
     static Activity owner;
     static LinearLayout pill;
     static GradientDrawable background;
-    static int savedFlags,hover=-1;
+    static int hover=-1;
     static boolean intro;
     static final Rect bounds=new Rect();
     static final int[] position=new int[2],origin=new int[2];
@@ -76,9 +74,8 @@ final class DrawerHomeTarget {
         layer.addView(view,(ViewGroup.LayoutParams)params);
     }
     private static void animateIn(final View view,int height,final boolean first){
-        Activity a=LauncherFeatures.activity.get();
-        view.setAlpha(0);view.setTranslationY(-height-FrostedSurface.dp(a,26));view.setScaleX(.96f);view.setScaleY(.96f);
-        view.animate().translationY(0).scaleX(1).scaleY(1).alpha(1).setDuration(260).setStartDelay(first?0:40).setInterpolator(new OvershootInterpolator(.65f)).withEndAction(new Runnable(){public void run(){if(first&&pill==view){intro=false;motion();}}}).start();
+        view.setTranslationY(0);
+        Balloon.inflate(view,first?0:45,new Runnable(){public void run(){if(first&&pill==view){intro=false;motion();}}});
     }
     static boolean updateRemove(int x,int y,ViewGroup layer){
         LinearLayout view=removePill;if(view==null){overRemove=false;return false;}
@@ -105,8 +102,8 @@ final class DrawerHomeTarget {
     static void release(){if(!DrawerDrag.active())hide();}
     static void hide(){
         final LinearLayout second=removePill;removePill=null;removeBackground=null;removeHover=0;overRemove=false;
-        if(second!=null){second.animate().cancel();second.animate().alpha(0).translationY(-FrostedSurface.dp(second.getContext(),12)).setDuration(120).withEndAction(new Runnable(){public void run(){if(second.getParent() instanceof ViewGroup)((ViewGroup)second.getParent()).removeView(second);}}).start();}
-        final LinearLayout old=pill;final Activity a=owner;pill=null;owner=null;background=null;hover=-1;intro=false;
-        if(old!=null){old.animate().cancel();old.animate().alpha(0).translationY(-FrostedSurface.dp(old.getContext(),12)).setDuration(120).withEndAction(new Runnable(){public void run(){if(old.getParent() instanceof ViewGroup)((ViewGroup)old.getParent()).removeView(old);}}).start();}
+        if(second!=null)Balloon.deflate(second,0,new Runnable(){public void run(){if(second.getParent() instanceof ViewGroup)((ViewGroup)second.getParent()).removeView(second);}});
+        final LinearLayout old=pill;pill=null;owner=null;background=null;hover=-1;intro=false;
+        if(old!=null)Balloon.deflate(old,25,new Runnable(){public void run(){if(old.getParent() instanceof ViewGroup)((ViewGroup)old.getParent()).removeView(old);}});
     }
 }

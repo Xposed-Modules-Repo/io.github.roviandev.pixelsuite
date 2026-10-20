@@ -73,6 +73,7 @@ final class DrawerPopupLayout {
         scroll.setOutlineProvider(android.view.ViewOutlineProvider.BOUNDS);scroll.setClipToOutline(true);
         scroll.setTag(wrapper);scroll.setFillViewport(false);scroll.setHorizontalScrollBarEnabled(false);
         scroll.setVerticalScrollBarEnabled(false);scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setVerticalFadingEdgeEnabled(true);scroll.setFadingEdgeLength(FrostedSurface.dp(popup.getContext(),28));
         scroll.addView(content,new ScrollView.LayoutParams(width,-2));
         popup.addView(scroll,new LinearLayout.LayoutParams(width,-2));
         Xp.setAdditionalInstanceField(popup,"pixelsuite_compact_menu",Boolean.TRUE);
@@ -122,10 +123,7 @@ final class DrawerPopupLayout {
                 if(held!=null&&held.isAttachedToWindow()&&held.getWidth()>0){
                     int[] a=new int[2],o=new int[2];held.getLocationOnScreen(a);layer.getLocationOnScreen(o);
                     Rect r=new Rect(a[0]-o[0],a[1]-o[1],a[0]-o[0]+Math.round(held.getWidth()*held.getScaleX()*scaleOf(held)),a[1]-o[1]+Math.round(held.getHeight()*held.getScaleY()*scaleOf(held)));
-                    if(!r.isEmpty()){
-                        if(icon!=null&&icon!=held)LauncherFeatures.logOnce("Drawer folder menu: originalView differs from the held icon",new IllegalStateException(String.valueOf(icon.getClass().getName())));
-                        return r;
-                    }
+                    if(!r.isEmpty())return r;
                 }
             }
             if(icon==null||!icon.isAttachedToWindow())return null;

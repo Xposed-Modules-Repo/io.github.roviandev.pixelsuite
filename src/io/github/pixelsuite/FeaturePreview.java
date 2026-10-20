@@ -15,6 +15,7 @@ import android.view.accessibility.AccessibilityManager;
 final class FeaturePreview extends View implements ViewTreeObserver.OnPreDrawListener {
     private static final int ACTION=0,HOLD=1,RESET=2,START=3;
     private static final long HOLD_MS=1100,RESET_MS=240,START_MS=220;
+    private static final android.view.animation.LinearInterpolator LINEAR=new android.view.animation.LinearInterpolator();
     private final PreviewScenes scenes;
     private final PreviewIcons icons;
     private final Rect visible=new Rect();
@@ -57,7 +58,7 @@ final class FeaturePreview extends View implements ViewTreeObserver.OnPreDrawLis
     private void animate(final boolean transition){
         float from=transition?reset:progress;
         animator=ValueAnimator.ofFloat(from,1f);animator.setDuration(Math.max(1,(long)((transition?RESET_MS:scenes.duration())*(1-from))));
-        animator.setInterpolator(new android.view.animation.LinearInterpolator());
+        animator.setInterpolator(LINEAR);
         animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener(){public void onAnimationUpdate(ValueAnimator a){if(transition)reset=(Float)a.getAnimatedValue();else progress=(Float)a.getAnimatedValue();invalidate();}});
         animator.addListener(new AnimatorListenerAdapter(){boolean cancelled;
             @Override public void onAnimationCancel(Animator a){cancelled=true;}

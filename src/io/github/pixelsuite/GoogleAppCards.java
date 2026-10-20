@@ -29,11 +29,12 @@ final class GoogleAppCards {
         int id=label?labelId:iconId;return id!=0&&view.getId()==id;
     }
     static org.json.JSONObject entry(String text){
-        GoogleAliases.reload();Context c=GoogleAliases.context();if(c==null)return null;
-        long serial=((UserManager)c.getSystemService(Context.USER_SERVICE)).getSerialNumberForUser(android.os.Process.myUserHandle());
-        org.json.JSONObject match=null;Iterator<String> keys=GoogleAliases.aliases.keys();
+        GoogleAliases.reload();org.json.JSONObject map=GoogleAliases.aliases;if(map.length()==0)return null;
+        Context c=GoogleAliases.context();if(c==null)return null;
+        long serial=GoogleAliases.serial(c,android.os.Process.myUserHandle());
+        org.json.JSONObject match=null;Iterator<String> keys=map.keys();
         while(keys.hasNext()){
-            org.json.JSONObject e=GoogleAliases.aliases.optJSONObject(keys.next());if(e==null||e.optLong("user",-1)!=serial||!e.has("uniqueOriginal"))continue;
+            org.json.JSONObject e=map.optJSONObject(keys.next());if(e==null||e.optLong("user",-1)!=serial||!e.has("uniqueOriginal"))continue;
             if(!text.equals(e.optString("uniqueOriginal"))&&!text.equals(e.optString("alias")))continue;
             if(match!=null)return null;match=e;
         }
@@ -58,17 +59,19 @@ final class GoogleAppCards {
             else load(hash);
         }finally{writing.remove();}
     }
+    static final java.util.regex.Pattern HASH=java.util.regex.Pattern.compile("[a-f0-9]{64}");
+    static volatile boolean loggedIcon;
     static void load(final String hash){
-        if(!hash.matches("[a-f0-9]{64}"))return;synchronized(pending){if(!pending.add(hash))return;}
+        if(!HASH.matcher(hash).matches())return;synchronized(pending){if(!pending.add(hash))return;}
         IO.execute(new Runnable(){public void run(){try{
             Context c=GoogleAliases.context();if(c==null)return;Bitmap image;
             try(java.io.InputStream in=c.getContentResolver().openInputStream(AliasProvider.URI.buildUpon().appendPath("icons").appendPath(hash).build())){image=BitmapFactory.decodeStream(in);}
             if(image!=null&&image.getWidth()<=256&&image.getHeight()<=256)images.put(hash,image);
-        }catch(Throwable error){Module.log("Google app icon unavailable",error);}finally{synchronized(pending){pending.remove(hash);}if(images.get(hash)!=null)changed();}}});
+        }catch(Throwable error){if(!loggedIcon){loggedIcon=true;Module.log("Google app icon unavailable",error);}}finally{synchronized(pending){pending.remove(hash);}if(images.get(hash)!=null)changed();}}});
     }
     static void install(){
-        Xp.hookAllMethods(TextView.class,"setText",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){
-            if(Boolean.TRUE.equals(writing.get())||p.args.length!=2||!(p.args[0] instanceof CharSequence)||!(p.args[1] instanceof TextView.BufferType))return;
+        Xp.findAndHookMethod(TextView.class,"setText",CharSequence.class,TextView.BufferType.class,new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){
+            if(p.args.length!=2||!(p.args[0] instanceof CharSequence)||!(p.args[1] instanceof TextView.BufferType)||Boolean.TRUE.equals(writing.get()))return;
             TextView view=(TextView)p.thisObject;if(!target(view,true))return;
             String original=p.args[0].toString();org.json.JSONObject entry=entry(original);Card card=cards.get(view);if(card==null){card=new Card();cards.put(view,card);}
             card.original=entry==null?original:entry.optString("uniqueOriginal",original);

@@ -97,7 +97,6 @@ final class FilesSort {
     private static final String SORT_COLUMNS = "android:query-arg-sort-columns";
     private static final String SORT_DIRECTION = "android:query-arg-sort-direction";
     private static final String SORT_COLLATION = "android:query-arg-sort-collation";
-    private static volatile boolean sLoggedQuery;
 
     static android.os.Bundle newestFirst(android.net.Uri uri, String[] projection, android.os.Bundle in) {
         if (in == null || !"media".equals(uri.getAuthority())) return null;
@@ -114,7 +113,6 @@ final class FilesSort {
         out.remove(SORT_COLUMNS); out.remove(SORT_DIRECTION); out.remove(SORT_COLLATION);
         out.remove("android:query-arg-sort-locale");
         out.putString(SQL_ORDER, order);
-        if (!sLoggedQuery) { sLoggedQuery = true; Module.log("files-sort: supported media listings sorted newest first"); }
         return out;
     }
 
@@ -254,6 +252,7 @@ final class FilesSort {
         Object hit = sLearned.get(type);
         if (hit == NO_ACCESSOR) return null;
         if (hit instanceof Accessor) return (Accessor) hit;
+        if (list.size() < 3) return null;
         List<Object> sample = new java.util.ArrayList<Object>();
         for (Object o : list) { if (o != null && o.getClass() == type) sample.add(o); if (sample.size() >= 24) break; }
         if (sample.size() < 3) return null;
@@ -307,7 +306,6 @@ final class FilesSort {
         if (chosen == null) for (Field f : all) if (f.getName().toLowerCase(java.util.Locale.ROOT).contains("modif")) { chosen = f; break; }
         if (chosen == null) return null;
         final Field time = chosen, file = path; final boolean seconds = secs.contains(chosen);
-        Module.log("files-sort: learned " + type.getName() + "." + time.getName() + (seconds ? " (s)" : " (ms)") + " as modified time");
         return new Accessor() {
             long lastModified(Object o) { try { long v = time.getLong(o); return seconds ? v * 1000 : v; } catch (Throwable t) { return 0L; } }
             File file(Object o) { try { Object p = file.get(o); return p instanceof String ? new File((String) p) : null; } catch (Throwable t) { return null; } }

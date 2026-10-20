@@ -14,6 +14,7 @@ final class Feature {
     static final String FILES_SORT = "pixelsuite_files_sort";
     static final String SCREENSHOT_FREE_CROP = "pixelsuite_screenshot_free_crop";
     static final String SCREENSHOT_DOODLES = "pixelsuite_screenshot_doodles";
+    static final String PHOTOS_DOODLES = "pixelsuite_photos_doodles";
     static final String TAP_CHECK = "pixelsuite_tap_check";
     static final String DOUBLE_TAP_WAKE = "pixelsuite_double_tap_wake";
     static final String LOCK_SHORTCUTS = "pixelsuite_lockscreen_shortcuts";
@@ -22,9 +23,10 @@ final class Feature {
 
     static int defaultFor(String key) {
         if(LauncherFeatures.LABEL_LEVEL.equals(key))return 2;
+        if(SurfaceStyle.KEY.equals(key))return SurfaceStyle.FROSTED;
         if(LauncherFeatures.GRID_SIZE.equals(key)||LauncherFeatures.DRAWER_GRID_SIZE.equals(key))return 3;
-        return (SuperDark.KEY.equals(key) || LauncherFeatures.LABEL_SIZE.equals(key) || LauncherFeatures.HIDE_SHORTCUTS.equals(key) || LauncherFeatures.GRID.equals(key) || LauncherFeatures.DRAWER.equals(key) || LauncherFeatures.RENAME.equals(key) || LauncherFeatures.DRAG_PILL.equals(key) || LauncherFeatures.ICONS.equals(key) || FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
-                || LOCK_SHORTCUTS.equals(key)) ? 0 : 1;
+        return (LauncherFeatures.LABEL_SIZE.equals(key) || LauncherFeatures.HIDE_SHORTCUTS.equals(key) || LauncherFeatures.GRID.equals(key) || LauncherFeatures.DRAWER.equals(key) || LauncherFeatures.RENAME.equals(key) || LauncherFeatures.DRAG_PILL.equals(key) || LauncherFeatures.ICONS.equals(key) || FLASHLIGHT.equals(key) || DOUBLE_TAP_WAKE.equals(key)
+                || LOCK_SHORTCUTS.equals(key) || SuperDark.KEY.equals(key)) ? 0 : 1;
     }
 
     static boolean on(Context ctx, String key) {

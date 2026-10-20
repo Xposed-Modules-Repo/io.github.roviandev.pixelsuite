@@ -46,15 +46,47 @@ final class DoodleOverlay extends FrameLayout {
     static boolean sFill;
     static float sPanelShift;
 
+    interface Host {
+        Object key();
+        Bridge.Space space(View overlay);
+        void picture();
+        void selected(boolean on);
+        void history();
+        boolean drawsShapes();
+        void outside(float rawX, float rawY);
+        RectF[] slots(View overlay);
+        boolean fixed();
+        boolean editorTouch(Bridge.Space s, float x, float y);
+    }
+
+    static final class StudioHost implements Host {
+        final View canvas; final Object renderer;
+        StudioHost(View canvas) throws Exception { this.canvas = canvas; renderer = Bridge.renderer(canvas); }
+        public Object key() { return renderer; }
+        public Bridge.Space space(View overlay) { return Bridge.space(canvas, overlay); }
+        public void picture() { canvas.invalidate(); }
+        public void selected(boolean on) { ScreenshotEditor.setSelected(on); }
+        public void history() { ScreenshotEditor.doodleHistoryChanged(); }
+        public boolean drawsShapes() { return true; }
+        public void outside(float rawX, float rawY) { }
+        public RectF[] slots(View overlay) { return null; }
+        public boolean fixed() { return false; }
+        public boolean editorTouch(Bridge.Space s, float x, float y) { return false; }
+    }
+
+    static Host lastHost;
+
     final Activity activity;
-    final View canvasView;
+    final Host host;
     final Object renderer;
     final List<Doodle> shapes;
     Doodle selected;
     final Layer layer;
     final FrameLayout panel;
     final float density;
-    final int surface, onSurface, onSurfaceVariant, accent, onAccent, outline;
+    int surface;
+    final int onSurface, onSurfaceVariant, accent, onAccent, outline;
+    boolean superDark;
     float toolbarTopRaw;
     Object backCallback;
     final List<ImageView> shapeButtons = new ArrayList<ImageView>(), colorButtons = new ArrayList<ImageView>();
@@ -66,6 +98,13 @@ final class DoodleOverlay extends FrameLayout {
         return o != null && o.isAttachedToWindow();
     }
 
+    static boolean studioCanvasGone() {
+        DoodleOverlay o = current.get();
+        return o != null && o.host instanceof StudioHost && !((StudioHost) o.host).canvas.isAttachedToWindow();
+    }
+
+    static void redraw() { DoodleOverlay o = current.get(); if (o != null && o.isAttachedToWindow()) o.layer.invalidate(); }
+
     static void toggle() {
         if (active()) leave(true); else enter();
     }
@@ -76,33 +115,38 @@ final class DoodleOverlay extends FrameLayout {
         if (a == null || canvas == null) { ScreenshotEditor.logOnce("doodles: editor canvas not found", null); return; }
         try {
             ScreenshotEditor.closeNativeTool();
-            sKind = Doodle.ARROW;
-            DoodleOverlay o = new DoodleOverlay(a, canvas, ScreenshotEditor.lastDownRawY);
-            ViewGroup content = (ViewGroup) a.findViewById(android.R.id.content);
-            content.addView(o, new ViewGroup.LayoutParams(-1, -1));
-            current = new WeakReference<DoodleOverlay>(o);
-            o.registerBack(true);
-            ScreenshotEditor.setSelected(true);
-            Module.log("screenshot-editor: doodles opened");
+            open(a, new StudioHost(canvas), ScreenshotEditor.lastDownRawY);
         } catch (Throwable error) {
             ScreenshotEditor.logOnce("doodles could not open", error);
         }
     }
 
+    static DoodleOverlay open(Activity a, Host host, float toolbarRawY) throws Exception {
+        sKind = Doodle.ARROW;
+        DoodleOverlay old = current.get();
+        if (old != null) { old.registerBack(false); if (old.getParent() instanceof ViewGroup) ((ViewGroup) old.getParent()).removeView(old); }
+        DoodleOverlay o = new DoodleOverlay(a, host, toolbarRawY);
+        ViewGroup content = (ViewGroup) a.findViewById(android.R.id.content);
+        content.addView(o, new ViewGroup.LayoutParams(-1, -1));
+        current = new WeakReference<DoodleOverlay>(o);
+        o.registerBack(true);
+        host.selected(true);
+        if (host.fixed()) o.motion(true, null);
+        return o;
+    }
+
     static void leave(boolean fromButton) {
         final DoodleOverlay o = current.get();
         current = new WeakReference<DoodleOverlay>(null);
-        ScreenshotEditor.setSelected(false);
+        if (o != null) o.host.selected(false); else if (lastHost != null) lastHost.selected(false);
         if (o == null) return;
         o.selected = null;
         o.refresh();
         o.registerBack(false);
         o.setEnabled(false);
-        o.stopFling();
-        if(o.widthAnim!=null){o.widthAnim.cancel();o.widthAnim=null;}
-        o.animate().alpha(0f).setDuration(140).withEndAction(new Runnable() { public void run() {
-            if (o.getParent() instanceof ViewGroup) ((ViewGroup) o.getParent()).removeView(o);
-        }}).start();
+        final Runnable gone = new Runnable() { public void run() { if (o.getParent() instanceof ViewGroup) ((ViewGroup) o.getParent()).removeView(o); } };
+        if (o.host.fixed()) { o.leaving = true; o.layer.invalidate(); o.motion(false, gone); return; }
+        o.animate().alpha(0f).setDuration(140).withEndAction(gone).start();
     }
 
     static List<Doodle> snapshot(Object renderer) {
@@ -113,6 +157,10 @@ final class DoodleOverlay extends FrameLayout {
             for (Doodle d : list) copy.add(d.copy());
             return copy;
         }
+    }
+
+    static boolean hasShapes(Object renderer) {
+        synchronized (models) { List<Doodle> l = models.get(renderer); return l != null && !l.isEmpty(); }
     }
 
     static List<Doodle> model(Object renderer) {
@@ -128,6 +176,10 @@ final class DoodleOverlay extends FrameLayout {
     }
     static final Map<Object, History> histories = new WeakHashMap<Object, History>();
     static WeakReference<Object> lastRenderer = new WeakReference<Object>(null);
+
+    static void forget(Object key) {
+        synchronized (models) { models.remove(key); histories.remove(key); }
+    }
 
     static History history(Object renderer) {
         synchronized (models) {
@@ -151,7 +203,7 @@ final class DoodleOverlay extends FrameLayout {
             if (h.undo.size() > 100) h.undo.remove(0);
             h.redo.clear();
         }
-        ScreenshotEditor.doodleHistoryChanged();
+        if (lastHost != null) lastHost.history();
     }
 
     static boolean canUndo() {
@@ -166,8 +218,7 @@ final class DoodleOverlay extends FrameLayout {
     }
     static boolean hasShapes() {
         Object r = lastRenderer.get();
-        if (r == null) return false;
-        synchronized (models) { List<Doodle> l = models.get(r); return l != null && !l.isEmpty(); }
+        return r != null && hasShapes(r);
     }
 
     static boolean undo() { return step(true); }
@@ -188,12 +239,8 @@ final class DoodleOverlay extends FrameLayout {
         }
         DoodleOverlay o = current.get();
         if (o != null && o.isAttachedToWindow() && o.renderer == r) { o.selected = null; o.refresh(); o.syncPanel(); }
-        else {
-            Activity a = ScreenshotEditor.activity();
-            View canvas = a == null ? null : ScreenshotEditor.canvasFor(a);
-            if (canvas != null) canvas.invalidate();
-        }
-        ScreenshotEditor.doodleHistoryChanged();
+        else if (lastHost != null) lastHost.picture();
+        if (lastHost != null) lastHost.history();
         return true;
     }
 
@@ -207,16 +254,20 @@ final class DoodleOverlay extends FrameLayout {
         return (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
     }
 
-    DoodleOverlay(Activity a, View canvas, float toolbarRawY) throws Exception {
+    DoodleOverlay(Activity a, Host host, float toolbarRawY) throws Exception {
         super(a);
         activity = a;
-        canvasView = canvas;
-        renderer = Bridge.renderer(canvas);
+        this.host = host;
+        lastHost = host;
+        renderer = host.key();
         lastRenderer = new WeakReference<Object>(renderer);
         shapes = model(renderer);
         density = a.getResources().getDisplayMetrics().density;
-        boolean dark = dark(a);
+        boolean dark = dark(a) || host.fixed();
         surface = system(a, dark ? "system_surface_container_high_dark" : "system_surface_container_high_light", dark ? 0xff2b2930 : 0xffece6f0);
+        superDark = host.fixed() || (dark && SuperDark.inEffect(a));
+        if (superDark) surface = 0xff000000;
+        else if (dark) surface = ComposeFrost.toolbarColour != 0 ? ComposeFrost.toolbarColour : 0xff1f1f21;
         onSurface = system(a, dark ? "system_on_surface_dark" : "system_on_surface_light", dark ? 0xffe6e0e9 : 0xff1d1b20);
         onSurfaceVariant = system(a, dark ? "system_on_surface_variant_dark" : "system_on_surface_variant_light", dark ? 0xffcac4d0 : 0xff49454f);
         accent = system(a, dark ? "system_accent1_200" : "system_accent1_600", dark ? 0xffd0bcff : 0xff6750a4);
@@ -233,6 +284,7 @@ final class DoodleOverlay extends FrameLayout {
     }
 
     int dp(float v) { return Math.round(v * density); }
+    static int dpOf(Context c, float v) { return Math.round(v * c.getResources().getDisplayMetrics().density); }
 
     @Override public boolean dispatchTouchEvent(MotionEvent e) { return isEnabled() && super.dispatchTouchEvent(e); }
 
@@ -252,6 +304,12 @@ final class DoodleOverlay extends FrameLayout {
         placePanel();
     }
 
+    @Override protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        registerBack(false);
+        if (current.get() == this) { current = new WeakReference<DoodleOverlay>(null); try { host.selected(false); } catch (Throwable ignored) { } }
+    }
+
     void registerBack(boolean on) {
         try {
             Object dispatcher = Activity.class.getMethod("getOnBackInvokedDispatcher").invoke(activity);
@@ -260,7 +318,18 @@ final class DoodleOverlay extends FrameLayout {
             if (on) {
                 backCallback = java.lang.reflect.Proxy.newProxyInstance(callbackType.getClassLoader(), new Class<?>[]{callbackType}, new java.lang.reflect.InvocationHandler() {
                     public Object invoke(Object proxy, Method m, Object[] args) {
-                        if ("onBackInvoked".equals(m.getName())) leave(false);
+                        if ("onBackInvoked".equals(m.getName())) {
+                            if (current.get() == DoodleOverlay.this && isAttachedToWindow() && isShown() && getAlpha() > 0.05f) {
+                                boolean editorGone = host instanceof StudioHost && !((StudioHost) host).canvas.isAttachedToWindow();
+                                leave(false);
+                                if (editorGone) try { activity.onBackPressed(); } catch (Throwable ignored) { }
+                            }
+                            else {
+                                registerBack(false);
+                                if (current.get() == DoodleOverlay.this) leave(false);
+                                try { activity.onBackPressed(); } catch (Throwable ignored) { }
+                            }
+                        }
                         else if ("equals".equals(m.getName())) return proxy == args[0];
                         else if ("hashCode".equals(m.getName())) return System.identityHashCode(proxy);
                         return null;
@@ -277,7 +346,7 @@ final class DoodleOverlay extends FrameLayout {
     }
 
     void refresh() {
-        canvasView.invalidate();
+        host.picture();
         layer.invalidate();
     }
 
@@ -297,7 +366,7 @@ final class DoodleOverlay extends FrameLayout {
     }
 
     float widthInImage() {
-        Bridge.Space s = Bridge.space(canvasView, this);
+        Bridge.Space s = host.space(this);
         return sWidthDp * density / Math.max(0.0001f, s == null ? 1 : s.scale);
     }
 
@@ -310,7 +379,10 @@ final class DoodleOverlay extends FrameLayout {
         float[] pinchMid = new float[2];
         Doodle pinchFrom;
         final int slop;
+        Doodle free;
+        boolean snapX, snapY, snapLevel, snapUpright;
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final DashPathEffect guideDash = new DashPathEffect(new float[]{dp(4), dp(4)}, 0), outlineDash = new DashPathEffect(new float[]{dp(6), dp(4)}, 0);
 
         Layer(Context c) { super(c); slop = ViewConfiguration.get(c).getScaledTouchSlop(); }
 
@@ -331,10 +403,7 @@ final class DoodleOverlay extends FrameLayout {
             if (grabberNear(x + me[0], y + me[1]) != null) return true;
             if (selected != null && Doodle.handleAt(selected.isLine(), screen(selected, s), x, y, dp(26)) >= 0) return true;
             RectF area = new RectF(s.image.left - dp(24), s.image.top - dp(8), s.image.right + dp(24), s.image.bottom + dp(24));
-            if (toolbarTopRaw > 0) {
-                int[] at = new int[2]; getLocationOnScreen(at);
-                area.bottom = Math.min(area.bottom, toolbarTopRaw - at[1]);
-            }
+            if (toolbarTopRaw > 0) area.bottom = Math.min(area.bottom, toolbarTopRaw - me[1]);
             return area.contains(x, y);
         }
 
@@ -357,15 +426,15 @@ final class DoodleOverlay extends FrameLayout {
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) grabbing = null;
                 return grab(pill, e);
             }
-            Bridge.Space s = Bridge.space(canvasView, DoodleOverlay.this);
-            if (s == null) return false;
+            Bridge.Space s = host.space(DoodleOverlay.this);
+            if (s == null) { if (e.getActionMasked() == MotionEvent.ACTION_DOWN) host.outside(e.getRawX(), e.getRawY()); return false; }
             float x = e.getX(), y = e.getY();
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN: {
-                    if (!ours(s, x, y)) return false;
+                    if (!ours(s, x, y)) { host.outside(e.getRawX(), e.getRawY()); return false; }
                     downX = lastX = x; downY = lastY = y;
                     hadSelection = selected != null;
-                    saved = false;
+                    saved = false; free = null; snapX = snapY = snapLevel = snapUpright = false;
                     handle = selected == null ? -1 : Doodle.handleAt(selected.isLine(), screen(selected, s), x, y, dp(26));
                     if (handle >= 0) { mode = HANDLE; return true; }
                     Doodle d = hit(s, x, y);
@@ -373,6 +442,7 @@ final class DoodleOverlay extends FrameLayout {
                         if (d != selected) { selected = d; syncPanel(); performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); }
                         mode = MOVE; invalidate(); return true;
                     }
+                    if (host.editorTouch(s, x, y)) return false;
                     mode = PENDING;
                     return true;
                 }
@@ -397,14 +467,17 @@ final class DoodleOverlay extends FrameLayout {
                     }
                     if ((mode == MOVE || mode == HANDLE) && !saved && Math.hypot(x - downX, y - downY) > slop / 2f) { checkpoint(); saved = true; dim(true); }
                     if (mode == CREATE) {
-                        float[] b = image(s, x, y);
+                        float[] b = selected.isLine() ? level(s, selected.x1, selected.y1, x, y) : image(s, x, y);
                         synchronized (models) { selected.x2 = b[0]; selected.y2 = b[1]; }
                     } else if (mode == MOVE && selected != null && saved) {
                         float[] a = image(s, lastX, lastY), b = image(s, x, y);
-                        synchronized (models) { selected.offset(b[0] - a[0], b[1] - a[1]); }
+                        if (free == null) free = selected.copy();
+                        free.offset(b[0] - a[0], b[1] - a[1]);
+                        float[] snap = centre(s, free);
+                        synchronized (models) { selected.x1 = free.x1 + snap[0]; selected.y1 = free.y1 + snap[1]; selected.x2 = free.x2 + snap[0]; selected.y2 = free.y2 + snap[1]; }
                     } else if (mode == HANDLE && selected != null && saved) {
                         if (selected.isLine()) {
-                            float[] b = image(s, x, y);
+                            float[] b = handle == 0 ? level(s, selected.x2, selected.y2, x, y) : level(s, selected.x1, selected.y1, x, y);
                             synchronized (models) { if (handle == 0) { selected.x1 = b[0]; selected.y1 = b[1]; } else { selected.x2 = b[0]; selected.y2 = b[1]; } }
                         } else {
                             float[] box = Doodle.dragBoxHandle(screen(selected, s), handle, x, y);
@@ -422,6 +495,7 @@ final class DoodleOverlay extends FrameLayout {
                         }
                     }
                     lastX = x; lastY = y;
+                    if (mode == PENDING || mode == NONE || ((mode == MOVE || mode == HANDLE) && !saved)) return true;
                     refresh();
                     return true;
                 }
@@ -443,15 +517,41 @@ final class DoodleOverlay extends FrameLayout {
                         }
                         syncPanel();
                     }
-                    mode = NONE; dim(false);
+                    mode = NONE; dim(false); free = null; snapX = snapY = snapLevel = snapUpright = false;
                     refresh();
                     return true;
                 case MotionEvent.ACTION_CANCEL:
-                    mode = NONE; dim(false); refresh();
+                    mode = NONE; dim(false); free = null; snapX = snapY = snapLevel = snapUpright = false; refresh();
                     return true;
             }
             return true;
         }
+
+        float[] centre(Bridge.Space s, Doodle d) {
+            float[] c = {(d.x1 + d.x2) / 2f, (d.y1 + d.y2) / 2f};
+            s.toScreen.mapPoints(c);
+            float cx = s.image.centerX(), cy = s.image.centerY(), near = dp(10);
+            boolean x = Math.abs(c[0] - cx) < near, y = Math.abs(c[1] - cy) < near;
+            if ((x && !snapX) || (y && !snapY)) tick();
+            snapX = x; snapY = y;
+            float[] to = {x ? cx : c[0], y ? cy : c[1]}, from = {c[0], c[1]};
+            s.toImage.mapPoints(to); s.toImage.mapPoints(from);
+            return new float[]{to[0] - from[0], to[1] - from[1]};
+        }
+
+        float[] level(Bridge.Space s, float fixedX, float fixedY, float x, float y) {
+            float[] f = {fixedX, fixedY}; s.toScreen.mapPoints(f);
+            float dx = x - f[0], dy = y - f[1];
+            double angle = Math.toDegrees(Math.atan2(Math.abs(dy), Math.abs(dx)));
+            boolean far = Math.hypot(dx, dy) > dp(24);
+            boolean lv = far && angle < 6, up = far && angle > 84;
+            if ((lv && !snapLevel) || (up && !snapUpright)) tick();
+            snapLevel = lv; snapUpright = up;
+            if (lv) y = f[1]; else if (up) x = f[0];
+            return image(s, x, y);
+        }
+
+        void tick() { performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); }
 
         float spacing(MotionEvent e) {
             return (float) Math.hypot(e.getX(0) - e.getX(1), e.getY(0) - e.getY(1));
@@ -475,19 +575,31 @@ final class DoodleOverlay extends FrameLayout {
         }
 
         @Override protected void onDraw(Canvas canvas) {
+            Bridge.Space s = null; boolean placed = false;
+            if (!host.drawsShapes() && !leaving) { s = host.space(DoodleOverlay.this); placed = true; drawShapes(canvas, s, shapes); }
             Doodle d = selected;
             if (d == null) return;
+            if (mode == MOVE && (snapX || snapY)) {
+                if (!placed) { s = host.space(DoodleOverlay.this); placed = true; }
+                if (s != null) {
+                    paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(dp(1)); paint.setColor(accent); paint.setAlpha(0xb0);
+                    paint.setPathEffect(guideDash);
+                    if (snapX) canvas.drawLine(s.image.centerX(), s.image.top, s.image.centerX(), s.image.bottom, paint);
+                    if (snapY) canvas.drawLine(s.image.left, s.image.centerY(), s.image.right, s.image.centerY(), paint);
+                    paint.setPathEffect(null);
+                }
+            }
             if (dragging()) { if (chrome != 0f) showChrome(false); return; }
             if (chrome <= 0.01f && (chromeAnim == null || !chromeAnim.isRunning())) { showChrome(true); return; }
             int alpha = Math.round(255 * chrome);
-            Bridge.Space s = Bridge.space(canvasView, DoodleOverlay.this);
+            if (!placed) s = host.space(DoodleOverlay.this);
             if (s == null) return;
             float[] p = screen(d, s);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(1.5f));
             paint.setColor(0xccffffff);
             paint.setAlpha(Math.round(0xcc * chrome));
-            paint.setPathEffect(new DashPathEffect(new float[]{dp(6), dp(4)}, 0));
+            paint.setPathEffect(outlineDash);
             if (d.isLine()) canvas.drawLine(p[0], p[1], p[2], p[3], paint);
             else canvas.drawRect(Math.min(p[0], p[2]), Math.min(p[1], p[3]), Math.max(p[0], p[2]), Math.max(p[1], p[3]), paint);
             paint.setPathEffect(null);
@@ -509,6 +621,19 @@ final class DoodleOverlay extends FrameLayout {
         }
     }
 
+    private static final Paint SHAPE_PAINT = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    static void drawShapes(Canvas canvas, Bridge.Space s, List<Doodle> list) {
+        if (s == null || list == null || list.isEmpty()) return;
+        List<Doodle> copy;
+        synchronized (models) { copy = copies(list); }
+        int save = canvas.save();
+        canvas.clipRect(s.image);
+        canvas.concat(s.toScreen);
+        for (Doodle d : copy) d.draw(canvas, SHAPE_PAINT);
+        canvas.restoreToCount(save);
+    }
+
     void dim(boolean busy) {
         panel.animate().alpha(busy ? 0f : 1f).setDuration(busy ? 80 : 160).start();
     }
@@ -523,7 +648,6 @@ final class DoodleOverlay extends FrameLayout {
     NoScroll shapeScroll, colorScroll;
     float progress;
     android.animation.ValueAnimator widthAnim;
-    android.view.VelocityTracker sideVelocity;
 
     final class NoScroll extends HorizontalScrollView {
         boolean scrollable;
@@ -533,18 +657,14 @@ final class DoodleOverlay extends FrameLayout {
     }
 
     int pad() { return dp(12); }
-    int grab() { return dp(24); }
+    int grab() { return host != null && host.fixed() ? 0 : dp(24); }
     int rowH() { return dp(40); }
-    int screenW() { return (getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels) - dp(16); }
-    int compactWidth() { return Math.min(dp(302), screenW()); }
-    int fullWidth() { return screenW(); }
+    int screenW() { return getResources().getDisplayMetrics().widthPixels - dp(16); }
+    int compactWidth() { return slotWidth > 0 ? slotWidth : Math.min(dp(302), screenW()); }
+    int fullWidth() { return slotWidth > 0 ? slotWidth : screenW(); }
     float colCompact() { return (compactWidth() - 2f * pad()) / (SHOWN + 1); }
     float colFull() { return (fullWidth() - 2f * pad() - grab()) / SHAPE_ORDER.length; }
-    float col(float p) {
-        float wanted = colCompact() + (colFull() - colCompact()) * p;
-        float fit = (fullWidth() - 2f * pad() - grab() * p) / (SHOWN + 1 + (SHAPE_ORDER.length - SHOWN - 1) * p);
-        return Math.min(wanted, fit);
-    }
+    float col(float p) { return colCompact() + (colFull() - colCompact()) * p; }
     int widthAt(float p) { return Math.round(2 * pad() + grab() * p + col(p) * (SHOWN + 1 + (SHAPE_ORDER.length - SHOWN - 1) * p)); }
 
     final class Dot extends Drawable {
@@ -567,12 +687,35 @@ final class DoodleOverlay extends FrameLayout {
         @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
     }
 
+    static final class Rim extends Drawable {
+        final float radius, width; final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG); int shaderH = -1;
+        Rim(float radius, float width) {
+            this.radius = radius; this.width = width;
+            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(width * 1.6f);
+            paint.setMaskFilter(new android.graphics.BlurMaskFilter(width * 1.4f, android.graphics.BlurMaskFilter.Blur.NORMAL));
+        }
+        @Override public void draw(Canvas canvas) {
+            android.graphics.Rect b = getBounds(); if (b.isEmpty()) return;
+            if (shaderH != b.height()) {
+                shaderH = b.height();
+                paint.setShader(new android.graphics.LinearGradient(0, b.top, 0, b.bottom,
+                        new int[]{0x30ffffff, 0x12ffffff, 0x0cffffff, 0x16ffffff}, new float[]{0f, 0.35f, 0.75f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+            }
+            float in = width * 0.5f;
+            canvas.drawRoundRect(b.left + in, b.top + in, b.right - in, b.bottom - in, radius - in, radius - in, paint);
+        }
+        @Override public void setAlpha(int alpha) { paint.setAlpha(alpha); }
+        @Override public void setColorFilter(ColorFilter filter) {}
+        @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
+    }
+
     FrameLayout buildPanel(final Context c) {
         FrameLayout shell = new FrameLayout(c);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(surface);
         bg.setCornerRadius(dp(28));
         shell.setBackground(bg);
+        if (superDark) shell.setForeground(new Rim(dp(28), dp(1.5f)));
         shell.setElevation(dp(6));
         shell.setClipToOutline(true);
         shell.setClickable(true);
@@ -605,7 +748,7 @@ final class DoodleOverlay extends FrameLayout {
             }});
             shapeRow.addView(b, new LinearLayout.LayoutParams(Math.round(colCompact()), rowH()));
             shapeButtons.add(b); shapeKinds.add(kind);
-            if (i >= SHOWN) extraShapes.add(b); else baseCells.add(b);
+            if (i >= SHOWN) extraShapes.add(b);
         }
         shapeScroll.addView(shapeRow);
         box.addView(shapeScroll, new LinearLayout.LayoutParams(-1, -2));
@@ -626,7 +769,7 @@ final class DoodleOverlay extends FrameLayout {
             swatch.setOnClickListener(new OnClickListener() { public void onClick(View v) { sColor = color; applyToSelected(); syncPanel(); } });
             colorRow.addView(swatch, new LinearLayout.LayoutParams(Math.round(colCompact()), rowH()));
             colorButtons.add(swatch);
-            if (i >= SHOWN) extraColors.add(swatch); else baseCells.add(swatch);
+            if (i >= SHOWN) extraColors.add(swatch);
         }
         colorScroll.addView(colorRow);
         box.addView(colorScroll, new LinearLayout.LayoutParams(-1, -2));
@@ -651,11 +794,12 @@ final class DoodleOverlay extends FrameLayout {
             public void onStopTrackingTouch(SeekBar bar) {}
         });
         controls.addView(size, new LinearLayout.LayoutParams(0, rowH(), 1));
-        fillButton = roundButton(c, new FillIcon(onSurface, density), "Fill shape", new OnClickListener() { public void onClick(View v) {
+        FillIcon fillIcon = new FillIcon(onSurface, density); fillIcon.scale = 1.25f;
+        fillButton = roundButton(c, fillIcon, "Fill shape", new OnClickListener() { public void onClick(View v) {
             sFill = !sFill; applyToSelected(); syncPanel();
         }});
         controls.addView(fillButton, new LinearLayout.LayoutParams(dp(38), dp(38)));
-        controls.addView(trashButton = roundButton(c, new TrashIcon(onSurface, density), "Delete shape", new OnClickListener() { public void onClick(View v) {
+        controls.addView(trashButton = roundButton(c, trashIcon(), "Delete shape", new OnClickListener() { public void onClick(View v) {
             if (selected != null || !shapes.isEmpty()) checkpoint();
             synchronized (models) {
                 if (selected != null) shapes.remove(selected);
@@ -675,12 +819,18 @@ final class DoodleOverlay extends FrameLayout {
         sideGrabber = sideGrabber(c);
         shell.addView(sideGrabber, new FrameLayout.LayoutParams(pad() + grab(), dp(96), Gravity.END | Gravity.CENTER_VERTICAL));
         progress = sExpanded ? 1f : 0f;
+        if (host.fixed()) {
+            progress = 1f;
+            box.getChildAt(0).setVisibility(GONE);
+            box.getChildAt(box.getChildCount() - 1).setVisibility(GONE);
+            topPill = null; bottomPill = null;
+            sideGrabber.setVisibility(GONE);
+            box.setPadding(pad(), dp(8), pad(), dp(8));
+        }
         applyProgress();
         syncPanel();
         return shell;
     }
-
-    final List<View> baseCells = new ArrayList<View>();
 
     private static void width(View v, int w) {
         android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
@@ -712,10 +862,10 @@ final class DoodleOverlay extends FrameLayout {
         grow(extraColors, p, c);
         sideGrabber.setAlpha(Math.max(0f, (p - 0.5f) * 2f));
         sideGrabber.setTranslationX((1 - p) * dp(16));
-        sideGrabber.setVisibility(p > 0.5f ? VISIBLE : INVISIBLE);
+        if (host.fixed()) { sideGrabber.setVisibility(GONE); colorScroll.scrollable = true; return; }
+        sideGrabber.setVisibility(p > 0.01f ? VISIBLE : INVISIBLE);
         box.setPadding(pad(), dp(2), pad() + Math.round(grab() * p), dp(2));
         colorScroll.scrollable = p >= 1f;
-        shapeScroll.scrollable = p >= 1f;
         if (p <= 0f) colorScroll.scrollTo(0, 0);
     }
 
@@ -734,7 +884,7 @@ final class DoodleOverlay extends FrameLayout {
         int w = Math.round(c * p);
         for (int i = 0; i < views.size(); i++) {
             View v = views.get(i);
-            float start = Math.min(i, 7) * 0.05f, local = p >= 1f ? 1f : Math.max(0f, Math.min(1f, (p - 0.2f - start) / 0.45f));
+            float start = Math.min(i, 7) * 0.05f, local = Math.max(0f, Math.min(1f, (p - 0.2f - start) / 0.45f));
             v.setAlpha(w > dp(2) ? 1f : 0f);
             float sc = 0.5f + 0.5f * local;
             v.setScaleX(sc); v.setScaleY(sc);
@@ -765,31 +915,32 @@ final class DoodleOverlay extends FrameLayout {
     View sideGrabber(Context c) {
         final View g = new View(c) {
             final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            final Path arrow = new Path();
             @Override protected void onDraw(Canvas canvas) {
                 float cx = getWidth() - dp(12), cy = getHeight() / 2f, h = dp(isPressed() ? 36 : 30), w = dp(4);
                 p.setStyle(Paint.Style.FILL);
                 p.setColor(onSurfaceVariant); p.setAlpha(isPressed() ? 255 : 150);
-                canvas.drawRoundRect(new RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), w / 2, w / 2, p);
+                canvas.drawRoundRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, w / 2, w / 2, p);
                 p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(2)); p.setStrokeCap(Paint.Cap.ROUND); p.setStrokeJoin(Paint.Join.ROUND);
                 float ax = cx - dp(9), s = dp(3.5f);
-                android.graphics.Path arrow = new android.graphics.Path();
+                arrow.rewind();
                 arrow.moveTo(ax + s * 0.6f, cy - s); arrow.lineTo(ax - s * 0.4f, cy); arrow.lineTo(ax + s * 0.6f, cy + s);
                 canvas.drawPath(arrow, p);
             }
         };
         g.setContentDescription("Make Doodles menu smaller");
         g.setOnTouchListener(new View.OnTouchListener() {
-            float startX, startP; boolean moved;
+            float startX, startP; android.view.VelocityTracker vt; boolean moved;
             public boolean onTouch(View v, MotionEvent e) {
                 if (progress <= 0.01f && e.getActionMasked() == MotionEvent.ACTION_DOWN) return false;
-                if (sideVelocity != null) { MotionEvent r = MotionEvent.obtain(e); r.setLocation(e.getRawX(), e.getRawY()); sideVelocity.addMovement(r); r.recycle(); }
+                if (vt != null) { MotionEvent r = MotionEvent.obtain(e); r.setLocation(e.getRawX(), e.getRawY()); vt.addMovement(r); r.recycle(); }
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN: {
                         if (widthAnim != null) widthAnim.cancel();
                         startX = e.getRawX(); startP = progress; moved = false;
-                        if (sideVelocity != null) sideVelocity.recycle();
-                        sideVelocity = android.view.VelocityTracker.obtain();
-                        MotionEvent r = MotionEvent.obtain(e); r.setLocation(e.getRawX(), e.getRawY()); sideVelocity.addMovement(r); r.recycle();
+                        if (vt != null) vt.recycle();
+                        vt = android.view.VelocityTracker.obtain();
+                        MotionEvent r = MotionEvent.obtain(e); r.setLocation(e.getRawX(), e.getRawY()); vt.addMovement(r); r.recycle();
                         v.setPressed(true); v.invalidate();
                         v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                         if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
@@ -807,7 +958,7 @@ final class DoodleOverlay extends FrameLayout {
                     case MotionEvent.ACTION_CANCEL: {
                         v.setPressed(false); v.invalidate();
                         float vx = 0;
-                        if (sideVelocity != null) { sideVelocity.computeCurrentVelocity(1000); vx = sideVelocity.getXVelocity(); sideVelocity.recycle(); sideVelocity = null; }
+                        if (vt != null) { vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vt.recycle(); vt = null; }
                         boolean close = !moved || vx < -dp(300) || (vx < dp(300) && progress < 0.7f);
                         if (close) v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                         setExpanded(!close, true);
@@ -827,7 +978,7 @@ final class DoodleOverlay extends FrameLayout {
                 p.setColor(onSurfaceVariant);
                 p.setAlpha(isPressed() ? 255 : 150);
                 float w = dp(isPressed() ? 48 : 40), h = dp(5), cx = getWidth() / 2f, cy = getHeight() / 2f;
-                canvas.drawRoundRect(new RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), h / 2, h / 2, p);
+                canvas.drawRoundRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, h / 2, h / 2, p);
             }
         };
         pill.setContentDescription("Move Doodles menu");
@@ -841,7 +992,7 @@ final class DoodleOverlay extends FrameLayout {
         return pill;
     }
 
-    View topPill, bottomPill, grabbed;
+    View topPill, bottomPill;
     float grabStartRaw, grabStartShift;
     android.view.VelocityTracker grabVelocity;
 
@@ -855,8 +1006,8 @@ final class DoodleOverlay extends FrameLayout {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
                 stopFling();
-                grabbed = pill;
-                grabStartRaw = e.getRawY(); grabStartShift = sPanelShift;
+                grabStartRaw = e.getRawY(); grabStartShift = sPanelShift; grabStartT = sSlotT;
+                if (slotAnim != null) slotAnim.cancel();
                 if (grabVelocity != null) grabVelocity.recycle();
                 grabVelocity = android.view.VelocityTracker.obtain();
                 MotionEvent raw = MotionEvent.obtain(e); raw.setLocation(e.getRawX(), e.getRawY()); grabVelocity.addMovement(raw); raw.recycle();
@@ -865,14 +1016,20 @@ final class DoodleOverlay extends FrameLayout {
                 if (pill.getParent() != null) pill.getParent().requestDisallowInterceptTouchEvent(true);
                 return true;
             }
-            case MotionEvent.ACTION_MOVE:
+            case MotionEvent.ACTION_MOVE: {
+                RectF[] s = slots();
+                if (s != null) {
+                    float span = s[0].centerY() - s[1].centerY();
+                    if (span != 0) applySlots(grabStartT - (e.getRawY() - grabStartRaw) / span);
+                    return true;
+                }
                 sPanelShift = grabStartShift + (e.getRawY() - grabStartRaw);
                 placePanel();
                 return true;
+            }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 pill.setPressed(false); pill.invalidate();
-                grabbed = null;
                 float vy = 0;
                 if (grabVelocity != null) {
                     grabVelocity.computeCurrentVelocity(1000);
@@ -880,6 +1037,11 @@ final class DoodleOverlay extends FrameLayout {
                     grabVelocity.recycle(); grabVelocity = null;
                 }
                 int fling = ViewConfiguration.get(pill.getContext()).getScaledMinimumFlingVelocity();
+                if (slots() != null) {
+                    boolean flick = e.getActionMasked() == MotionEvent.ACTION_UP && Math.abs(vy) > Math.max(fling * 4, dp(500));
+                    settleSlot(flick ? (vy < 0 ? 1f : 0f) : (sSlotT >= 0.5f ? 1f : 0f));
+                    return true;
+                }
                 if (e.getActionMasked() == MotionEvent.ACTION_UP && Math.abs(vy) > Math.max(fling * 4, dp(500))) flingPanel(vy);
                 return true;
             }
@@ -890,7 +1052,7 @@ final class DoodleOverlay extends FrameLayout {
     View grabberNear(float rawX, float rawY) {
         if (panel.getAlpha() < 0.5f || topPill == null) return null;
         int[] at = new int[2]; panel.getLocationOnScreen(at);
-        float top = at[1], bottom = at[1] + panel.getHeight(), cx = at[0] + panel.getWidth() / 2f;
+        float top = at[1], bottom = at[1] + panel.getHeight() * panel.getScaleY(), cx = at[0] + panel.getWidth() * panel.getScaleX() / 2f;
         if (Math.abs(rawX - cx) > dp(110)) return null;
         if (rawY >= top - dp(24) && rawY < top) return topPill;
         if (bottomPill != null && rawY > bottom && rawY <= bottom + dp(24)) return bottomPill;
@@ -898,27 +1060,8 @@ final class DoodleOverlay extends FrameLayout {
     }
 
     android.animation.ValueAnimator flight;
-    Runnable impact;
 
-    void stopFling() {
-        android.animation.ValueAnimator previous = flight;
-        flight = null;
-        if (impact != null) { removeCallbacks(impact); impact = null; }
-        if (previous != null) previous.cancel();
-    }
-
-    @Override protected void onDetachedFromWindow() {
-        stopFling();
-        if (widthAnim != null) { widthAnim.cancel(); widthAnim = null; }
-        if(sideVelocity!=null){sideVelocity.recycle();sideVelocity=null;}
-        if (sideGrabber != null) sideGrabber.setPressed(false);
-        if (grabVelocity != null) { grabVelocity.recycle(); grabVelocity = null; }
-        if (grabbed != null) { grabbed.setPressed(false); grabbed = null; }
-        layer.grabbing = null;
-        if (layer.chromeAnim != null) layer.chromeAnim.cancel();
-        panel.animate().cancel();
-        super.onDetachedFromWindow();
-    }
+    void stopFling() { if (flight != null) { flight.cancel(); flight = null; } }
 
     void flingPanel(float vy) {
         if (getHeight() <= 0 || panel.getHeight() <= 0) return;
@@ -945,34 +1088,27 @@ final class DoodleOverlay extends FrameLayout {
                     float arc = (float) Math.abs(Math.sin(Math.PI * 2.2 * Math.pow(b, 0.8)));
                     y = edge + inward * amp * arc * (float) Math.pow(1 - b, 2.2);
                 }
-                y = Math.max(min, Math.min(max, y));
                 sPanelShift = y;
                 panel.setTranslationY(y);
             }
         });
         flight.addListener(new android.animation.AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(android.animation.Animator a) {
-                if (flight != a) return;
-                sPanelShift = edge; panel.setTranslationY(edge); flight = null;
-                if (impact != null) { removeCallbacks(impact); impact = null; }
-            }
+            @Override public void onAnimationEnd(android.animation.Animator a) { sPanelShift = edge; panel.setTranslationY(edge); }
         });
-        final android.animation.ValueAnimator started = flight;
-        impact = new Runnable() { public void run() { if (flight == started && started.isRunning()) panel.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); } };
-        postDelayed(impact, (long) travel);
-        started.start();
+        flight.start();
+        postDelayed(new Runnable() { public void run() { if (flight != null && flight.isRunning()) panel.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); } }, (long) travel);
     }
 
     float sTopLimit = -1, sBottomLimit = -1;
     static final float FRAME_DP = 18;
     float topLimit() {
         if (sTopLimit < 0) {
-            Bridge.Space s = canvasView == null ? null : Bridge.space(canvasView, this);
+            Bridge.Space s = host.space(this);
             if (s != null && s.image.top > dp(40)) {
                 sTopLimit = Math.max(dp(32), Math.min(dp(160), s.image.top - FRAME_DP * density));
                 sBottomLimit = s.image.bottom + FRAME_DP * density;
             }
-            if (sTopLimit < 0) { ScreenshotEditor.logOnce("Doodles menu top limit: picture not placed yet, 110dp used", null); return dp(110); }
+            if (sTopLimit < 0) return dp(110);
         }
         return sTopLimit;
     }
@@ -980,7 +1116,7 @@ final class DoodleOverlay extends FrameLayout {
     float bottomLimit() {
         int nav = 0;
         try {
-            android.view.WindowInsets in = (android.view.WindowInsets) Xp.callMethod(this, "getRootWindowInsets");
+            android.view.WindowInsets in = getRootWindowInsets();
             if (in != null) nav = in.getStableInsetBottom();
         } catch (Throwable ignored) { }
         View root = getRootView();
@@ -992,17 +1128,79 @@ final class DoodleOverlay extends FrameLayout {
         return limit;
     }
 
+    static float sSlotT;
+    int slotWidth;
+    float grabStartT;
+    android.animation.ValueAnimator slotAnim;
+
+    RectF[] slots() { return host.slots(this); }
+
+    void applySlots(float t) {
+        RectF[] s = slots();
+        if (s == null || panel.getHeight() <= 0) return;
+        t = Math.max(0f, Math.min(1f, t));
+        sSlotT = t;
+        float h = panel.getHeight();
+        float k = lerp(s[0].height() / h, s[1].height() / h, t);
+        float w = lerp(s[0].width(), s[1].width(), t);
+        int layoutW = Math.max(dp(160), Math.round(w / k));
+        if (layoutW != slotWidth) { slotWidth = layoutW; applyProgress(); }
+        panel.setPivotX(panel.getWidth() / 2f); panel.setPivotY(h / 2f);
+        panel.setScaleX(k * enterScale); panel.setScaleY(k * enterScale);
+        float cx = lerp(s[0].centerX(), s[1].centerX(), t), cy = lerp(s[0].centerY(), s[1].centerY(), t);
+        panel.setTranslationX(cx - (panel.getLeft() + panel.getWidth() / 2f));
+        panel.setTranslationY(cy - (panel.getTop() + h / 2f) + enterOffset);
+    }
+    static float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+    float enterOffset, enterScale = 1f;
+    boolean leaving;
+    android.animation.ValueAnimator motionAnim;
+    void motion(final boolean in, final Runnable end) {
+        if (motionAnim != null) motionAnim.cancel();
+        final float from = in ? 0f : 1f - Math.min(1f, Math.abs(enterOffset) / dp(28));
+        motionAnim = android.animation.ValueAnimator.ofFloat(from, in ? 1f : 0f);
+        motionAnim.setDuration(in ? 280 : 200);
+        motionAnim.setInterpolator(in ? new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f) : new android.view.animation.PathInterpolator(0.3f, 0f, 0.8f, 0.15f));
+        motionAnim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator a) {
+                float v = (Float) a.getAnimatedValue();
+                enterOffset = (1f - v) * dp(28); enterScale = 0.94f + 0.06f * v;
+                panel.setAlpha(v);
+                applySlots(sSlotT);
+            }
+        });
+        motionAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) { if (end != null) end.run(); }
+        });
+        if (in) { enterOffset = dp(28); enterScale = 0.94f; panel.setAlpha(0f); }
+        motionAnim.start();
+    }
+
+    void settleSlot(float to) {
+        if (slotAnim != null) slotAnim.cancel();
+        slotAnim = android.animation.ValueAnimator.ofFloat(sSlotT, to);
+        slotAnim.setDuration(300);
+        slotAnim.setInterpolator(new android.view.animation.OvershootInterpolator(0.9f));
+        slotAnim.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+            public void onAnimationUpdate(android.animation.ValueAnimator a) {
+                float v = (Float) a.getAnimatedValue();
+                applySlots(Math.max(-0.04f, Math.min(1.04f, v)));
+            }
+        });
+        final float end = to;
+        slotAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) { applySlots(end); panel.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); }
+        });
+        slotAnim.start();
+    }
+
     void placePanel() {
+        if (slots() != null) { applySlots(sSlotT); return; }
         if (getHeight() <= 0 || panel.getHeight() <= 0) { panel.setTranslationY(sPanelShift); return; }
         float min = topLimit() - panel.getTop(), max = bottomLimit() - panel.getTop() - panel.getHeight();
         sPanelShift = Math.max(min, Math.min(Math.max(min, max), sPanelShift));
         panel.setTranslationY(sPanelShift);
-    }
-
-    LinearLayout.LayoutParams buttonParams() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        lp.leftMargin = dp(6);
-        return lp;
     }
 
     ImageView roundButton(Context c, Drawable icon, String label, OnClickListener click) {
@@ -1053,7 +1251,7 @@ final class DoodleOverlay extends FrameLayout {
         fillButton.getDrawable().invalidateSelf();
         fillButton.setAlpha(Doodle.isLine(kind) ? 0.35f : 1f);
         if (d != null && size != null) {
-            Bridge.Space s = Bridge.space(canvasView, this);
+            Bridge.Space s = host.space(this);
             if (s != null) { sWidthDp = Math.max(1, Math.min(24, d.width * s.scale / density)); size.setProgress(Math.round(sWidthDp) - 1); }
         }
     }
@@ -1068,10 +1266,6 @@ final class DoodleOverlay extends FrameLayout {
         @Override public void setAlpha(int alpha) {}
         @Override public void setColorFilter(ColorFilter filter) {}
         @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
-        void stroke(float width) {
-            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(width * density); paint.setColor(color);
-            paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
-        }
         @Override public void draw(Canvas canvas) {
             int save = canvas.save();
             float size = 24 * density * scale;
@@ -1082,35 +1276,39 @@ final class DoodleOverlay extends FrameLayout {
             canvas.restoreToCount(save);
         }
         abstract void draw24(Canvas canvas);
-        void stroke24(float width) { stroke(width / density); }
     }
 
     static final class ShapeIcon extends Icon {
-        final int kind;
-        ShapeIcon(int kind, int color, float density) { super(color, density); this.kind = kind; }
+        final int kind; final Path box;
+        ShapeIcon(int kind, int color, float density) {
+            super(color, density); this.kind = kind;
+            box = Doodle.isLine(kind) ? null : Doodle.outline(kind, 4, kind == Doodle.RECT ? 5 : 4, 20, kind == Doodle.RECT ? 19 : 20, 2f);
+        }
         @Override void draw24(Canvas c) {
             paint.setColor(color);
             paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
             paint.setStrokeWidth(2f);
-            if (Doodle.isLine(kind)) Doodle.drawLine(c, paint, kind, 4, 20, 20, 4, 2f);
-            else { paint.setStyle(Paint.Style.STROKE); c.drawPath(Doodle.outline(kind, 4, kind == Doodle.RECT ? 5 : 4, 20, kind == Doodle.RECT ? 19 : 20, 2f), paint); }
+            if (box == null) Doodle.drawLine(c, paint, kind, 4, 20, 20, 4, 2f);
+            else { paint.setStyle(Paint.Style.STROKE); c.drawPath(box, paint); }
         }
     }
 
     static final class MoreShapesIcon extends Icon {
+        final Path triangle = Doodle.outline(Doodle.TRIANGLE, 3, 3, 13, 12, 1.8f), star = Doodle.outline(Doodle.STAR, 12, 11, 22, 21, 1.8f);
         MoreShapesIcon(int color, float density) { super(color, density); }
         @Override void draw24(Canvas c) {
             paint.setColor(color); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.8f);
             paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
-            c.drawPath(Doodle.outline(Doodle.TRIANGLE, 3, 3, 13, 12, 1.8f), paint);
-            c.drawPath(Doodle.outline(Doodle.STAR, 12, 11, 22, 21, 1.8f), paint);
+            c.drawPath(triangle, paint);
+            c.drawPath(star, paint);
             c.drawCircle(17.5f, 6.5f, 3.5f, paint);
-            c.drawRoundRect(new RectF(3, 15, 9.5f, 21), 1.5f, 1.5f, paint);
+            c.drawRoundRect(3, 15, 9.5f, 21, 1.5f, 1.5f, paint);
         }
     }
     static final class RainbowIcon extends Drawable {
-        final float density; int ring, picked;
+        final float density; int ring;
         final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        android.graphics.SweepGradient sweep; float sweepX, sweepY;
         RainbowIcon(float density) { this.density = density; }
         @Override public int getIntrinsicWidth() { return Math.round(34 * density); }
         @Override public int getIntrinsicHeight() { return Math.round(34 * density); }
@@ -1119,7 +1317,11 @@ final class DoodleOverlay extends FrameLayout {
             if (r <= 0) return;
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(0xff000000);
-            paint.setShader(new android.graphics.SweepGradient(cx, cy, new int[]{0xffec5f59, 0xfff6c644, 0xff49c562, 0xff34c8bc, 0xff2a84c8, 0xffa657c0, 0xffec5fbb, 0xffec5f59}, null));
+            if (sweep == null || sweepX != cx || sweepY != cy) {
+                sweep = new android.graphics.SweepGradient(cx, cy, new int[]{0xffec5f59, 0xfff6c644, 0xff49c562, 0xff34c8bc, 0xff2a84c8, 0xffa657c0, 0xffec5fbb, 0xffec5f59}, null);
+                sweepX = cx; sweepY = cy;
+            }
+            paint.setShader(sweep);
             canvas.drawCircle(cx, cy, r, paint);
             paint.setShader(null);
             paint.setStyle(Paint.Style.STROKE);
@@ -1147,28 +1349,33 @@ final class DoodleOverlay extends FrameLayout {
         @Override void draw24(Canvas c) {
             paint.setStrokeWidth(2f); paint.setStrokeJoin(Paint.Join.ROUND);
             paint.setStyle(filled ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE);
-            c.drawRoundRect(new RectF(5, 5, 19, 19), 3, 3, paint);
+            c.drawRoundRect(4, 4, 20, 20, 3.5f, 3.5f, paint);
         }
     }
 
+    TrashIcon trashIcon() { TrashIcon t = new TrashIcon(onSurface, density); t.scale = 1.25f; return t; }
+
     static final class TrashIcon extends Icon {
-        TrashIcon(int color, float density) { super(color, density); }
+        final Path can = new Path();
+        TrashIcon(int color, float density) {
+            super(color, density);
+            can.moveTo(6.5f, 6.5f); can.lineTo(7.5f, 19); can.quadTo(7.6f, 20, 8.6f, 20); can.lineTo(15.4f, 20); can.quadTo(16.4f, 20, 16.5f, 19); can.lineTo(17.5f, 6.5f);
+        }
         @Override void draw24(Canvas c) {
             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2f); paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
             c.drawLine(4.5f, 6.5f, 19.5f, 6.5f, paint);
             c.drawLine(9.5f, 6.5f, 10, 4, paint); c.drawLine(10, 4, 14, 4, paint); c.drawLine(14, 4, 14.5f, 6.5f, paint);
-            Path can = new Path(); can.moveTo(6.5f, 6.5f); can.lineTo(7.5f, 19); can.quadTo(7.6f, 20, 8.6f, 20); can.lineTo(15.4f, 20); can.quadTo(16.4f, 20, 16.5f, 19); can.lineTo(17.5f, 6.5f);
             c.drawPath(can, paint);
             c.drawLine(10.2f, 10, 10.4f, 16.5f, paint); c.drawLine(13.8f, 10, 13.6f, 16.5f, paint);
         }
     }
 
     static final class CheckIcon extends Icon {
-        CheckIcon(int color, float density) { super(color, density); }
+        final Path check = new Path();
+        CheckIcon(int color, float density) { super(color, density); check.moveTo(6f, 12.5f); check.lineTo(10, 16.5f); check.lineTo(18f, 8f); }
         @Override void draw24(Canvas c) {
             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.2f); paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
-            Path p = new Path(); p.moveTo(6f, 12.5f); p.lineTo(10, 16.5f); p.lineTo(18f, 8f);
-            c.drawPath(p, paint);
+            c.drawPath(check, paint);
         }
     }
 

@@ -1,26 +1,125 @@
+## v2.0.4
+
+🎨 **New Frosted Glass Slider!**
+
+- New slider under **Themes** changes the look of supported folders, shortcut menus, toast messages, Google Photos menus and dialogs.
+
+  - **Blur Off:** turns off blur, including the phone’s window blur. White in light mode, tinted black in dark mode.
+
+  - **Stock:** keeps Google’s surfaces, while preserving your icon sizes and menu positions.
+
+  - **Frosted Glass (Default):** blurs the background behind these surfaces with Pixel Suite’s tint.
+
+- **Super Dark** keeps surfaces black with blur off. While the phone is in dark mode, turn off **Super Dark-Mode** before changing surface styles. The slider works normally in light mode.
+
+- A looping preview shows each style. Move the slider to try it instantly.
+
+📸 **Doodles in Google Photos**
+
+⚠️ **For Doodles in Google Photos:** select **Google Photos** in Pixel Suite’s LSPosed scope, then restart Photos or reboot. Enable it under **Doodles → Google Photos**.
+
+- New **Doodles** tab beside **Crop**, with shapes, arrows, colors, thickness, fill and delete controls.
+
+- Fully expanded toolbar with scrolling colors and an animated entrance and exit. The menu stays black in light and dark modes.
+
+- Save your drawings, then reopen the photo to move, resize, recolor or delete its shapes. **Revert** removes saved Doodles.
+
+- Shapes stay aligned while cropping, zooming or rotating. Drag the photo edges to crop with Doodles open.
+
+- Supports Ultra HDR output and its gain map.
+
+🔒 **Works completely offline.** Doodles runs directly inside Google Photos, on your phone. Your photos stay private—all Doodles processing happens locally.
+
+**Pixel Suite adds the Doodles tab inside Google Photos and draws your shapes over the photo while you edit. When you tap Save, Photos’ own editor saves the result. The editable shapes stay in Photos’ private storage so you can adjust them later.**
+
+**It uses Photos’ existing editor without changing your account, subscription or device identity. Your backup settings stay as they are.**
+
+✨ **Enhancements**
+
+- **Doodles:** center snapping with guide lines and light vibration feedback. Lines and arrows snap horizontally or vertically when close.
+
+- **Google Photos:** matching frosted bottom tab bar and search button. The **trash/Undo** pill sits just above the bar with matching width.
+
+- **Toast messages:** app messages now appear at the top in compact pills, following your surface style and theme.
+
+- **Super Dark-Mode:** pure-black Doodles menus with a subtle border, plus matching dark editor controls and dialogs.
+
+⚡ **Less background work**
+
+- Drawing effects now run only while the screens that need them are open, with fewer repeated calculations and redraws.
+
+🐛 **Bug fixes**
+
+- **App shortcut menus:** fixed split backgrounds and menus getting cut off inside drawer folders. Menus now use one matching panel, with fading edges when there’s more to scroll.
+
+- **Google Photos messages:** fixed the wrong pill colors in **Stock** and **Blur Off**. They now follow light and dark mode.
+
+- Dragging an app directly from a drawer folder to the **Uninstall** button now also removes it from that folder, leaving no leftover icon.
+
+- Shortcut menus inside home-screen folders now blur the folder behind them, within the menu frame.
+
+- Fixed Pixel Studio’s **Back**, **X** and **Done** controls getting stuck after switching tools.
+
+- Fixed Google Photos’ selection and confirmation panels not following Super Dark-Mode.
+
+**Install over the current official build and reboot.**
+
 ## v2.0.3
 
 ## What's new in 2.0.3:
 
-🏠 **Home-screen menu:** removed the redundant “Apps list” option—you can already open the app drawer by swiping up.
+This update brings a redesigned Doodles menu, more reliable folder interactions, fixes for Pixel Studio and Super Dark, and cleaner settings throughout Pixel Suite.
 
-🌗 **App launch:** fixed the white flash when opening Pixel Suite in dark theme.
+### 🏠 Home-screen menu
 
-✏️ **Doodles redesign:** a wider, shorter menu with aligned shapes, colors and controls. Tap More shapes or the rainbow icon to expand for more shapes and colors. Tap the arrow on the right to fold it back. Drag or flick the menu up or down to reposition it.
+- Removed the redundant **Apps list** option—you can already open the app drawer by swiping up.
 
-📁 **Drawer folders:** the Back gesture closes the folder first; the next Back gesture leaves the drawer. Fixed accidental taps during transitions and icon/name jumps after reordering.
+### 🌗 App launch
 
-🗂️ **Home folders:** smoother closing after moving apps, with stock spring animations preserved. Auto (A–Z) and Custom sorting now open inside the same menu.
+- Fixed the white flash when opening Pixel Suite in dark theme. The launch screen now follows the system's light or dark theme from the start.
 
-✂️ **Pixel Studio:** fixed, and should be much harder to break after future updates.
+### ✏️ Doodles redesign
 
-🧹 **Recents:** fixed a rare issue where Clear all became disabled after restarting.
+- A wider, shorter menu with neatly aligned shapes, colors, Delete and Done controls.
+- Tap **More shapes** or the **rainbow icon** to expand for more shapes and colors. Tap the arrow on the right to fold it back.
+- Drag or flick the menu vertically **up or down** to reposition it. It stays within the editing area and clear of the navigation bar.
+- Selection outlines and handles hide while drawing, moving, resizing or pinching, then return when you release. Smaller handles keep their original touch area.
+- Hidden controls no longer catch taps while the menu is folded.
 
-🌑 **Super Dark:** fixed a few places where the dark theme wasn’t applying and made theme handling more efficient.
+### 📁 Drawer folders
 
-✨ **Cleaner interface:** compact, consistent prompts and shorter descriptions throughout Pixel Suite. Animated previews and essential setup instructions remain.
+- The **Back gesture** from either edge closes the open folder first; the next Back gesture leaves the drawer. Canceling the gesture keeps the folder open.
+- Fixed quick taps during opening and closing accidentally launching an app behind the folder.
+- Fixed icon, size and label jumps after reordering folder contents. Folder previews update once the folder has settled.
 
-Install over the current official version and reboot.
+### 🗂️ Home folders and menus
+
+- Smoother folder closing after moving apps, with the stock spring animations preserved.
+- **Auto (A–Z)** and **Custom** sorting expand inside the same Sort menu, matching drawer folders.
+- More compact Rename, Remove, Sort, Change icon and Add apps prompts, with consistent light, dark and Super Dark styling.
+
+### ✂️ Pixel Studio
+
+- Fixed, and should be much harder to break after future updates.
+
+### 🧹 Recents
+
+- Fixed a rare issue where **Clear all** became disabled after restarting, including when a task had no thumbnail.
+- **Select** and **Screenshot** keep their normal behavior.
+
+### 🌑 Super Dark
+
+- Fixed a few places where the dark theme wasn't applying, including supported System UI dialogs and Pixel Launcher's Home settings.
+- Made theme handling more efficient by reducing repeated background-color processing.
+- Keeps automatic light/dark schedules and restores blur when appropriate.
+
+### ✨ Cleaner Pixel Suite settings
+
+- Shorter descriptions across feature pages, focused on what each option does and how to use it.
+- Kept animated previews, essential setup instructions, reset guidance and the system font-settings location.
+- The in-app changelog shows the latest update, with a link to the full release history on GitHub.
+
+**Install over the current official version and reboot.** No uninstall is needed.
 
 ---
 

@@ -75,13 +75,15 @@ final class MenuFont {
         }
     }
 
+    private static volatile Method getVariation, putVariation;
+
     static String variationOf(TextView t) {
-        try { Method m = TextView.class.getMethod("getFontVariationSettings"); return (String) m.invoke(t); }
+        try { Method m = getVariation; if (m == null) getVariation = m = TextView.class.getMethod("getFontVariationSettings"); return (String) m.invoke(t); }
         catch (Throwable ignored) { return null; }
     }
 
     static void setVariation(TextView t, String settings) {
-        try { Method m = TextView.class.getMethod("setFontVariationSettings", String.class); m.invoke(t, settings); }
+        try { Method m = putVariation; if (m == null) putVariation = m = TextView.class.getMethod("setFontVariationSettings", String.class); m.invoke(t, settings); }
         catch (Throwable ignored) { }
     }
 

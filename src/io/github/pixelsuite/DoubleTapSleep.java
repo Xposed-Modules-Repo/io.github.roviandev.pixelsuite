@@ -20,7 +20,6 @@ final class DoubleTapSleep {
     private static int sLastX, sLastY;
     private static String sHome;
     private static long sHomeAt;
-    private static boolean sLoggedFirstTap;
     private static volatile Context sCtx;
 
     private DoubleTapSleep() {}
@@ -50,10 +49,6 @@ final class DoubleTapSleep {
         if (ctx == null) return;
 
         String pkg = (String) Xp.getObjectField(session, "mPackageName");
-        if (!sLoggedFirstTap) {
-            sLoggedFirstTap = true;
-            Module.log("double-tap-sleep: home-screen taps arriving from " + pkg);
-        }
         if (pkg == null || !pkg.equals(homePackage(ctx))) return;
         if (!Feature.on(ctx, Feature.DOUBLE_TAP_SLEEP)) return;
 
@@ -86,7 +81,6 @@ final class DoubleTapSleep {
         try {
             PowerManager.class.getMethod("goToSleep", long.class, int.class, int.class)
                     .invoke(pm, SystemClock.uptimeMillis(), SLEEP_REASON_POWER_BUTTON, 0);
-            Module.log("double-tap-sleep: screen off");
         } catch (Throwable t) {
             Module.log("double-tap-sleep: goToSleep failed", t);
         }

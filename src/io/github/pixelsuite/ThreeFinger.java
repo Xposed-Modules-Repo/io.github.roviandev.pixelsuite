@@ -69,7 +69,7 @@ final class ThreeFinger {
                     });
 
             installFallback();
-            Module.log("system hooks installed");
+            Module.log("three-finger screenshot: system hooks installed");
         } catch (Throwable t) {
             Module.log("system hook setup failed", t);
         }
@@ -92,7 +92,7 @@ final class ThreeFinger {
                             try {
                                 Detector.FALLBACK.onTouch((MotionEvent) param.args[0], false);
                             } catch (Throwable t) {
-                                Module.log("fallback touch handling failed", t);
+                                logTouchError(t);
                             }
                         }
                     })) {
@@ -139,7 +139,6 @@ final class ThreeFinger {
                         @Override
                         public void onChange(boolean selfChange) {
                             sEnabled = isEnabled(sContext);
-                            Module.log("enabled: " + sEnabled);
                             updateMonitor();
                         }
                     });
@@ -149,8 +148,6 @@ final class ThreeFinger {
                 @Override
                 public void run() {
                     updateMonitor();
-                    Module.log("initialised, enabled: " + sEnabled + ", blocks app touches: "
-                            + sMonitorActive + ", min swipe " + (int) sMinDistancePx + "px");
                 }
             });
         } catch (Throwable t) {
@@ -215,7 +212,6 @@ final class ThreeFinger {
         } catch (Throwable t) {
             Module.log("monitor dispose failed", t);
         }
-        Module.log("gesture monitor removed (feature off)");
     }
 
     static void pilfer() {
@@ -247,11 +243,19 @@ final class ThreeFinger {
                     Detector.MONITOR.onTouch((MotionEvent) event, true);
                 }
             } catch (Throwable t) {
-                Module.log("touch handling failed", t);
+                logTouchError(t);
             } finally {
                 finishInputEvent(event, false);
             }
         }
+    }
+
+    private static volatile boolean sTouchErrorLogged;
+
+    private static void logTouchError(Throwable t) {
+        if (sTouchErrorLogged) return;
+        sTouchErrorLogged = true;
+        Module.log("three-finger screenshot: touch handling failed", t);
     }
 
     private static final class Detector {
@@ -341,7 +345,6 @@ final class ThreeFinger {
     }
 
     private static void takeScreenshot() {
-        Module.log("three-finger swipe detected, taking screenshot");
         final Object helper = sScreenshotHelper;
         final Handler h = sWorker;
         if (helper == null || h == null) {
