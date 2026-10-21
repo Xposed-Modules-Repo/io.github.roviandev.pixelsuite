@@ -123,7 +123,10 @@ final class DrawerPopupLayout {
                 if(held!=null&&held.isAttachedToWindow()&&held.getWidth()>0){
                     int[] a=new int[2],o=new int[2];held.getLocationOnScreen(a);layer.getLocationOnScreen(o);
                     Rect r=new Rect(a[0]-o[0],a[1]-o[1],a[0]-o[0]+Math.round(held.getWidth()*held.getScaleX()*scaleOf(held)),a[1]-o[1]+Math.round(held.getHeight()*held.getScaleY()*scaleOf(held)));
-                    if(!r.isEmpty())return r;
+                    if(!r.isEmpty()){
+                        if(icon!=null&&icon!=held)LauncherFeatures.logOnce("Drawer folder menu: originalView differs from the held icon",new IllegalStateException(String.valueOf(icon.getClass().getName())));
+                        return r;
+                    }
                 }
             }
             if(icon==null||!icon.isAttachedToWindow())return null;

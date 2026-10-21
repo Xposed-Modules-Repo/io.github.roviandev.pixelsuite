@@ -60,8 +60,10 @@ final class FolderDrag {
             Xp.Callback callback = new Xp.Callback() {
                 protected void beforeHookedMethod(Xp.Param p) { try { touch(p); } catch (Throwable error) { LauncherFeatures.logOnce("Two-finger drag unavailable", error); } }
             };
-            if (Xp.hookAllMethods(type("Launcher"), "dispatchTouchEvent", callback).isEmpty())
+            if (Xp.hookAllMethods(type("Launcher"), "dispatchTouchEvent", callback).isEmpty()) {
                 Xp.hookMethod(Activity.class.getMethod("dispatchTouchEvent", MotionEvent.class), callback);
+                Module.log("Second-finger gestures: hooked Activity.dispatchTouchEvent");
+            }
         } catch (Throwable error) { LauncherFeatures.logOnce("Two-finger drag unavailable", error); }
     }
 
@@ -80,7 +82,7 @@ final class FolderDrag {
         boolean paging = LauncherFeatures.on(TWO_FINGER), picking = MultiDrag.on();
         int action = e.getActionMasked();
         if (picking && action == MotionEvent.ACTION_MOVE) MultiDrag.follow();
-        if (action == MotionEvent.ACTION_MOVE && second < 0) return;
+        if (action == MotionEvent.ACTION_POINTER_DOWN && picking) MultiDrag.why("second finger down, dragging=" + dragging(a) + ", paging=" + paging);
         if ((!paging && !picking) || !dragging(a)) { second = -1; return; }
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
             if (second < 0) {
@@ -199,15 +201,14 @@ final class FolderDrag {
     static final class Stay {
         final View folder; final ViewGroup layer; final int border, edge;
         private final Handler handler = new Handler(Looper.getMainLooper());
-        private final Rect inner = new Rect(), outer = new Rect(), hit = new Rect();
         volatile boolean left; private Runnable leave; private Runnable turn; private int dir;
         Stay(View folder, ViewGroup layer) {
             this.folder = folder; this.layer = layer;
             border = LauncherFeatures.dp(folder.getContext(), 16); edge = LauncherFeatures.dp(folder.getContext(), 28);
         }
+        Rect bounds() { Rect r = new Rect(0, 0, folder.getWidth(), folder.getHeight()); layer.offsetDescendantRectToMyCoords(folder, r); return r; }
         void update(int x, int y) {
-            inner.set(0, 0, folder.getWidth(), folder.getHeight()); layer.offsetDescendantRectToMyCoords(folder, inner);
-            outer.set(inner); outer.inset(-border, -border);
+            Rect inner = bounds(), outer = new Rect(inner); outer.inset(-border, -border);
             if (outer.contains(x, y)) {
                 if (leave != null) { handler.removeCallbacks(leave); leave = null; }
                 left = false;
@@ -239,7 +240,7 @@ final class FolderDrag {
         }
         private View find(View v, int sx, int sy) {
             if (v.getVisibility() != View.VISIBLE) return null;
-            Rect r = hit; if (!v.getGlobalVisibleRect(r) || !r.contains(sx, sy)) return null;
+            Rect r = new Rect(); if (!v.getGlobalVisibleRect(r) || !r.contains(sx, sy)) return null;
             Object tag = v.getTag();
             if (tag != null && LauncherFeatures.identity(tag) != null) return v;
             if (v instanceof ViewGroup) {

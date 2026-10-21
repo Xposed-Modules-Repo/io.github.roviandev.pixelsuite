@@ -27,6 +27,8 @@ final class BackdropSurface extends GradientDrawable {
     final Context context;
     boolean failed;
     boolean allowed;
+    boolean parentBlur;
+    boolean reported;
     int night,radiusPx;
     WeakReference<View> host=new WeakReference<View>(null);
     Object node;
@@ -56,6 +58,7 @@ final class BackdropSurface extends GradientDrawable {
     private void colors(){openColor=FrostedSurface.colors(context)[0];closedColor=FrostedSurface.closedFolderColor(context);}
 
     void bind(final View view){
+        parentBlur=true;
         if(!allowed)setColor(FrostedSurface.tone(context)|0xff000000);
         if(host.get()==view)return;
         unwatch();
@@ -75,7 +78,7 @@ final class BackdropSurface extends GradientDrawable {
             try{drawFrost(canvas,view);}
             catch(Throwable unsupported){
                 failed=true;refresh();
-                if(!frostErrorLogged){frostErrorLogged=true;SuiteLog.log("Local frost unavailable, using an opaque panel",unsupported);}
+                SuiteLog.log("Local frost unavailable, using an opaque panel",unsupported);
             }
         }
         super.draw(canvas);
@@ -110,6 +113,10 @@ final class BackdropSurface extends GradientDrawable {
                 RectF area=new RectF(bounds);toLayer.mapRect(area);
                 int under=recordUnder(layer,top,area,blur);
                 if(under>0){canvas.concat(toLocal);DRAW_NODE.invoke(canvas,node);}
+                if(!reported){
+                    reported=true;
+                    if(reportedTypes.add(view.getClass().getName()))SuiteLog.log("Local frost: "+view.getClass().getSimpleName()+" frame="+Math.round(bounds.width())+"x"+Math.round(bounds.height())+", under="+under+", radius="+radiusPx+", wallpaper region="+(wallpaper!=null));
+                }
             }
         }finally{canvas.restoreToCount(save);}
         lastFrame.set(frameInLayer(view,this,layer,null));lastAlpha=alpha;
@@ -179,7 +186,7 @@ final class BackdropSurface extends GradientDrawable {
             }
             return region;
         }catch(Throwable unavailable){
-            if(regionRoot!=Boolean.FALSE){regionRoot=Boolean.FALSE;if(!regionErrorLogged){regionErrorLogged=true;SuiteLog.log("Local frost: wallpaper region unavailable",unavailable);}}
+            if(regionRoot!=Boolean.FALSE){regionRoot=Boolean.FALSE;SuiteLog.log("Local frost: wallpaper region unavailable",unavailable);}
             return null;
         }
     }
@@ -272,20 +279,20 @@ final class BackdropSurface extends GradientDrawable {
 
     static final Map<View,BackdropSurface> hosts=new WeakHashMap<View,BackdropSurface>();
     private static final ArrayDeque<Integer> saves=new ArrayDeque<Integer>();
-    private static boolean clipErrorLogged,frostErrorLogged,regionErrorLogged;
+    private static boolean clipErrorLogged;
 
     static Map<View,View> active(ViewGroup layer){
-        Map<View,View> out=null;
+        Map<View,View> out=new java.util.HashMap<View,View>();
         ArrayList<Map.Entry<View,BackdropSurface>> list;
-        synchronized(hosts){if(hosts.isEmpty())return java.util.Collections.emptyMap();list=new ArrayList<Map.Entry<View,BackdropSurface>>(hosts.entrySet());}
+        synchronized(hosts){list=new ArrayList<Map.Entry<View,BackdropSurface>>(hosts.entrySet());}
         for(Map.Entry<View,BackdropSurface> entry:list){
             View view=entry.getKey();BackdropSurface surface=entry.getValue();
             if(view==null||surface==null||surface.host.get()!=view||!surface.allowed||surface.failed)continue;
             if(!view.isAttachedToWindow()||!view.isShown()||dragLayerOf(view)!=layer||!surface.owns(view))continue;
             Matrix toLayer=new Matrix();View top=mapToLayer(view,layer,toLayer);
-            if(top!=null){if(out==null)out=new java.util.HashMap<View,View>();out.put(view,top);}
+            if(top!=null)out.put(view,top);
         }
-        return out==null?java.util.Collections.<View,View>emptyMap():out;
+        return out;
     }
     static java.util.Set<View> activeTops(ViewGroup layer){return new java.util.HashSet<View>(active(layer).values());}
 
@@ -344,6 +351,7 @@ final class BackdropSurface extends GradientDrawable {
         preDraw=null;lastFrame.setEmpty();lastAlpha=-1f;requestedFrame.setEmpty();requestedAlpha=-1f;
     }
 
+    private static final java.util.Set<String> reportedTypes=new java.util.HashSet<String>();
     private static Class<?> folderType;private static boolean folderMissing;
     static boolean isFolder(View view){
         if(folderType==null&&!folderMissing){try{folderType=LauncherFeatures.type("folder.Folder");}catch(Throwable t){folderMissing=true;}}

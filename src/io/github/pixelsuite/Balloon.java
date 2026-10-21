@@ -121,12 +121,7 @@ final class Balloon {
     }
 
     static void buttons(View v, List<View> out) {
-        Class<?> button = null;
-        try { button = LauncherFeatures.type("ButtonDropTarget"); } catch (Throwable ignored) { }
-        buttons(v, button, out);
-    }
-    private static void buttons(View v, Class<?> button, List<View> out) {
-        if (button != null && button.isInstance(v)) { if (v.getVisibility() == View.VISIBLE) out.add(v); return; }
-        if (v instanceof ViewGroup) { ViewGroup g = (ViewGroup) v; for (int i = 0; i < g.getChildCount(); i++) buttons(g.getChildAt(i), button, out); }
+        try { if (LauncherFeatures.type("ButtonDropTarget").isInstance(v)) { if (v.getVisibility() == View.VISIBLE) out.add(v); return; } } catch (Throwable ignored) { }
+        if (v instanceof ViewGroup) { ViewGroup g = (ViewGroup) v; for (int i = 0; i < g.getChildCount(); i++) buttons(g.getChildAt(i), out); }
     }
 }

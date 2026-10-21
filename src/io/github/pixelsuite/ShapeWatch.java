@@ -9,12 +9,10 @@ import java.util.List;
 final class ShapeWatch {
     private ShapeWatch() {}
     private static String last;
-    private static volatile Object singleton;
 
     private static Object themeManager(Context c) throws Exception {
-        Object holder = singleton;
-        if (holder == null) singleton = holder = LauncherFeatures.type("graphics.ThemeManager").getField("INSTANCE").get(null);
-        return LauncherFeatures.call(holder, "get", c);
+        Object singleton = LauncherFeatures.type("graphics.ThemeManager").getField("INSTANCE").get(null);
+        return LauncherFeatures.call(singleton, "get", c);
     }
 
     static Path path(Context c) {
@@ -102,16 +100,18 @@ final class ShapeWatch {
     }
 
     static void refreshDrawer(Activity a) {
+        int lists = 0;
         try {
             Object holders = LauncherFeatures.get(LauncherFeatures.call(a, "getAppsView"), "mAH");
             for (Object holder : (List<?>) holders) {
                 if (holder == null) continue;
                 try {
                     Object list = LauncherFeatures.get(holder, "mRecyclerView");
-                    if (list != null) { LauncherFeatures.call(LauncherFeatures.call(list, "getRecycledViewPool"), "clear"); LauncherFeatures.call(LauncherFeatures.call(list, "getAdapter"), "notifyDataSetChanged"); }
+                    if (list != null) { LauncherFeatures.call(LauncherFeatures.call(list, "getRecycledViewPool"), "clear"); LauncherFeatures.call(LauncherFeatures.call(list, "getAdapter"), "notifyDataSetChanged"); lists++; }
                 } catch (Throwable ignored) { }
             }
         } catch (Throwable error) { LauncherFeatures.logOnce("Drawer rebind after shape change unavailable", error); }
         LauncherFeatures.refresh();
+        Module.log("Icon shape changed: drawer redrawn (" + lists + " lists)");
     }
 }

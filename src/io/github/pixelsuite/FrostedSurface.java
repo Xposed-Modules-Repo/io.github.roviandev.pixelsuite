@@ -15,24 +15,12 @@ final class FrostedSurface {
     static boolean dark(Context c){return (c.getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES;}
     static int dp(Context c,float value){return Math.round(c.getResources().getDisplayMetrics().density*value);}
     static Context launcherContext(Context c){try{return c.getPackageName().equals("com.google.android.apps.nexuslauncher")?c:c.createPackageContext("com.google.android.apps.nexuslauncher",0);}catch(Throwable ignored){return c;}}
-    private static final java.util.concurrent.ConcurrentHashMap<String,Integer> launcherIds=new java.util.concurrent.ConcurrentHashMap<String,Integer>();
-    private static int launcherId(Context c,Context launcher,String name,String type){
-        if(!"com.google.android.apps.nexuslauncher".equals(c.getPackageName()))return launcher.getResources().getIdentifier(name,type,"com.google.android.apps.nexuslauncher");
-        String key=type+'/'+name;Integer id=launcherIds.get(key);
-        if(id==null){id=launcher.getResources().getIdentifier(name,type,"com.google.android.apps.nexuslauncher");launcherIds.put(key,id);}
-        return id;
-    }
-    static int resourceColor(Context c,String name,int fallback){Context launcher=launcherContext(c);int id=launcherId(c,launcher,name,"color");try{return id==0?fallback:launcher.getResources().getColor(id,launcher.getTheme());}catch(Throwable ignored){return fallback;}}
-    private static volatile Method crossWindowBlur;
+    static int resourceColor(Context c,String name,int fallback){Context launcher=launcherContext(c);int id=launcher.getResources().getIdentifier(name,"color","com.google.android.apps.nexuslauncher");try{return id==0?fallback:launcher.getResources().getColor(id,launcher.getTheme());}catch(Throwable ignored){return fallback;}}
     static boolean blurEnabled(Context c){
         if(!SurfaceStyle.blur(c))return false;
-        Context launcher=launcherContext(c);int reduce=launcherId(c,launcher,"reduce_workspace_blur_usage","bool");
+        Context launcher=launcherContext(c);int reduce=launcher.getResources().getIdentifier("reduce_workspace_blur_usage","bool","com.google.android.apps.nexuslauncher");
         if(reduce!=0&&launcher.getResources().getBoolean(reduce))return false;
-        try{
-            Object manager=c.getSystemService(Context.WINDOW_SERVICE);Method m=crossWindowBlur;
-            if(m==null||!m.getDeclaringClass().isInstance(manager)){m=manager.getClass().getMethod("isCrossWindowBlurEnabled");crossWindowBlur=m;}
-            return (Boolean)m.invoke(manager);
-        }catch(Throwable ignored){return android.provider.Settings.Global.getInt(c.getContentResolver(),"disable_window_blurs",0)==0;}
+        try{Object manager=c.getSystemService(Context.WINDOW_SERVICE);return (Boolean)manager.getClass().getMethod("isCrossWindowBlurEnabled").invoke(manager);}catch(Throwable ignored){return android.provider.Settings.Global.getInt(c.getContentResolver(),"disable_window_blurs",0)==0;}
     }
     static int fallback(Context c){
         if(dark(c)&&Feature.on(c,SuperDark.KEY))return SUPER_DARK_PANEL;
@@ -67,18 +55,21 @@ final class FrostedSurface {
         try{
             Object root=LauncherFeatures.call(content,"getViewRootImpl");
             Drawable blur=(Drawable)LauncherFeatures.call(root,"createBackgroundBlurDrawable");
-            LauncherFeatures.call(blur,"setBlurRadius",depthBlurRadius(content.getContext()));
+            LauncherFeatures.call(blur,"setBlurRadius",blurEnabled(content.getContext())?depthBlurRadius(content.getContext()):0);
             LauncherFeatures.call(blur,"setCornerRadius",(float)dp(content.getContext(),radius));
             try{LauncherFeatures.call(blur,"setColor",Color.TRANSPARENT);}catch(Throwable ignored){}
             content.setBackground(new android.graphics.drawable.LayerDrawable(new Drawable[]{blur,windowDrawable(content.getContext(),radius)}));
-        }catch(Throwable unavailable){GradientDrawable bg=windowDrawable(content.getContext(),radius);bg.setColor(tone(content.getContext())|0xff000000);content.setBackground(bg);if(!blurErrorLogged){blurErrorLogged=true;SuiteLog.log("Popup window blur unavailable",unavailable);}}
+            final Drawable shown=blur;final View view=content;content.post(new Runnable(){public void run(){SuiteLog.log(what+" blur: bounds="+shown.getBounds().toShortString()+", view="+view.getWidth()+"x"+view.getHeight()+", radius="+depthBlurRadius(view.getContext()));}});
+        }catch(Throwable unavailable){GradientDrawable bg=windowDrawable(content.getContext(),radius);bg.setColor(tone(content.getContext())|0xff000000);content.setBackground(bg);SuiteLog.log("Popup window blur unavailable",unavailable);}
     }
-    private static boolean blurErrorLogged;
     static GradientDrawable drawable(Context c,float radius){
         return new BackdropSurface(c,radius);
     }
     static GradientDrawable windowDrawable(Context c,float radius){GradientDrawable d=new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,colors(c));d.setCornerRadius(dp(c,radius));return d;}
-    static int depthBlurRadius(Context c){Context launcher=launcherContext(c);int id=launcherId(c,launcher,"max_depth_blur_radius_enhanced","dimen");return id==0?dp(c,30):launcher.getResources().getDimensionPixelSize(id);}
+    static int depthBlurRadius(Context c){Context launcher=launcherContext(c);int id=launcher.getResources().getIdentifier("max_depth_blur_radius_enhanced","dimen","com.google.android.apps.nexuslauncher");return id==0?dp(c,30):launcher.getResources().getDimensionPixelSize(id);}
+    static int blurRadius(Context c){Context launcher=launcherContext(c);int id=launcher.getResources().getIdentifier("max_depth_blur_radius_enhanced","dimen","com.google.android.apps.nexuslauncher");return 3*(id==0?dp(c,30):launcher.getResources().getDimensionPixelSize(id));}
+    static void opaqueFallback(View view){opaqueDrawable(view.getBackground(),tone(view.getContext())|0xff000000);}
+    static void opaqueDrawable(Drawable drawable,int color){if(drawable instanceof GradientDrawable)((GradientDrawable)drawable).setColor(color);else if(drawable instanceof android.graphics.drawable.LayerDrawable){android.graphics.drawable.LayerDrawable layers=(android.graphics.drawable.LayerDrawable)drawable;for(int i=0;i<layers.getNumberOfLayers();i++)if(layers.getId(i)!=android.R.id.mask)opaqueDrawable(layers.getDrawable(i),color);}}
     static AlertDialog show(AlertDialog.Builder builder){return show(builder.create());}
     static AlertDialog show(AlertDialog dialog){
         dialog.setCancelable(true);dialog.setCanceledOnTouchOutside(true);

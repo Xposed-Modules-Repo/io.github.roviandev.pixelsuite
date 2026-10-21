@@ -132,8 +132,11 @@ final class DrawerFolderAlignment {
             icon.invalidate();changed=true;
         }
         Xp.setAdditionalInstanceField(frame,"pixelsuite_last_alignment",new int[]{size,top,Math.round(label.getTranslationY())});
+        String note="Drawer folder aligned: cell "+frame.getWidth()+"x"+frame.getHeight()+", icon top "+top+", size "+size+", baseline "+baseline+", caption top "+label.getTop()+" shift "+Math.round(label.getTranslationY());
+        if(!note.equals(lastNote)){lastNote=note;Module.log(note);}
         return changed;
     }
+    static String lastNote;
 
     static TextView styleSource(FrameLayout frame){
         if(frame.getParent() instanceof ViewGroup){

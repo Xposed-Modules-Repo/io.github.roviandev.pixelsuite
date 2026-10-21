@@ -1,6 +1,7 @@
 package io.github.pixelsuite;
 
 import android.app.Activity;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.view.View;
 import android.view.ViewGroup;
@@ -48,6 +49,11 @@ final class DrawerDrag {
                 }
             });
         }catch(Throwable error){LauncherFeatures.logOnce("Drawer folder Cancel label unavailable",error);}
+        Xp.hookAllMethods(type("DropTargetBar"),"onDragStart",new Xp.Callback(){
+            protected void afterHookedMethod(Xp.Param p){
+                Session s=session;if(s!=null&&!s.exited)return;
+            }
+        });
         Xp.hookAllMethods(type("dragndrop.DragController"),"callOnDragEnd",new Xp.Callback(){
             protected void afterHookedMethod(Xp.Param p){if(session!=null)finish();}
         });
@@ -59,6 +65,7 @@ final class DrawerDrag {
         for(android.view.ViewParent p=v.getParent();p!=null;p=p.getParent())if(p==s.stay.folder)return true;
         return false;
     }
+    static String heldKey(){Session s=session;return s==null?null:s.key;}
     static void refreshHover(){Session s=session;if(s==null||s.exited)return;try{call(s.controller,"handleMoveEvent",s.lastX,s.lastY);}catch(Throwable ignored){}}
     static void pause(){if(session!=null&&!session.exited)cancel();}
     static boolean start(final View source){
@@ -240,6 +247,7 @@ final class DrawerDrag {
             Object workspace=get(activity,"mWorkspace");set(workspace,"mDragSourceInternal",null);
             call(workspace,"onDragStart",drag,get(controller,"mOptions"));
             call(get(activity,"mDropTargetBar"),"onDragStart",drag,get(controller,"mOptions"));
+            Module.log("Drawer drag handed off above search bar");
         }
     }
     static Object objectMethod(Object self,Method m,Object[] args){
@@ -248,14 +256,10 @@ final class DrawerDrag {
         if(m.getName().equals("toString"))return "PixelSuiteDrawerDrag";return null;
     }
     private static View findCell(View root,int x,int y,ViewGroup layer){
-        int[] base=new int[2];layer.getLocationOnScreen(base);
-        return findCell(root,x+base[0],y+base[1],type("model.data.AppInfo"),new Rect());
-    }
-    private static View findCell(View root,int sx,int sy,Class<?> appInfo,Rect bounds){
         if(root.getVisibility()!=View.VISIBLE||Xp.getAdditionalInstanceField(root,"pixelsuite_picked")!=null)return null;
-        if(!root.getGlobalVisibleRect(bounds)||!bounds.contains(sx,sy))return null;
-        Object tag=root.getTag();if(tag!=null&&(DrawerFolders.isFolder(tag)||appInfo.isInstance(tag))&&!LauncherFeatures.privateItem(tag))return root;
-        if(root instanceof ViewGroup){ViewGroup group=(ViewGroup)root;for(int i=group.getChildCount()-1;i>=0;i--){View result=findCell(group.getChildAt(i),sx,sy,appInfo,bounds);if(result!=null)return result;}}
+        int[] base=new int[2];layer.getLocationOnScreen(base);Rect bounds=new Rect();if(!root.getGlobalVisibleRect(bounds)||!bounds.contains(x+base[0],y+base[1]))return null;
+        Object tag=root.getTag();if(tag!=null&&(DrawerFolders.isFolder(tag)||type("model.data.AppInfo").isInstance(tag))&&!LauncherFeatures.privateItem(tag))return root;
+        if(root instanceof ViewGroup){ViewGroup group=(ViewGroup)root;for(int i=group.getChildCount()-1;i>=0;i--){View result=findCell(group.getChildAt(i),x,y,layer);if(result!=null)return result;}}
         return null;
     }
 }

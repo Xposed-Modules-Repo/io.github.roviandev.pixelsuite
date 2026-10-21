@@ -23,7 +23,7 @@ final class HomeOptions {
 
     private HomeOptions() {}
 
-    static volatile float downY = -1;
+    static volatile float downX = -1, downY = -1;
 
     static void follow(final View popup) {
         if (popup == null || downY < 0) return;
@@ -54,7 +54,7 @@ final class HomeOptions {
                 protected void beforeHookedMethod(Xp.Param p) {
                     if (p.args.length > 0 && p.args[0] instanceof android.view.MotionEvent) {
                         android.view.MotionEvent e = (android.view.MotionEvent) p.args[0];
-                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) downY = e.getRawY();
+                        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) { downX = e.getRawX(); downY = e.getRawY(); }
                     }
                 }
             });
@@ -138,6 +138,7 @@ final class HomeOptions {
             if(text==null||!(apps.toString().contentEquals(text)||"Apps list".contentEquals(text)))continue;
             popup.removeViewAt(i);
             try{LauncherFeatures.call(popup,"assignMarginsAndBackgrounds",popup);}catch(Throwable noReshape){}
+            LauncherFeatures.logOnce("Home menu: Apps list row removed",null);
         }
     }
 
@@ -157,7 +158,7 @@ final class HomeOptions {
         CharSequence apps = appsListLabel(a);
         ArrayList<Object> kept = new ArrayList<Object>();
         for (Object item : items) { CharSequence l = item == null ? "" : label(item); if (!(apps.toString().contentEquals(l) || "Apps list".contentEquals(l))) kept.add(item); }
-        if (kept.size() != items.size()) items = kept;
+        if (kept.size() != items.size()) { items = kept; LauncherFeatures.logOnce("Home menu: Apps list row removed", null); }
         int home = -1;
         for (int i = 0; i < items.size(); i++) {
             Object item = items.get(i);
