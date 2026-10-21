@@ -23,16 +23,15 @@ final class LauncherSearchAliases {
             if(!LauncherFeatures.on(LauncherFeatures.RENAME)||p.args.length<2||!(p.args[0] instanceof String)||!(p.args[1] instanceof ArrayList))return;
             String query=LauncherFeatures.searchText(((String)p.args[0]).trim());if(query.isEmpty())return;
             final List<App> index=new ArrayList<App>();Map<String,Object> additions=new LinkedHashMap<String,Object>();
-            final Class<?> adapterItem=LauncherFeatures.type("allapps.BaseAllAppsAdapter$AdapterItem");
             for(Object info:LauncherFeatures.apps()){
                 App app=new App(info);if(app.key==null)continue;index.add(app);
                 String alias=LauncherFeatures.data.alias(app.key);
                 if(!alias.isEmpty()&&LauncherFeatures.searchText(alias).contains(query)){
-                    Object row=Xp.newInstance(adapterItem,2);LauncherFeatures.set(row,"itemInfo",info);additions.put(app.key,row);
+                    Object row=Xp.newInstance(LauncherFeatures.type("allapps.BaseAllAppsAdapter$AdapterItem"),2);LauncherFeatures.set(row,"itemInfo",info);additions.put(app.key,row);
                 }
             }
             p.args[1]=SearchResultMerge.merge((List<Object>)p.args[1],additions,new SearchResultMerge.Keys<Object>(){
-                public boolean ordinary(Object row){return row.getClass()==adapterItem;}
+                public boolean ordinary(Object row){return row.getClass()==LauncherFeatures.type("allapps.BaseAllAppsAdapter$AdapterItem");}
                 public Set<String> keys(Object row){return rowKeys(row,index);}
             });
         }});

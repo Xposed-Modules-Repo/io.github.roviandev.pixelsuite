@@ -1,6 +1,6 @@
-[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/214-2.0.4)
+[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/221-2.0.5)
 
-# Pixel Suite 2.0.4
+# Pixel Suite 2.0.5
 
 Your Pixel. Your Way.
 
@@ -8,7 +8,17 @@ Your Pixel. Your Way.
 
 Made by **RovianDev**. A free, open-source LSPosed module for Pixel customization, gestures, screenshot tools and file sorting. Each feature has its own control.
 
-## 🎨 New Frosted Glass Slider!
+## 🐛 What’s fixed in 2.0.5
+
+- Fixed moving apps inside **drawer folders** not working correctly.
+
+- Fixed the first app shrinking away and leaving an empty spot when creating a **drawer folder** from several held apps.
+
+- Fixed a square background appearing behind the scatter animation when removing a **drawer folder**.
+
+- Fixed folder icons briefly showing the old app order after reordering. The preview now shows the new order as soon as the folder closes.
+
+## Frosted Glass Slider
 
 Choose the look of supported folders, shortcut menus, toast messages, Google Photos menus and dialogs under **Themes**:
 
@@ -33,7 +43,7 @@ Choose the look of supported folders, shortcut menus, toast messages, Google Pho
 
 **Also in 2.0.4:** Doodles snapping guides, themed Photos bars and message pills, matching shortcut-menu panels, folder uninstall cleanup and Pixel Studio control fixes. Drawing effects do less background work and only run while the screens that need them are open.
 
-[📥 Download 2.0.4](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/214-2.0.4) · [Full 2.0.4 release notes](RELEASE-NOTES-v2.0.4.md) · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/RovianDev/PixelSuite) · [Xposed](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/214-2.0.4)
+[📥 Download 2.0.5](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/221-2.0.5) · [Full 2.0.5 release notes](RELEASE-NOTES-v2.0.5.md) · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/RovianDev/PixelSuite) · [Xposed](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/221-2.0.5)
 
 ## 📱 Launcher and folders
 
@@ -75,7 +85,7 @@ The **Restart** shortcut lets you reload Pixel Launcher or Files after relevant 
 
 **Root + LSPosed API 102 required.** Tested on a Pixel 11 Pro; it should also work on other Pixel devices.
 
-1. Install **PixelSuite-v2.0.4.apk** over the current official version.
+1. Install **PixelSuite-v2.0.5.apk** over the current official version.
 2. Enable Pixel Suite in LSPosed and grant the module app root access to save settings.
 3. Keep the recommended scopes: **System Framework, System UI, Pixel Launcher, Settings, Google, Gboard, Files by Google**, your installed **Files / DocumentsUI** picker, and **Pixel Studio** for screenshot tools. **Add Google Photos for Photos Doodles.**
 4. Reboot, open Pixel Suite and choose your features.

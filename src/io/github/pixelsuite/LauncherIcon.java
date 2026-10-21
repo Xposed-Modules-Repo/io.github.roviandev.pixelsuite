@@ -100,6 +100,7 @@ final class LauncherIcon {
         String pending=proxy?receiver.getIntent().getStringExtra(PENDING):(String)Xp.getAdditionalInstanceField(receiver,PENDING);
         if(owner!=null){LauncherFeatures.set(owner,"mPendingActivityRequestCode",-1);Xp.setAdditionalInstanceField(owner,PENDING,null);}
         final String key=pending;
+        Module.log("Icon picker result: "+resultCode+", pending="+(key!=null));
         if(key==null || resultCode!=Activity.RESULT_OK || result==null || result.getData()==null){finishReceiver(receiver,proxy);return;}
         final Uri uri=result.getData();
         // Keep the granted recipient alive until the selected image has been copied.
@@ -115,12 +116,9 @@ final class LauncherIcon {
                 finishReceiver(receiver,proxy);
             }});
         }});
-    }
-    private static final char[] HEX="0123456789abcdef".toCharArray();
-    /** Lower-case hex SHA-256 of the key + ".png". Asked for every app after a shape or theme change (apply), so no String.format per byte. */
-    static String filename(String key)throws Exception{
-        byte[] digest=MessageDigest.getInstance("SHA-256").digest(key.getBytes("UTF-8"));StringBuilder s=new StringBuilder(digest.length*2+4);
-        for(byte b:digest)s.append(HEX[(b>>4)&15]).append(HEX[b&15]);return s.append(".png").toString();
+    }    static String filename(String key)throws Exception{
+        byte[] digest=MessageDigest.getInstance("SHA-256").digest(key.getBytes("UTF-8"));StringBuilder s=new StringBuilder();
+        for(byte b:digest)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString()+".png";
     }
     static File file(Context c,String key)throws Exception{return new File(new File(c.getFilesDir(),"pixelsuite-icons"),filename(key));}
     static void choose(final Object info){

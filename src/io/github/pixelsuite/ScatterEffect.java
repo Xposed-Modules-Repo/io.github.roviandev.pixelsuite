@@ -33,7 +33,8 @@ final class ScatterEffect {
     /** Plays the effect over {@code view} (a folder icon). Safe to call with any view; failures are ignored. */
     static void play(final View view) {
         try {
-            if (!LauncherFeatures.on(KEY) || view == null || !view.isAttachedToWindow() || view.getWidth() <= 0 || view.getHeight() <= 0) return;
+            String skip = view == null ? "no folder view" : !view.isAttachedToWindow() ? "folder view not on screen" : view.getWidth() <= 0 || view.getHeight() <= 0 ? "folder view not laid out" : null;
+            if (skip != null) { Module.log("Folder remove animation skipped: " + skip); return; }
             Activity a = LauncherFeatures.activity.get(); if (a == null) return;
             if (android.provider.Settings.Global.getFloat(a.getContentResolver(), android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f) return;
             final ViewGroup decor = (ViewGroup) a.getWindow().getDecorView();
@@ -42,16 +43,28 @@ final class ScatterEffect {
             int[] at = new int[2], base = new int[2], inWindow = new int[2]; view.getLocationOnScreen(at); decor.getLocationOnScreen(base); view.getLocationInWindow(inWindow);
             final float left = at[0] - base[0], top = at[1] - base[1], density = view.getContext().getResources().getDisplayMetrics().density;
             Rect source = new Rect(inWindow[0], inWindow[1], inWindow[0] + view.getWidth(), inWindow[1] + view.getHeight());
-            source.intersect(0, 0, decor.getWidth(), decor.getHeight());
-            if (source.width() <= 0 || source.height() <= 0) return;   // the folder is outside the window
+            if (!source.intersect(0, 0, decor.getWidth(), decor.getHeight())) return;
+            if (source.width() <= 0 || source.height() <= 0) { Module.log("Folder remove animation skipped: folder outside the window"); return; }
             final Bitmap picture = Bitmap.createBitmap(source.width(), source.height(), Bitmap.Config.ARGB_8888);
             final float sx = left + (source.left - inWindow[0]), sy = top + (source.top - inWindow[1]);
+            // build 217 (owner's video: a square box behind the animation): the copy is the whole cell, the drawer's
+            // background around the folder included. Only the folder's round icon is kept (the drawer row's icon top and
+            // size, as the folder is aligned to them).
+            float[] round = null;
+            try {
+                if (view instanceof android.widget.FrameLayout) {
+                    int[] ref = DrawerFolderAlignment.reference((android.widget.FrameLayout) view);
+                    if (ref != null && ref[1] > 0) round = new float[]{view.getWidth() / 2f - (source.left - inWindow[0]), ref[0] + ref[1] / 2f - (source.top - inWindow[1]), ref[1] / 2f + density};
+                }
+            } catch (Throwable ignored) { }
+            final float[] keep = round;
             Class<?> copy = Class.forName("android.view.PixelCopy"), listener = Class.forName("android.view.PixelCopy$OnPixelCopyFinishedListener");
             Object done = java.lang.reflect.Proxy.newProxyInstance(listener.getClassLoader(), new Class<?>[]{listener}, new java.lang.reflect.InvocationHandler() {
                 public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) {
                     if (!"onPixelCopyFinished".equals(method.getName())) return null;
                     try {
-                        if (args == null || ((Number) args[0]).intValue() != 0) { picture.recycle(); LauncherFeatures.logOnce("Folder remove animation: screen copy failed (" + (args == null ? "?" : args[0]) + ")", null); return null; }
+                        if (args == null || ((Number) args[0]).intValue() != 0 || !decor.isAttachedToWindow()) { picture.recycle(); Module.log("Folder remove animation skipped: screen copy failed or window closed"); return null; }
+                        if (keep != null) clip(picture, keep);
                         start(decor, picture, sx, sy, density);
                     } catch (Throwable error) { LauncherFeatures.logOnce("Folder remove animation unavailable", error); }
                     return null;
@@ -60,6 +73,17 @@ final class ScatterEffect {
             copy.getMethod("request", android.view.Window.class, Rect.class, Bitmap.class, listener, android.os.Handler.class)
                     .invoke(null, a.getWindow(), source, picture, done, new android.os.Handler(android.os.Looper.getMainLooper()));
         } catch (Throwable error) { LauncherFeatures.logOnce("Folder remove animation unavailable", error); }
+    }
+
+    /** Clears everything of the copy outside the circle {x, y, radius}. */
+    private static void clip(Bitmap picture, float[] circle) {
+        Canvas c = new Canvas(picture);
+        android.graphics.Path outside = new android.graphics.Path();
+        outside.setFillType(android.graphics.Path.FillType.INVERSE_EVEN_ODD);
+        outside.addCircle(circle[0], circle[1], circle[2], android.graphics.Path.Direction.CW);
+        Paint clear = new Paint(Paint.ANTI_ALIAS_FLAG);
+        clear.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR));
+        c.drawPath(outside, clear);
     }
 
     private static void start(final ViewGroup decor, Bitmap picture, float left, float top, float density) {
@@ -75,6 +99,7 @@ final class ScatterEffect {
             public void onAnimationEnd(Animator x) { decor.getOverlay().remove(effect); decor.invalidate(); effect.release(); }
         });
         animator.start();
+        Module.log("Folder remove animation: " + effect.count + " pieces at " + Math.round(effect.left) + "," + Math.round(effect.top));
     }
 
     /** The animation itself: one drawable, one clock. */

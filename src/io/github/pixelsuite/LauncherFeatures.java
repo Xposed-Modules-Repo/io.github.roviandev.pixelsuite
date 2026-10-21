@@ -11,6 +11,9 @@ import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.LinearGradient;
 import android.graphics.drawable.GradientDrawable;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.UserHandle;
@@ -20,10 +23,13 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -74,7 +80,7 @@ final class LauncherFeatures {
     static volatile boolean styleDisc=true;
     static boolean frosted(){return restyle&&(on(GRID)||on(DRAWER)||on(RENAME)||on(ICONS)||on(DRAG_PILL));}
     static void install(ClassLoader cl) {
-        loader = cl; types.clear();
+        loader = cl;
         try {
             Xp.hookAllMethods(type("Launcher"), "onCreate", new Xp.Callback() {
                 protected void beforeHookedMethod(Xp.Param p) {
@@ -131,16 +137,10 @@ final class LauncherFeatures {
             ThemeFolderRestore.install();
             installMenus();
             try{HomeOptions.install();}catch(Throwable error){Module.log("Pixel Suite settings row unavailable",error);}
-            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.4)");
+            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.5)");
         } catch (Throwable error) { Module.log("Launcher customization unavailable", error); }
     }
-    /** Launcher classes found so far (layout, touch and draw paths ask for the same few names over and over). */
-    private static final java.util.concurrent.ConcurrentHashMap<String,Class<?>> types=new java.util.concurrent.ConcurrentHashMap<String,Class<?>>();
-    static Class<?> type(String name) {
-        Class<?> found=types.get(name);
-        if(found==null){found=Xp.findClass(ROOT + name, loader);types.put(name,found);}   // a missing class still throws, every time
-        return found;
-    }
+    static Class<?> type(String name) { return Xp.findClass(ROOT + name, loader); }
     static void installBackdropDrawing(){
         final Class<?> folderClass=type("folder.Folder");
         final Class<?> dragLayerClass=type("dragndrop.DragLayer");
@@ -152,23 +152,13 @@ final class LauncherFeatures {
         }});
         // Local frost: views drawn under a frosted panel are clipped out of the panel's frame;
         // the panel draws their blurred copy there instead. Nothing changes outside the frame.
-        // Every child draw of every ViewGroup in the launcher passes here, so this is a plain hooker
-        // (no per-call Param and argument array, unlike Xp.Callback); same order and error handling.
-        try{
-            for(Method m:ViewGroup.class.getDeclaredMethods())if(m.getName().equals("drawChild"))Xp.x().hook(m).intercept(new XposedInterface.Hooker(){
-                public Object intercept(XposedInterface.Chain chain)throws Throwable{
-                    ViewGroup parent=(ViewGroup)chain.getThisObject();List<Object> args=chain.getArgs();android.graphics.Canvas canvas=(android.graphics.Canvas)args.get(0);
-                    boolean layer=dragLayerClass.isInstance(parent);
-                    try{
-                        DropIndicator.beforeDrawChild(parent,canvas,(View)args.get(1));   // drawer drop indicator, behind its icon
-                        if(layer)BackdropSurface.beforeDrawChild(parent,canvas,(View)args.get(1));
-                    }catch(Throwable error){logOnce("Panel draw hook failed",error);}
-                    Object result=chain.proceed();
-                    if(layer)try{BackdropSurface.afterDrawChild(canvas);}catch(Throwable error){logOnce("Panel draw hook failed",error);}
-                    return result;
-                }
-            });
-        }catch(Throwable error){Module.log("Panel drawing hook unavailable",error);}
+        Xp.hookAllMethods(ViewGroup.class,"drawChild",new Xp.Callback(){
+            protected void beforeHookedMethod(Xp.Param p){
+                DropIndicator.beforeDrawChild((ViewGroup)p.thisObject,(android.graphics.Canvas)p.args[0],(View)p.args[1]);   // drawer drop indicator, behind its icon
+                if(dragLayerClass.isInstance(p.thisObject))BackdropSurface.beforeDrawChild((ViewGroup)p.thisObject,(android.graphics.Canvas)p.args[0],(View)p.args[1]);
+            }
+            protected void afterHookedMethod(Xp.Param p){if(dragLayerClass.isInstance(p.thisObject))BackdropSurface.afterDrawChild((android.graphics.Canvas)p.args[0]);}
+        });
     }
     static Object get(Object o, String name) { return Xp.getObjectField(o, name); }
     static void set(Object o, String name, Object v) { Xp.setObjectField(o, name, v); }
@@ -223,7 +213,7 @@ final class LauncherFeatures {
             View decor = a.getWindow().getDecorView(); refreshLabels(decor);
             Object ah = get(call(a, "getAppsView"), "mAH");
             for (Object holder : (List<?>) ah) if (holder != null) call(get(holder, "mAppsList"), "onAppsUpdated");
-        } catch (Throwable e) { logOnce("Launcher refresh failed", e); }
+        } catch (Throwable e) { Module.log("Launcher refresh failed", e); }
         DrawerFolders.scheduleRebind();
         GoogleAliases.publish();
     }
@@ -237,7 +227,7 @@ final class LauncherFeatures {
         try {
             Object ah = get(call(a, "getAppsView"), "mAH");
             for (Object holder : (List<?>) ah) if (holder != null) call(get(holder, "mAppsList"), "onAppsUpdated");
-        } catch (Throwable e) { logOnce("Launcher refresh failed", e); refresh(); }
+        } catch (Throwable e) { Module.log("Launcher refresh failed", e); refresh(); }
     }
     static void refreshLabels(View v) {
         if(type("BubbleTextView").isInstance(v)){
@@ -395,16 +385,7 @@ final class LauncherFeatures {
             folderTitleMinimum.set(new int[]{c.getResources().getIdentifier("folder_title_min_width","dimen",c.getPackageName()),dp(c,40)});
             try{return chain.proceed();}finally{if(previous==null)folderTitleMinimum.remove();else folderTitleMinimum.set(previous);}
         }});
-        // Every dimension read in the process passes here: a plain hooker, no per-call Param (see installBackdropDrawing).
-        try{
-            for(Method method:android.content.res.Resources.class.getDeclaredMethods())if(method.getName().equals("getDimensionPixelSize"))Xp.x().hook(method).intercept(new XposedInterface.Hooker(){public Object intercept(XposedInterface.Chain chain)throws Throwable{
-                int[] minimum=folderTitleMinimum.get();
-                if(minimum==null||minimum[0]==0)return chain.proceed();
-                List<Object> args=chain.getArgs();
-                if(args.size()>0&&args.get(0) instanceof Number&&((Number)args.get(0)).intValue()==minimum[0])return minimum[1];
-                return chain.proceed();
-            }});
-        }catch(Throwable error){Module.log("Folder title width hook unavailable",error);}
+        Xp.hookAllMethods(android.content.res.Resources.class,"getDimensionPixelSize",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){int[] minimum=folderTitleMinimum.get();if(minimum!=null&&minimum[0]!=0&&((Number)p.args[0]).intValue()==minimum[0])p.setResult(minimum[1]);}});
         Xp.hookAllMethods(type("folder.Folder"), "closeComplete", new Xp.Callback() {
             protected void afterHookedMethod(Xp.Param p) {
                 // A drawer folder hidden for the end of its close (DrawerFolders.closeDrawerFolder) is visible again for its next open.
@@ -575,7 +556,7 @@ final class LauncherFeatures {
             try { call(content, "snapToPageImmediately", ((Number) call(content, "getDestinationPage")).intValue()); } catch (Throwable ignored) { }
         } catch (Throwable ignored) { }
         if (DrawerFolders.drawerFolderView(folder)) return;   // the drawer keeps its own state
-        settleHomePage();
+        settleHomePage("close");
     }
 
     /**
@@ -590,7 +571,7 @@ final class LauncherFeatures {
             for (java.lang.reflect.Field f : manager.getClass().getDeclaredFields()) {
                 f.setAccessible(true);
                 Object v = f.get(manager);
-                if (state.isInstance(v)) return v;
+                if (state.isInstance(v)) { logOnce("Launcher state read from StateManager." + f.getName(), null); return v; }
             }
         } catch (Throwable ignored) { }
         return null;
@@ -603,7 +584,7 @@ final class LauncherFeatures {
      * is behind the open folder then) and again as a home folder starts closing. goToState(NORMAL, false) ends a
      * running transition and applies the normal state; it is skipped in any other state (edit mode, overview).
      */
-    static void settleHomePage() {
+    static void settleHomePage(String when) {
         try {
             Activity a = activity.get(); if (a == null) return;
             Object manager = call(a, "getStateManager"), state = launcherState(manager);
@@ -618,7 +599,7 @@ final class LauncherFeatures {
     static final ThreadLocal<Boolean> drawerDrop = new ThreadLocal<Boolean>();
     static void installFolderDropSettle() {
         try {
-            Xp.hookAllMethods(type("folder.Folder"), "onDrop", new Xp.Callback() {
+            int drops = Xp.hookAllMethods(type("folder.Folder"), "onDrop", new Xp.Callback() {
                 protected void beforeHookedMethod(Xp.Param p) {
                     folderDrop.set(Boolean.TRUE);
                     if (DrawerFolders.drawerFolderView((View) p.thisObject)) drawerDrop.set(Boolean.TRUE);
@@ -626,10 +607,10 @@ final class LauncherFeatures {
                 protected void afterHookedMethod(Xp.Param p) {
                     boolean drawer = drawerDrop.get() != null;
                     folderDrop.remove(); drawerDrop.remove();
-                    if (!drawer) new Handler(Looper.getMainLooper()).post(new Runnable() { public void run() { settleHomePage(); } });
+                    if (!drawer) new Handler(Looper.getMainLooper()).post(new Runnable() { public void run() { settleHomePage("drop"); } });
                 }
-            });
-            Xp.hookAllMethods(type("statemanager.StateManager"), "goToState", new Xp.Callback() {
+            }).size();
+            int states = Xp.hookAllMethods(type("statemanager.StateManager"), "goToState", new Xp.Callback() {
                 protected void beforeHookedMethod(Xp.Param p) {
                     if (folderDrop.get() == null || p.args.length < 1) return;
                     try {
@@ -643,7 +624,8 @@ final class LauncherFeatures {
                         else if (p.args.length >= 2 && p.args[1] instanceof Integer) p.args[1] = 0;
                     } catch (Throwable ignored) { }
                 }
-            });
+            }).size();
+            Module.log("Folder drop settle: " + drops + " drop hooks, " + states + " state hooks");
         } catch (Throwable error) { logOnce("Folder drop settle unavailable", error); }
     }
     /** The animation being built opens the folder: its boolean argument if it has one, else the folder's open flag. */
@@ -657,6 +639,7 @@ final class LauncherFeatures {
      * icons' top. Uses the dock's resting layout position, not its current transform, so a
      * drawer folder (dock moved away behind the drawer) gets the same line as a home folder.
      */
+    static int dockLine(Activity a,ViewGroup drag,int[] dock){return dockLine(a,drag,dock,DOCK_GAP_DP);}
     static int dockLine(Activity a,ViewGroup drag,int[] dock,int gapDp){
         View hotseat;
         // Nexus 17 exposes the dock as a field on Launcher; getHotseat belongs to Workspace.
@@ -695,7 +678,17 @@ final class LauncherFeatures {
         return current==ancestor?y:Integer.MIN_VALUE;
     }
     /** Same rule as the PreviewBackground.drawBackground hook: which closed folders use the module's color. */
+    /** The popup menu's colour as the launcher reads it (null when it cannot be read: the folder keeps its stock colour). */
+    static Integer popupColor(Context c){
+        try{int attr=c.getResources().getIdentifier("popupColorPrimary","attr",c.getPackageName());if(attr==0)return null;Object v=Xp.callStaticMethod(type("icons.GraphicsUtils"),"getAttrColor",attr,c);return v instanceof Integer?(Integer)v|0xff000000:null;}catch(Throwable t){return null;}
+    }
     static boolean styledPreview(Object info){return styleDisc&&info!=null&&(DrawerFolders.isFolder(info)||on(GRID));}
+    static void decorateAnimator(Object result,final XposedInterface.Chain chain){
+        if(result instanceof AnimatorSet && Boolean.TRUE.equals(chain.getArgs().get(0))){
+            final Object folder=get(chain.getThisObject(),"folder");
+            ((AnimatorSet)result).addListener(new AnimatorListenerAdapter(){public void onAnimationEnd(Animator a){styleFolder(folder);}});
+        }
+    }
     static void afterClose(Object folder,Runnable task){
         Xp.setAdditionalInstanceField(folder,"pixelsuite_after_close",task);call(folder,"close",true);
     }
@@ -735,10 +728,8 @@ final class LauncherFeatures {
         ((BackdropSurface)background).bind(view);
         view.invalidate();
     }
-    private static final java.util.concurrent.ConcurrentHashMap<String,Integer> systemColors=new java.util.concurrent.ConcurrentHashMap<String,Integer>();
     static int surface(Context c,String name,int fallback){
-        Integer known=systemColors.get(name);
-        int id;if(known!=null)id=known;else{id=c.getResources().getIdentifier(name,"color","android");systemColors.put(name,id);}
+        int id=c.getResources().getIdentifier(name,"color","android");
         try{return id==0?fallback:c.getResources().getColor(id,c.getTheme());}catch(Throwable ignored){return fallback;}
     }
     static int gridFor(Object info) {
@@ -990,16 +981,13 @@ final class LauncherFeatures {
         // (the "white, then blurred" shift). The menu keeps its reveal animation but is opaque from
         // the first frame.
         try {
-            for (Method m : View.class.getDeclaredMethods()) if (m.getName().equals("setAlpha")) Xp.x().hook(m).intercept(new XposedInterface.Hooker() {
-                public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                    if (openingUntil.isEmpty()) return chain.proceed();
-                    Object view = chain.getThisObject(); List<Object> args = chain.getArgs();
-                    if (!(view instanceof ViewGroup) || args.size() != 1 || !(args.get(0) instanceof Float)) return chain.proceed();
-                    Long until = openingUntil.get(view);
-                    if (until == null) return chain.proceed();
-                    if (android.os.SystemClock.uptimeMillis() > until) { openingUntil.remove(view); return chain.proceed(); }
-                    if (((Float) args.get(0)).floatValue() < 1f) return chain.proceed(new Object[]{Float.valueOf(1f)});
-                    return chain.proceed();
+            Xp.hookAllMethods(View.class, "setAlpha", new Xp.Callback() {
+                protected void beforeHookedMethod(Xp.Param p) {
+                    if (openingUntil.isEmpty() || !(p.thisObject instanceof ViewGroup) || p.args.length != 1 || !(p.args[0] instanceof Float)) return;
+                    Long until = openingUntil.get(p.thisObject);
+                    if (until == null) return;
+                    if (android.os.SystemClock.uptimeMillis() > until) { openingUntil.remove(p.thisObject); return; }
+                    if (((Float) p.args[0]).floatValue() < 1f) p.args[0] = Float.valueOf(1f);
                 }
             });
         } catch (Throwable error) { logOnce("Menu open fade unavailable", error); }
@@ -1014,7 +1002,7 @@ final class LauncherFeatures {
         });
         Xp.hookAllMethods(type("popup.ArrowPopup"),"assignMarginsAndBackgrounds",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
             if(p.args.length>0&&p.args[0]==p.thisObject&&type("popup.PopupContainer").isInstance(p.thisObject)&&!privateItem(get(p.thisObject,"itemInfo"))){
-                try{DrawerPopupLayout.compact((ViewGroup)p.thisObject);}catch(Throwable error){logOnce("Drawer compact menu unavailable",error);}
+                try{DrawerPopupLayout.compact((ViewGroup)p.thisObject);}catch(Throwable error){Module.log("Drawer compact menu unavailable",error);}
                 // Module rows ("Change icon", "Rename", "Create folder") in the stock rows' font and weight.
                 try{MenuFont.match((ViewGroup)p.thisObject);}catch(Throwable error){logOnce("Menu font matching unavailable",error);}
                 FrostedSurface.popup((ViewGroup)p.thisObject);

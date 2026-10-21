@@ -1,12 +1,19 @@
 package io.github.pixelsuite;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ClipData;
 import android.content.Context;
+import android.content.DialogInterface;
+import android.graphics.Rect;
+import android.view.DragEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewConfiguration;
+import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -61,6 +68,7 @@ final class DrawerFolders {
         // the launcher for one back callback when the swipe starts; with a drawer folder open that was the drawer's own
         // (it animates the drawer away with the swipe). Now, while a drawer folder is open, the callback only closes
         // the folder; the next back swipe leaves the drawer as usual.
+        int backHooks=0;
         // Only a back that closes the folder counts (preview95 counted any close, so a back right after tapping outside a
         // folder was swallowed). The folder takes back through these methods (the floating-view base class or the
         // folder's own override); closing it by a tap, a drag or a state change never passes here.
@@ -77,10 +85,10 @@ final class DrawerFolders {
                 }catch(Throwable ignored){}
             }
         };
-        for(String closing:new String[]{"handleClose","animateClosed"})Xp.hookAllMethods(type("folder.Folder"),closing,closeFromBack);
+        for(String closing:new String[]{"handleClose","animateClosed"})backHooks+=Xp.hookAllMethods(type("folder.Folder"),closing,closeFromBack).size();
         for(String back:new String[]{"onBackInvoked","onBackPressed","onBackStarted"}){
-            Xp.hookAllMethods(type("AbstractFloatingView"),back,backClose);
-            Xp.hookAllMethods(type("folder.Folder"),back,backClose);
+            backHooks+=Xp.hookAllMethods(type("AbstractFloatingView"),back,backClose).size();
+            backHooks+=Xp.hookAllMethods(type("folder.Folder"),back,backClose).size();
         }
         // Launcher 17 closes the drawer in the predictive back's own animation (CUJ "close all apps back" started at
         // onBackStarted), without onStateBack. Those animation entry points are guarded too: with a drawer folder open,
@@ -88,7 +96,7 @@ final class DrawerFolders {
         for(String cls:new String[]{"com.android.launcher3.uioverrides.states.AllAppsState","com.android.launcher3.LauncherState","com.android.launcher3.allapps.AllAppsTransitionController","com.android.launcher3.uioverrides.touchcontrollers.AllAppsSwipeController"}){
             for(String m:new String[]{"onBackStarted","onBackProgressed","onBackInvoked","onBackCancelled","startBackAnimation","onBackAnimationStarted","handleBackInvoked"}){
                 try{
-                    Xp.hookAllMethods(Xp.findClass(cls,LauncherFeatures.loader),m,new Xp.Callback(){
+                    backHooks+=Xp.hookAllMethods(Xp.findClass(cls,LauncherFeatures.loader),m,new Xp.Callback(){
                         protected void beforeHookedMethod(Xp.Param p){
                             View folder=openDrawerFolder();long ago=android.os.SystemClock.uptimeMillis()-folderClosedAt;
                             if(folder==null&&(folderClosedAt<=0||ago>=700))return;
@@ -97,13 +105,13 @@ final class DrawerFolders {
                             if(n.equals("onBackStarted")&&folder!=null)folderClosedAt=android.os.SystemClock.uptimeMillis();   // this gesture is the folder's
                             p.setResult(null);
                         }
-                    });
+                    }).size();
                 }catch(Throwable missing){}
             }
         }
         for(String launcherClass:new String[]{"com.android.launcher3.Launcher","com.android.launcher3.uioverrides.QuickstepLauncher","com.google.android.apps.nexuslauncher.NexusLauncherActivity"}){
             try{
-                Xp.hookAllMethods(Xp.findClass(launcherClass,LauncherFeatures.loader),"getOnBackAnimationCallback",new Xp.Callback(){
+                backHooks+=Xp.hookAllMethods(Xp.findClass(launcherClass,LauncherFeatures.loader),"getOnBackAnimationCallback",new Xp.Callback(){
                     protected void afterHookedMethod(Xp.Param p){
                         final View folder=openDrawerFolder();if(folder==null)return;
                         Class<?> want=((java.lang.reflect.Method)p.method).getReturnType();
@@ -119,7 +127,7 @@ final class DrawerFolders {
                             }
                         }));
                     }
-                });
+                }).size();
             }catch(Throwable missing){}
         }
         // preview: the hooks above were not enough on the phone ("Drawer folder back hooks 2" and the swipe still went
@@ -128,19 +136,20 @@ final class DrawerFolders {
         // the folder when the swipe completes; otherwise every call passes straight through. Same on both edges.
         try{
             Class<?> dispatcher=Class.forName("android.window.WindowOnBackInvokedDispatcher");
-            Xp.hookAllMethods(dispatcher,"registerOnBackInvokedCallback",new Xp.Callback(){
+            backHooks+=Xp.hookAllMethods(dispatcher,"registerOnBackInvokedCallback",new Xp.Callback(){
                 protected void beforeHookedMethod(Xp.Param p){wrapBack(p,1);}
-            });
-            Xp.hookAllMethods(dispatcher,"unregisterOnBackInvokedCallback",new Xp.Callback(){
+            }).size();
+            backHooks+=Xp.hookAllMethods(dispatcher,"unregisterOnBackInvokedCallback",new Xp.Callback(){
                 protected void beforeHookedMethod(Xp.Param p){if(p.args.length>0){Object w=wrappedBack.remove(p.args[0]);if(w!=null)p.args[0]=w;}}
             }).size();
         }catch(Throwable missing){Module.log("Drawer folder back: dispatcher unavailable ("+missing+")");}
         // Fallback for the non-predictive path (3-button back, apps targeting old back): same rule.
         try{
-            Xp.hookAllMethods(Xp.findClass("com.android.launcher3.Launcher",LauncherFeatures.loader),"onBackPressed",new Xp.Callback(){
+            backHooks+=Xp.hookAllMethods(Xp.findClass("com.android.launcher3.Launcher",LauncherFeatures.loader),"onBackPressed",new Xp.Callback(){
                 protected void beforeHookedMethod(Xp.Param p){View folder=openDrawerFolder();if(folder!=null){folderClosedAt=android.os.SystemClock.uptimeMillis();call(folder,"close",true);p.setResult(null);}}
             }).size();
         }catch(Throwable missing){}
+        Module.log("Drawer folder back hooks "+backHooks);
         // A drawer folder belongs to the drawer. Whenever the launcher heads to any other state
         // (home after unlock, overview, the drawer closing), close it first. Before, locking with a
         // drawer folder open could bring the launcher back to home after unlock with the folder
@@ -445,13 +454,13 @@ final class DrawerFolders {
      * left the drawer. Each folder now carries its own last-open and last-close times, set by the module's own open call
      * and by animateOpen (after it has run), and by any close; it is open while the last open is newer.
      */
-    static void markOpen(View f){
+    static void markOpen(View f,String how){
         if(f==null)return;
         long now=android.os.SystemClock.uptimeMillis();
         Xp.setAdditionalInstanceField(f,"pixelsuite_opened_at",now);
         openFolder=new java.lang.ref.WeakReference<View>(f);folderOpenedAt=now;
     }
-    static void markShut(View f){
+    static void markShut(View f,String how){
         long now=android.os.SystemClock.uptimeMillis();
         Object opened=Xp.getAdditionalInstanceField(f,"pixelsuite_opened_at");
         if(!(opened instanceof Long))return;   // never opened as a drawer folder
@@ -471,25 +480,26 @@ final class DrawerFolders {
 
     private static void installOpenTracking(){
         try{
-            Xp.hookAllMethods(type("folder.Folder"),"animateOpen",new Xp.Callback(){
+            int n=Xp.hookAllMethods(type("folder.Folder"),"animateOpen",new Xp.Callback(){
                 protected void afterHookedMethod(Xp.Param p){
                     View f=(View)p.thisObject;
-                    if(drawerFolderView(f))markOpen(f);
+                    if(drawerFolderView(f))markOpen(f,"animateOpen");
                 }
-            });
+            }).size();
             for(final String m:new String[]{"close","handleClose","animateClosed","closeComplete"}){
                 Xp.Callback shut=new Xp.Callback(){
                     protected void beforeHookedMethod(Xp.Param p){
                         if(!(p.thisObject instanceof View))return;
                         // close(animate) on a folder that is not open does nothing in the launcher (mIsOpen check)
-                        markShut((View)p.thisObject);
+                        markShut((View)p.thisObject,m);
                     }
                 };
-                Xp.hookAllMethods(type("folder.Folder"),m,shut);
+                n+=Xp.hookAllMethods(type("folder.Folder"),m,shut).size();
                 // only close() is concrete there (handleClose is abstract and cannot be hooked)
-                if(m.equals("close"))try{Xp.hookAllMethods(type("AbstractFloatingView"),m,shut);}catch(Throwable ignored){}
+                if(m.equals("close"))try{n+=Xp.hookAllMethods(type("AbstractFloatingView"),m,shut).size();}catch(Throwable ignored){}
             }
             installClickGuard();
+            Module.log("Drawer folder open tracking: "+n+" hooks");
         }catch(Throwable error){Module.log("Drawer folder open tracking unavailable, using the on-screen check",error);}
     }
 
@@ -598,7 +608,7 @@ final class DrawerFolders {
     /** Closes whichever folder is open, home or drawer, without animation (the screen is off). */
     static void closeAnyFolder(Activity a){
         Object top=Xp.callStaticMethod(type("AbstractFloatingView"),"getTopOpenView",a);
-        if(top!=null&&type("folder.Folder").isInstance(top))call(top,"close",false);
+        if(top!=null&&type("folder.Folder").isInstance(top)){call(top,"close",false);Module.log("Folder closed: screen locked");}
     }
     /** The member icon whose menu is open (its screen position places the menu; see DrawerPopupLayout.iconRect). */
     static java.lang.ref.WeakReference<View> heldView=new java.lang.ref.WeakReference<View>(null);
@@ -662,7 +672,13 @@ final class DrawerFolders {
         if(reopenId==id){reopenId=0;icon.post(new Runnable(){public void run(){call(get(icon,"mFolder"),"animateOpen",0,new ArrayList<Object>((List<?>)get(info,"contents")));}});}
         if(animateId==id){animateId=0;icon.post(new Runnable(){public void run(){
             try{Object manager=get(icon,"mPreviewItemManager");List<?> params=(List<?>)get(manager,"mFirstPageParams");
-                if(params.size()>0){Object animation=Xp.newInstance(type("folder.FolderPreviewItemAnim"),manager,params.get(0),-1,-1,0,2,350,null);call(get(animation,"mAnimator"),"start");}
+                // build 216 (owner's video: a new drawer folder made from several held apps showed its first app big, then
+                // shrinking to a dot and gone, leaving its slot empty): the first app grows into its place among the apps the
+                // folder really shows (1 to 4), not always among 2, and the preview is laid out again when it ends.
+                if(params.size()>0){
+                    Runnable settle=new Runnable(){public void run(){try{call(icon,"updatePreviewItems",false);((View)icon).invalidate();}catch(Throwable ignored){}}};
+                    Object animation=Xp.newInstance(type("folder.FolderPreviewItemAnim"),manager,params.get(0),-1,-1,0,Math.min(4,params.size()),350,settle);call(get(animation,"mAnimator"),"start");
+                }
             }catch(Throwable error){Module.log("Drawer folder creation animation unavailable",error);}
         }});}
     }
@@ -699,7 +715,7 @@ final class DrawerFolders {
             Object folder=get(v,"mFolder");ArrayList<Object> content=new ArrayList<Object>((List<?>)get(info,"contents"));
             if(content.size()<2){chooseApps(info);return;}
             call(folder,"animateOpen",0,content);
-            if(folder instanceof View&&openFolder.get()!=folder)markOpen((View)folder);
+            if(folder instanceof View&&openFolder.get()!=folder)markOpen((View)folder,"drawer icon tap");
         }});
         // Hold: the folder's menu (Rename, Sort, Remove) opens under it; moving the finger or
         // holding 1.5 s from finger-down moves the folder like an app (see touch()).
@@ -813,6 +829,7 @@ final class DrawerFolders {
             Object bound=Xp.getAdditionalInstanceField(cell,"pixelsuite_bind_context");
             Context context=bound instanceof Context?(Context)bound:(a!=null?a:cell.getContext());
             bindFolder((FrameLayout)cell,context,id);
+            Module.log("Drawer folder preview updated: "+f.name+" ("+((List<?>)get(cell.getTag(),"contents")).size()+" apps)");
         }
     }
     /** A drawer folder is open, or closed less than 700 ms ago, or one is still on screen (its close animation). */
@@ -1040,6 +1057,9 @@ final class DrawerFolders {
         if(!LauncherFeatures.data.save(folders))return false;LauncherFeatures.refreshOrder();return true;   // order only: keep the built folder icons
     }
     static int nextId(List<LauncherData.Folder> list){int id=1;for(LauncherData.Folder f:list)id=Math.max(id,f.id+1);if(id>=16000)throw new IllegalStateException("Folder limit reached");return id;}
+    static List<String> readOrder(long user){
+        List<String> result=new ArrayList<String>();try{org.json.JSONArray a=new org.json.JSONArray(LauncherFeatures.data.prefs.getString("order:"+user,"[]"));for(int i=0;i<a.length();i++)result.add(a.getString(i));}catch(Exception ignored){}return result;
+    }
     static void create(Object app){
         String key=LauncherFeatures.identity(app);if(key==null)return;
         LauncherData.Folder f=new LauncherData.Folder();f.id=nextId(LauncherFeatures.data.folders());f.name="Folder";f.grid=LauncherFeatures.defaultDrawerGrid();
@@ -1068,6 +1088,12 @@ final class DrawerFolders {
             if(!LauncherFeatures.data.save(list))return false;
             if(creating)animateId=f.id;else reopenId=f.id;LauncherFeatures.refresh();return true;
         }});
+    }
+    static void renameFolder(final LauncherData.Folder f,final boolean creating){
+        Activity a=LauncherFeatures.activity.get();final EditText edit=new EditText(a);edit.setSingleLine();edit.setText(f.name);edit.selectAll();
+        FrostedSurface.show(new AlertDialog.Builder(a).setTitle("Folder name").setView(edit).setNegativeButton("Cancel",null).setPositiveButton("Save",new DialogInterface.OnClickListener(){public void onClick(DialogInterface d,int w){
+            String name=edit.getText().toString().trim();if(name.length()>0&&name.length()<=80)f.name=name;choose(f,creating);
+        }}).create());
     }
     static void changeGrid(Object info,int n){
         LauncherData.Folder f=record(info);if(f==null)return;List<LauncherData.Folder> list=LauncherFeatures.data.folders();for(LauncherData.Folder item:list)if(item.id==f.id)item.grid=LauncherData.grid(n);LauncherFeatures.data.save(list);

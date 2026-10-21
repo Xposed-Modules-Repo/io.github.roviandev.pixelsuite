@@ -30,6 +30,9 @@ final class ClearAll {
 
     private ClearAll() {}
 
+
+    static final String TAG = "[ClearAllFix] ";
+    private static final String LAUNCHER = "com.google.android.apps.nexuslauncher";
     private static final String RECENTS_VIEW = "com.android.quickstep.views.RecentsView";
     private static final String ACTIONS_VIEW = "com.android.quickstep.views.OverviewActionsView";
     private static final String STOCK_CLEAR_ALL = "com.android.quickstep.views.ClearAllButton";
@@ -49,11 +52,12 @@ final class ClearAll {
             sRecentsClass = Xp.findClass(RECENTS_VIEW, cl);
             Class<?> actionsClass = Xp.findClass(ACTIONS_VIEW, cl);
 
-            // Both come back accessible.
             sDismissAllWithView = Xp.findMethodExactIfExists(
                     sRecentsClass, "dismissAllTasks", View.class);
+            if (sDismissAllWithView != null) sDismissAllWithView.setAccessible(true);
             sDismissAllNoArg = Xp.findMethodExactIfExists(
                     sRecentsClass, "dismissAllTasks");
+            if (sDismissAllNoArg != null) sDismissAllNoArg.setAccessible(true);
 
             Xp.hookAllConstructors(sRecentsClass, new Xp.Callback() {
                 @Override
@@ -95,7 +99,8 @@ final class ClearAll {
             Module.log(SUB + "hooks installed (dismissAllTasks(View)="
                     + (sDismissAllWithView != null) + ", ()=" + (sDismissAllNoArg != null) + ")");
         } catch (Throwable t) {
-            Module.log(SUB + "hook setup failed", t);
+            Module.log(SUB + "hook setup failed");
+            Xp.log(t);
         }
     }
 
@@ -114,6 +119,7 @@ final class ClearAll {
             final Method setDisallow = Xp.findMethodExactIfExists(
                     sRecentsClass, "setDisallowScrollToClearAll", boolean.class);
             if (setDisallow != null) {
+                setDisallow.setAccessible(true);
                 Xp.findAndHookMethod(sRecentsClass, "setDisallowScrollToClearAll",
                         boolean.class, new Xp.Callback() {
                             @Override
@@ -145,7 +151,8 @@ final class ClearAll {
                         + "hidden, but its page stays scrollable on this build");
             }
         } catch (Throwable t) {
-            Module.log(SUB + "could not block scrolling to stock Clear all", t);
+            Module.log(SUB + "could not block scrolling to stock Clear all");
+            Xp.log(t);
         }
 
         try {
@@ -167,8 +174,10 @@ final class ClearAll {
                     v.setFocusable(false);
                 }
             });
+            Module.log(SUB + "stock Clear all hidden");
         } catch (Throwable t) {
-            Module.log(SUB + "could not hide stock Clear all", t);
+            Module.log(SUB + "could not hide stock Clear all");
+            Xp.log(t);
         }
     }
 
@@ -187,9 +196,9 @@ final class ClearAll {
         Runnable r = new Runnable() {
             @Override
             public void run() {
-                if (install(host)) return;
-                if (attempt + 1 < MAX_INSTALL_TRIES) scheduleInstall(host, attempt + 1, 400L);
-                else Module.log(SUB + "button could not be installed");
+                if (!install(host) && attempt + 1 < MAX_INSTALL_TRIES) {
+                    scheduleInstall(host, attempt + 1, 400L);
+                }
             }
         };
         if (delayMs <= 0) host.post(r); else host.postDelayed(r, delayMs);
@@ -203,9 +212,15 @@ final class ClearAll {
             if (existing instanceof View) return true;
 
             final LinearLayout row = actionRow(host);
-            if (row == null) return false;                   // not inflated yet: retried
+            if (row == null) {
+                Module.log(SUB + "action_buttons row not found yet");
+                return false;
+            }
             final TextView stock = styleSource(row, host);
-            if (stock == null) return false;
+            if (stock == null) {
+                Module.log(SUB + "no stock button to copy the look from yet");
+                return false;
+            }
 
             final Button mine = new Button(stock.getContext(), null, 0);
             mine.setId(View.generateViewId());
@@ -239,9 +254,12 @@ final class ClearAll {
                     });
                 }
             });
+
+            Module.log(SUB + "button installed in " + host.getClass().getName());
             return true;
         } catch (Throwable t) {
-            Module.log(SUB + "install failed", t);
+            Module.log(SUB + "install failed");
+            Xp.log(t);
             return false;
         }
     }
@@ -250,7 +268,10 @@ final class ClearAll {
         try {
             TextView stock = styleSource(row, host);
             if (stock == null) return;
-            if (mine.getParent() == null) addToRow(row, mine, stock, host);
+            if (mine.getParent() == null) {
+                addToRow(row, mine, stock, host);
+                Module.log(SUB + "button re-attached to row");
+            }
             Look.applyIfChanged(stock, mine);
         } catch (Throwable t) {
             Xp.log(t);
@@ -353,7 +374,8 @@ final class ClearAll {
                 return;
             }
         } catch (Throwable t) {
-            Module.log(SUB + "dismissAllTasks failed, falling back to stock button", t);
+            Module.log(SUB + "dismissAllTasks failed, falling back to stock button");
+            Xp.log(t);
         }
         int cid = id(host, "clear_all", "id");
         View stockClear = cid != 0 ? rv.findViewById(cid) : null;
