@@ -74,9 +74,37 @@ final class ClearAll {
                     protected void afterHookedMethod(Xp.Param param) {
                         Object mine = Xp.getAdditionalInstanceField(param.thisObject, KEY_BUTTON);
                         if (mine instanceof View && !((View) mine).isEnabled()) ((View) mine).setEnabled(true);
+                        try { keepRowForPairs((ViewGroup) param.thisObject); } catch (Throwable ignored) { }
+                        try {
+                            int flags = ((Number) Xp.getObjectField(param.thisObject, "mDisabledFlags")).intValue();
+                            if ((flags & ~1 & ~2) == 0 && (flags & 1) != 0) {
+                                LinearLayout row = actionRow((ViewGroup) param.thisObject);
+                                if (row != null) { row.setEnabled(true); for (int i = 0; i < row.getChildCount(); i++) row.getChildAt(i).setEnabled(true); }
+                                ((View) param.thisObject).setEnabled(true);
+                            }
+                        } catch (Throwable ignored) { }
                     }
                 });
             } catch (Throwable t) { Module.log(SUB + "kept-enabled hook unavailable (" + t + ")"); }
+
+            try {
+                Class<?> base = Xp.findClass("com.android.quickstep.views.OverviewActionsView", cl);
+                Xp.hookAllMethods(base, "updateActionButtonsVisibility", new Xp.Callback() {
+                    @Override
+                    protected void afterHookedMethod(Xp.Param param) {
+                        try { keepRowForPairs((ViewGroup) param.thisObject); } catch (Throwable ignored) { }
+                    }
+                });
+            } catch (Throwable t) { Module.log(SUB + "pair row hook unavailable (" + t + ")"); }
+            try {
+                Xp.hookAllMethods(View.class, "setEnabled", new Xp.Callback() {
+                    @Override
+                    protected void beforeHookedMethod(Xp.Param param) {
+                        if (param.args.length == 1 && Boolean.FALSE.equals(param.args[0])
+                                && Boolean.TRUE.equals(Xp.getAdditionalInstanceField(param.thisObject, KEY_KEEP_ON))) param.args[0] = Boolean.TRUE;
+                    }
+                });
+            } catch (Throwable t) { Module.log(SUB + "keep-on hook unavailable (" + t + ")"); }
 
             hideStockClearAll(cl);
 
@@ -208,6 +236,7 @@ final class ClearAll {
 
             addToRow(row, mine, stock, host);
             Xp.setAdditionalInstanceField(host, KEY_BUTTON, mine);
+            lower(host, row);
 
             row.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
                 @Override
@@ -231,7 +260,16 @@ final class ClearAll {
         }
     }
 
+    static void lower(ViewGroup host, LinearLayout row) {
+        try {
+            boolean portrait = host.getResources().getConfiguration().orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+            float want = portrait ? 40 * host.getResources().getDisplayMetrics().density : 0f;
+            if (row.getTranslationY() != want) row.setTranslationY(want);
+        } catch (Throwable ignored) { }
+    }
+
     private static void heal(ViewGroup host, LinearLayout row, Button mine) {
+        lower(host, row);
         try {
             TextView stock = styleSource(row, host);
             if (stock == null) return;
@@ -263,6 +301,59 @@ final class ClearAll {
             if (c instanceof TextView && c != mine) insertAt = i + 1;
         }
         row.addView(mine, insertAt, lp);
+    }
+
+    private static final String KEY_PAIR_OFF = "clearallfix.pairoff";
+    private static final String KEY_KEEP_ON = "clearallfix.keepon";
+    private static final float DIMMED = 0.38f;
+    private static void keepRowForPairs(ViewGroup host) {
+        Object mine = Xp.getAdditionalInstanceField(host, KEY_BUTTON);
+        LinearLayout row = actionRow(host);
+        if (!(mine instanceof View) || row == null || ((View) mine).getParent() != row) return;
+        boolean pair = Boolean.TRUE.equals(Xp.getObjectField(host, "mIsGroupedTask"));
+        if (pair) {
+            Object alphas = Xp.callMethod(host, "getActionsAlphas");
+            Xp.callMethod(Xp.callMethod(alphas, "get", 6), "setValue", 1f);
+        }
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View c = row.getChildAt(i);
+            if (c == mine || !(c instanceof TextView)) continue;
+            if (Xp.getAdditionalInstanceField(c, KEY_KEEP_ON) == null) { Xp.setAdditionalInstanceField(c, KEY_KEEP_ON, Boolean.TRUE); c.setEnabled(true); }
+            boolean off = Boolean.TRUE.equals(Xp.getAdditionalInstanceField(c, KEY_PAIR_OFF));
+            if (pair == off) continue;
+            Xp.setAdditionalInstanceField(c, KEY_PAIR_OFF, pair ? Boolean.TRUE : null);
+            c.setAlpha(1f);
+            c.setClickable(!pair);
+            textFade((TextView) c, pair ? DIMMED : 1f);
+        }
+        try { TextView stock = styleSource(row, host); if (stock != null) Look.applyIfChanged(stock, (TextView) mine); } catch (Throwable ignored) { }
+    }
+
+    private static void textFade(final TextView t, final float to) {
+        try {
+            Object was = Xp.getAdditionalInstanceField(t, "clearallfix.level");
+            final float from = was instanceof Float ? (Float) was : 1f;
+            Object base = Xp.getAdditionalInstanceField(t, "clearallfix.colors");
+            if (from >= 0.999f || !(base instanceof android.content.res.ColorStateList)) { base = t.getTextColors(); Xp.setAdditionalInstanceField(t, "clearallfix.colors", base); }
+            final android.content.res.ColorStateList colors = (android.content.res.ColorStateList) base;
+            Object running = Xp.getAdditionalInstanceField(t, "clearallfix.anim");
+            if (running instanceof android.animation.ValueAnimator) ((android.animation.ValueAnimator) running).cancel();
+            android.animation.ValueAnimator a = android.animation.ValueAnimator.ofFloat(from, to);
+            a.setDuration(160);
+            a.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() { public void onAnimationUpdate(android.animation.ValueAnimator va) {
+                float f = (Float) va.getAnimatedValue();
+                Xp.setAdditionalInstanceField(t, "clearallfix.level", f);
+                if (f >= 0.999f) t.setTextColor(colors);
+                else {
+                    int c = colors.getColorForState(t.getDrawableState(), colors.getDefaultColor());
+                    t.setTextColor((Math.round(((c >>> 24) & 0xff) * f) << 24) | (c & 0xffffff));
+                }
+                for (android.graphics.drawable.Drawable d : t.getCompoundDrawablesRelative()) if (d != null) d.mutate().setAlpha(Math.round(255 * f));
+                for (android.graphics.drawable.Drawable d : t.getCompoundDrawables()) if (d != null) d.mutate().setAlpha(Math.round(255 * f));
+            } });
+            Xp.setAdditionalInstanceField(t, "clearallfix.anim", a);
+            a.start();
+        } catch (Throwable ignored) { }
     }
 
     private static LinearLayout actionRow(ViewGroup host) {
@@ -387,6 +478,13 @@ final class ClearAll {
     static final class Look {
         private static final String KEY_SIG = "clearallfix.sig";
 
+        static ColorStateList baseColors(TextView stock) {
+            Object level = Xp.getAdditionalInstanceField(stock, "clearallfix.level");
+            Object base = Xp.getAdditionalInstanceField(stock, "clearallfix.colors");
+            if (level instanceof Float && (Float) level < 0.999f && base instanceof ColorStateList) return (ColorStateList) base;
+            return stock.getTextColors();
+        }
+
         static void applyIfChanged(TextView stock, TextView mine) {
             String sig = signature(stock);
             Object old = Xp.getAdditionalInstanceField(mine, KEY_SIG);
@@ -408,7 +506,7 @@ final class ClearAll {
             }
             mine.setElevation(stock.getElevation());
 
-            mine.setTextColor(stock.getTextColors());
+            mine.setTextColor(baseColors(stock));
             mine.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, stock.getTextSize());
             mine.setTypeface(stock.getTypeface());
             mine.setLetterSpacing(stock.getLetterSpacing());
@@ -434,7 +532,7 @@ final class ClearAll {
                 int h = start.getBounds().height() > 0 ? start.getBounds().height()
                         : start.getIntrinsicHeight();
                 ColorStateList tint = stock.getCompoundDrawableTintList();
-                CrossDrawable x = new CrossDrawable(tint != null ? tint : stock.getTextColors());
+                CrossDrawable x = new CrossDrawable(tint != null ? tint : baseColors(stock));
                 x.setBounds(0, 0, Math.max(w, 1), Math.max(h, 1));
                 mine.setCompoundDrawablesRelative(x, null, null, null);
                 mine.setCompoundDrawablePadding(stock.getCompoundDrawablePadding());
@@ -448,7 +546,7 @@ final class ClearAll {
         private static String signature(TextView s) {
             Drawable bg = s.getBackground();
             Drawable start = s.getCompoundDrawablesRelative()[0];
-            return s.getTextSize() + "|" + s.getTextColors().getDefaultColor() + "|"
+            return s.getTextSize() + "|" + baseColors(s).getDefaultColor() + "|"
                     + s.getPaddingStart() + "," + s.getPaddingTop() + ","
                     + s.getPaddingEnd() + "," + s.getPaddingBottom() + "|"
                     + (bg == null ? 0 : System.identityHashCode(bg.getConstantState())) + "|"

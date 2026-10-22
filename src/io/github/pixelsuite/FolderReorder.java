@@ -131,7 +131,7 @@ final class FolderReorder {
         for (View v : original) if (v != source && !picked(v)) r.add(v);
         return r;
     }
-    private static boolean picked(View v) { return Boolean.TRUE.equals(Xp.getAdditionalInstanceField(v, "pixelsuite_picked")); }
+    private static boolean picked(View v) { return MultiDrag.active() && Boolean.TRUE.equals(Xp.getAdditionalInstanceField(v, "pixelsuite_picked")); }
     private int lastGroupSize = 1;
     private boolean groupChanged() { return group().size() != lastGroupSize; }
 

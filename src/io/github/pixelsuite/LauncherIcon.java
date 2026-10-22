@@ -11,6 +11,7 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.drawable.BitmapDrawable;
 import android.media.ExifInterface;
 import android.net.Uri;
@@ -97,23 +98,68 @@ final class LauncherIcon {
         if(key==null || resultCode!=Activity.RESULT_OK || result==null || result.getData()==null){finishReceiver(receiver,proxy);return;}
         final Uri uri=result.getData();
         IO.execute(new Runnable(){public void run(){
-            boolean success=false;
-            try{importImage(receiver,key,uri);success=true;}catch(Throwable error){Module.log("Custom icon import failed",error);}
-            final boolean ok=success;
+            Bitmap picture=null;
+            try{picture=load(receiver,uri);}catch(Throwable error){Module.log("Custom icon import failed",error);}
+            final Bitmap loaded=picture;
             receiver.runOnUiThread(new Runnable(){public void run(){
-                synchronized(cache){retire(key);}
-                LauncherFeatures.refresh();
-                if(!receiver.isDestroyed())Toast.makeText(receiver,ok?"Icon updated":"Could not read this image. Try another image.",Toast.LENGTH_SHORT).show();
+                Activity host=proxy?LauncherFeatures.activity.get():receiver;
+                if(loaded==null){
+                    if(!receiver.isDestroyed())Toast.makeText(receiver,"Could not read this image. Try another image.",Toast.LENGTH_SHORT).show();
+                    finishReceiver(receiver,proxy);return;
+                }
+                if(host==null||host.isDestroyed()||host.isFinishing()){
+                    final Context app=receiver.getApplicationContext();
+                    IO.execute(new Runnable(){public void run(){
+                        boolean success=false;
+                        try{int side=Math.min(loaded.getWidth(),loaded.getHeight());RectF middle=new RectF((loaded.getWidth()-side)/2f,(loaded.getHeight()-side)/2f,(loaded.getWidth()+side)/2f,(loaded.getHeight()+side)/2f);
+                            Bitmap icon=IconEditor.render(loaded,middle,512);try{store(app,key,icon);success=true;}finally{icon.recycle();}}
+                        catch(Throwable error){Module.log("Custom icon save failed",error);}
+                        finally{loaded.recycle();}
+                        final boolean ok=success;
+                        main.post(new Runnable(){public void run(){
+                            if(ok){synchronized(cache){retire(key);}LauncherFeatures.refresh();}
+                            if(!receiver.isDestroyed())Toast.makeText(receiver,ok?"Icon updated":"Could not read this image. Try another image.",Toast.LENGTH_SHORT).show();
+                            finishReceiver(receiver,proxy);
+                        }});
+                    }});
+                    return;
+                }
                 finishReceiver(receiver,proxy);
+                final Context hostApp=host.getApplicationContext();
+                Chosen chosen=chosen(key);
+                IconEditor.show(host,loaded,chosen.label,chosen.icon.get(),new IconEditor.Result(){
+                    public void save(final Bitmap picture,final RectF area,final IconEditor.Done done){
+                        final Context c=hostApp;
+                        IO.execute(new Runnable(){public void run(){
+                            boolean success=false;
+                            try{Bitmap icon=IconEditor.render(picture,area,512);try{store(c,key,icon);success=true;}finally{icon.recycle();}}
+                            catch(Throwable error){Module.log("Custom icon save failed",error);}
+                            final boolean ok=success;
+                            main.post(new Runnable(){public void run(){
+                                if(ok){synchronized(cache){retire(key);}LauncherFeatures.refresh();}
+                                done.run(ok);
+                            }});
+                        }});
+                    }
+                });
             }});
         }});
-    }    static String filename(String key)throws Exception{
+    }
+    static final android.os.Handler main=new android.os.Handler(android.os.Looper.getMainLooper());
+    static final class Chosen{String label="";java.lang.ref.WeakReference<android.view.View> icon=new java.lang.ref.WeakReference<android.view.View>(null);}
+    static final Map<String,Chosen> chosenApps=new HashMap<String,Chosen>();
+    static Chosen chosen(String key){synchronized(chosenApps){Chosen c=chosenApps.get(key);return c!=null?c:new Chosen();}}    static String filename(String key)throws Exception{
         byte[] digest=MessageDigest.getInstance("SHA-256").digest(key.getBytes("UTF-8"));StringBuilder s=new StringBuilder();
         for(byte b:digest)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString()+".png";
     }
     static File file(Context c,String key)throws Exception{return new File(new File(c.getFilesDir(),"pixelsuite-icons"),filename(key));}
-    static void choose(final Object info){
+    static void choose(final Object info){choose(info,null);}
+    static void choose(final Object info,Object popup){
         final Activity a=LauncherFeatures.activity.get();final String key=LauncherFeatures.identity(info);if(a==null||key==null)return;
+        Chosen chosen=new Chosen();
+        try{Object title=get(info,"title");if(title!=null)chosen.label=title.toString();}catch(Throwable ignored){}
+        try{Object view=popup==null?null:get(popup,"originalIcon");if(view instanceof android.view.View)chosen.icon=new java.lang.ref.WeakReference<android.view.View>((android.view.View)view);}catch(Throwable ignored){}
+        synchronized(chosenApps){chosenApps.clear();chosenApps.put(key,chosen);}
         pick(a,key);
     }
     static void pick(final Activity a,final String key){
@@ -146,6 +192,40 @@ final class LauncherIcon {
         Xp.setAdditionalInstanceField(a,PENDING,key);
         try{a.startActivityForResult(intent,REQUEST);}catch(Exception error){Xp.setAdditionalInstanceField(a,PENDING,null);Toast.makeText(a,photos?"Photos is unavailable. Choose Files instead.":"Files is unavailable",0).show();}
     }
+    static Bitmap load(Context c,Uri uri)throws Exception{
+        File dir=new File(c.getFilesDir(),"pixelsuite-icons");if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("Cannot create icon storage");
+        File input=File.createTempFile("import-",".image",dir);
+        Bitmap decoded=null,oriented=null;
+        try{
+            try(InputStream in=c.getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(input)){
+                if(in==null)throw new IOException("No image stream");byte[] buffer=new byte[16384];int n,total=0;
+                while((n=in.read(buffer))!=-1){total+=n;if(total>32*1024*1024)throw new IOException("Image is too large");out.write(buffer,0,n);}
+            }
+            BitmapFactory.Options options=new BitmapFactory.Options();options.inJustDecodeBounds=true;BitmapFactory.decodeFile(input.getPath(),options);
+            if(options.outWidth<=0||options.outHeight<=0||Math.max(options.outWidth,options.outHeight)>32768)throw new IOException("Unsupported dimensions");
+            options.inSampleSize=1;while(Math.max(options.outWidth,options.outHeight)/options.inSampleSize>2048)options.inSampleSize*=2;
+            options.inJustDecodeBounds=false;options.inPreferredConfig=Bitmap.Config.ARGB_8888;
+            decoded=BitmapFactory.decodeFile(input.getPath(),options);if(decoded==null)throw new IOException("Unsupported image");
+            int orientation=1;try{orientation=new ExifInterface(input.getPath()).getAttributeInt(ExifInterface.TAG_ORIENTATION,1);}catch(IOException ignored){}
+            Matrix matrix=new Matrix();
+            if(orientation==2)matrix.setScale(-1,1);else if(orientation==3)matrix.setRotate(180);else if(orientation==4)matrix.setScale(1,-1);
+            else if(orientation==5){matrix.setRotate(90);matrix.postScale(-1,1);}else if(orientation==6)matrix.setRotate(90);
+            else if(orientation==7){matrix.setRotate(270);matrix.postScale(-1,1);}else if(orientation==8)matrix.setRotate(270);
+            oriented=matrix.isIdentity()?decoded:Bitmap.createBitmap(decoded,0,0,decoded.getWidth(),decoded.getHeight(),matrix,true);
+            if(oriented!=decoded){decoded.recycle();decoded=null;}
+            Bitmap result=oriented;oriented=null;decoded=null;return result;
+        }finally{
+            input.delete();if(oriented!=null&&oriented!=decoded)oriented.recycle();if(decoded!=null)decoded.recycle();
+        }
+    }
+    static void store(Context c,String key,Bitmap icon)throws Exception{
+        File dir=new File(c.getFilesDir(),"pixelsuite-icons");if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("Cannot create icon storage");
+        File output=File.createTempFile("icon-",".png",dir);
+        try{
+            try(FileOutputStream out=new FileOutputStream(output)){if(!icon.compress(Bitmap.CompressFormat.PNG,100,out))throw new IOException("Cannot encode image");out.getFD().sync();}
+            if(!output.renameTo(file(c,key)))throw new IOException("Cannot save image");
+        }finally{output.delete();}
+    }
     static void importImage(Context c,String key,Uri uri)throws Exception{
         File dir=new File(c.getFilesDir(),"pixelsuite-icons");if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("Cannot create icon storage");
         File input=File.createTempFile("import-",".image",dir),output=File.createTempFile("icon-",".png",dir);
@@ -177,19 +257,79 @@ final class LauncherIcon {
         int side=Math.min(input.getWidth(),input.getHeight());int x=(input.getWidth()-side)/2,y=(input.getHeight()-side)/2;
         Bitmap output=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(output);c.drawBitmap(input,new Rect(x,y,x+side,y+side),new Rect(0,0,size,size),new Paint(3));return output;
     }
+    static final class Bleed extends BitmapDrawable{
+        Bleed(android.content.res.Resources r,Bitmap b){super(r,b);}
+        @Override public void draw(Canvas c){
+            Rect b=getBounds();Bitmap image=getBitmap();if(image==null||b.isEmpty())return;
+            float extra=Math.max(3f,b.width()*0.01f);
+            c.drawBitmap(image,null,new android.graphics.RectF(b.left-extra,b.top-extra,b.right+extra,b.bottom+extra),getPaint());
+        }
+    }
+    static android.graphics.Picture shown(Context c,Object bitmapInfo,int size){
+        android.graphics.Picture picture=new android.graphics.Picture();
+        try{
+            Object manager=Xp.callMethod(LauncherFeatures.type("graphics.ThemeManager").getField("INSTANCE").get(null),"get",c);
+            Object state=get(manager,"iconState");
+            Object shape=get(get(manager,"iconShapeData"),"value");
+            int flags=2|4;
+            if(get(state,"themeController")!=null)flags|=1;
+            android.graphics.drawable.Drawable d=(android.graphics.drawable.Drawable)Xp.callMethod(bitmapInfo,"newIcon",c,flags,shape);
+            d.setBounds(0,0,size,size);
+            Canvas canvas=picture.beginRecording(size,size);
+            try{d.draw(canvas);}finally{picture.endRecording();}
+            return picture;
+        }catch(Throwable error){LauncherFeatures.logOnce("Icon export: launcher drawing unavailable, shape used",error);}
+        try{
+            Object image=get(bitmapInfo,"icon");if(!(image instanceof Bitmap))return null;
+            picture=new android.graphics.Picture();
+            Canvas canvas=picture.beginRecording(size,size);
+            try{
+                float inner=size*0.92f,at=(size-inner)/2f;
+                android.graphics.Path path=IconEditor.shape(c,inner);path.offset(at,at);
+                canvas.clipPath(path);canvas.drawBitmap((Bitmap)image,null,new android.graphics.RectF(at,at,at+inner,at+inner),new Paint(Paint.FILTER_BITMAP_FLAG|Paint.ANTI_ALIAS_FLAG));
+            }finally{picture.endRecording();}
+            return picture;
+        }catch(Throwable error){return null;}
+    }
+    static Bitmap picture(android.graphics.Picture picture)throws Exception{
+        Bitmap drawn=(Bitmap)Bitmap.class.getMethod("createBitmap",android.graphics.Picture.class).invoke(null,picture);
+        if(drawn.getConfig()==Bitmap.Config.ARGB_8888)return drawn;
+        Bitmap plain=drawn.copy(Bitmap.Config.ARGB_8888,false);drawn.recycle();
+        if(plain==null)throw new IOException("Icon could not be read back");
+        return plain;
+    }
+    static final Set<Object> ourPictures=Collections.newSetFromMap(new WeakHashMap<Object,Boolean>());
+    static boolean ours(Object bitmapInfo){
+        if(bitmapInfo==null)return false;
+        if(cache.containsValue(bitmapInfo)||retired.contains(bitmapInfo))return true;
+        try{Object picture=get(bitmapInfo,"icon");return picture!=null&&ourPictures.contains(picture);}catch(Throwable t){return false;}
+    }
+    static final Set<String> reloaded=new HashSet<String>();
+    static void reloadNatives(String key){
+        if(!reloaded.add(key))return;
+        main.removeCallbacks(reloadAll);main.postDelayed(reloadAll,300);
+    }
+    static final Runnable reloadAll=new Runnable(){public void run(){
+        try{Activity a=LauncherFeatures.activity.get();if(a==null)return;Object model=get(a,"mModel");call(model,"forceReload","pixelsuite icon reset");Module.log("Custom icons: launcher icons reloaded to find an app's own icon");}
+        catch(Throwable error){LauncherFeatures.logOnce("Icon reload unavailable",error);}
+    }};
     static void nativeLoaded(Object info){
         String key=LauncherFeatures.identity(info);if(key==null)return;
-        Object bitmap=get(info,"bitmap");originals.put(info,bitmap);synchronized(cache){nativeIcons.put(key,bitmap);}
+        Object bitmap=get(info,"bitmap");synchronized(cache){if(ours(bitmap))return;originals.put(info,bitmap);nativeIcons.put(key,bitmap);}
     }
     static void apply(Object info,String key){
         synchronized(cache){
             Object current=get(info,"bitmap");
-            boolean ours=cache.containsValue(current)||retired.contains(current);
+            boolean ours=ours(current);
             if(originals.containsKey(info)&&!ours&&current!=originals.get(info)){originals.put(info,current);nativeIcons.put(key,current);}
             if(!originals.containsKey(info)){
                 Object saved=nativeIcons.get(key);
-                originals.put(info,(current==cache.get(key)||retired.contains(current))&&saved!=null?saved:current);
-                if(current!=cache.get(key)&&!retired.contains(current))nativeIcons.put(key,current);
+                originals.put(info,ours&&saved!=null?saved:current);
+                if(!ours)nativeIcons.put(key,current);
+            }
+            if(ours(originals.get(info))){
+                Object saved=nativeIcons.get(key);
+                if(saved!=null&&!ours(saved))originals.put(info,saved);else reloadNatives(key);
             }
             if(!LauncherFeatures.on(LauncherFeatures.ICONS)){LauncherFeatures.set(info,"bitmap",originals.get(info));return;}
             Object replacement=cache.get(key);
@@ -207,8 +347,9 @@ final class LauncherIcon {
                         LauncherFeatures.set(options,"wrapNonAdaptiveIcon",true);LauncherFeatures.set(options,"addShadows",true);
                         LauncherFeatures.set(options,"iconScale",1f);LauncherFeatures.set(options,"isFullBleed",true);
                         LauncherFeatures.set(options,"userHandle",get(info,"user"));
-                        replacement=call(factory,"createBadgedIconBitmap",new BitmapDrawable(a.getResources(),image),options);
+                        replacement=call(factory,"createBadgedIconBitmap",new Bleed(a.getResources(),image),options);
                         cache.put(key,replacement);
+                        try{Object picture=get(replacement,"icon");if(picture!=null)ourPictures.add(picture);}catch(Throwable ignored){}
                     }finally{call(factory,"close");image.recycle();}
                 }
             }catch(Throwable error){missing.add(key);Module.log("Custom icon unavailable",error);}

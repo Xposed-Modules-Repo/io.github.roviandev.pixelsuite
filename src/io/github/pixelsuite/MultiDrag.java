@@ -118,7 +118,7 @@ final class MultiDrag {
             pick.alpha = hit.getAlpha(); pick.scaleX = hit.getScaleX(); pick.scaleY = hit.getScaleY();
             picks.add(pick);
             if (!attach(a)) { picks.remove(pick); why("tap ignored: could not attach the stack to the drag layer"); return; }
-            Xp.setAdditionalInstanceField(hit, "pixelsuite_picked", Boolean.TRUE);
+            Xp.setAdditionalInstanceField(hit, "pixelsuite_picked", Boolean.TRUE); hidden.put(hit, Boolean.TRUE);
             float left = 0f;
             hit.animate().alpha(left).scaleX(.82f).scaleY(.82f).setDuration(160).setInterpolator(STANDARD).start();
             badge.count(1 + picks.size());
@@ -146,7 +146,7 @@ final class MultiDrag {
         for (Pick p : picks) if (drawerItem(p.info) ? key != null && key.equals(p.key) : p.view == v && p.info == tag) match = p;
         v.animate().cancel();
         if (match != null) {
-            match.view = v; Xp.setAdditionalInstanceField(v, "pixelsuite_picked", Boolean.TRUE);
+            match.view = v; Xp.setAdditionalInstanceField(v, "pixelsuite_picked", Boolean.TRUE); hidden.put(v, Boolean.TRUE);
             v.setAlpha(0f); v.setScaleX(.82f); v.setScaleY(.82f);
         } else if (flagged) {
             Xp.setAdditionalInstanceField(v, "pixelsuite_picked", null);
@@ -216,6 +216,17 @@ final class MultiDrag {
             if (d == null || size <= 0) return null;
             float scale = v.getScaleX();
             Bitmap b = null;
+            try {
+                android.graphics.Picture picture = new android.graphics.Picture();
+                Rect old = d.copyBounds();
+                Canvas rec = picture.beginRecording(size, size);
+                try { d.setBounds(0, 0, size, size); d.draw(rec); } finally { picture.endRecording(); d.setBounds(old); }
+                Bitmap drawn = LauncherIcon.picture(picture);
+                int[] at = new int[2]; v.getLocationInWindow(at);
+                float left = at[0] + (v.getWidth() - size) / 2f * scale, top = at[1] + v.getPaddingTop() * scale;
+                out.set(left, top, left + size * scale, top + size * scale);
+                return drawn;
+            } catch (Throwable t) { why("icon as shown unavailable: " + t); }
             Bitmap own = findBitmap(d, 0);
             if (own != null) {
                 try { b = own.copy(Bitmap.Config.ARGB_8888, false); if (b != null && (b.getWidth() != size || b.getHeight() != size)) { Bitmap fit = Bitmap.createScaledBitmap(b, size, size, true); if (fit != b) { b.recycle(); b = fit; } } }
@@ -551,7 +562,15 @@ final class MultiDrag {
         }
     }
 
+    private static final java.util.WeakHashMap<View, Boolean> hidden = new java.util.WeakHashMap<View, Boolean>();
+
     private static void reset() {
+        for (View v : new ArrayList<View>(hidden.keySet())) {
+            if (v == null || !Boolean.TRUE.equals(Xp.getAdditionalInstanceField(v, "pixelsuite_picked"))) continue;
+            Xp.setAdditionalInstanceField(v, "pixelsuite_picked", null);
+            v.animate().cancel(); v.setAlpha(1f); v.setScaleX(1f); v.setScaleY(1f);
+        }
+        hidden.clear();
         restoreStarters();
         generation++;
         for (Pick p : picks) try { p.icon.recycle(); } catch (Throwable ignored) { }

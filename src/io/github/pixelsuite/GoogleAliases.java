@@ -7,20 +7,32 @@ import java.util.*;
 final class GoogleAliases {
     static volatile org.json.JSONObject aliases=new org.json.JSONObject();
     static long loaded;static boolean listening;static String published;
-    static final Map<android.graphics.Bitmap,String> exportedIcons=new WeakHashMap<android.graphics.Bitmap,String>();
+    static final Set<String> exportedIcons=new HashSet<String>();
+    static final Map<String,String[]> iconHashes=new HashMap<String,String[]>();
     static void publish(){
         Activity a=LauncherFeatures.activity.get();if(a==null||LauncherFeatures.data==null)return;
         try{
-            final org.json.JSONObject root=new org.json.JSONObject();final Map<String,android.graphics.Bitmap> icons=new HashMap<String,android.graphics.Bitmap>();
+            final org.json.JSONObject root=new org.json.JSONObject();final Map<String,android.graphics.Picture> icons=new HashMap<String,android.graphics.Picture>();
+            final Map<String,String> signatures=new HashMap<String,String>();
             List<Object> apps=LauncherFeatures.apps();final Map<String,String> nativeLabels=new HashMap<String,String>();
             for(Object info:apps){String key=LauncherFeatures.identity(info);CharSequence title=LauncherFeatures.nativeTitles.get(key);if(title!=null)nativeLabels.put(key,title.toString());}
+            boolean iconsOn=LauncherFeatures.on(LauncherFeatures.ICONS);
+            String look=ShapeWatch.token(a);
             for(Object info:apps){
                 String key=LauncherFeatures.identity(info);if(key==null)continue;String alias=LauncherFeatures.on(LauncherFeatures.RENAME)?LauncherFeatures.data.alias(key):"";
-                Object replacement; synchronized(LauncherIcon.cache){replacement=LauncherFeatures.on(LauncherFeatures.ICONS)?LauncherIcon.cache.get(key):null;}
-                if(alias.isEmpty()&&replacement==null)continue;
+                Object replacement; synchronized(LauncherIcon.cache){replacement=iconsOn?LauncherIcon.cache.get(key):null;}
+                Object shownFrom=replacement;
+                boolean locked=false;try{Object tc=LauncherFeatures.call(info,"getTargetComponent");locked=tc instanceof ComponentName&&PrivacyLock.lockedNow(a).contains(((ComponentName)tc).getPackageName());}catch(Throwable ignored){}
+                if(shownFrom==null&&(iconsOn||locked)){try{shownFrom=LauncherFeatures.get(info,"bitmap");}catch(Throwable ignored){}}
+                if(alias.isEmpty()&&shownFrom==null)continue;
                 ComponentName c=(ComponentName)LauncherFeatures.call(info,"getTargetComponent");
                 org.json.JSONObject entry=new org.json.JSONObject();entry.put("alias",alias);entry.put("package",c.getPackageName());entry.put("component",c.flattenToString());entry.put("user",Long.parseLong(key.substring(0,key.indexOf('|'))));root.put(key,entry);
-                if(replacement!=null){Object image=LauncherFeatures.get(replacement,"icon");if(image instanceof android.graphics.Bitmap)icons.put(key,(android.graphics.Bitmap)image);}
+                if(shownFrom!=null){
+                    String signature=System.identityHashCode(shownFrom)+"|"+look+(locked?"|locked":"");
+                    String[] known;synchronized(iconHashes){known=iconHashes.get(key);}
+                    if(known!=null&&known[0].equals(signature))entry.put("icon",known[1]);
+                    else{android.graphics.Picture image=LauncherIcon.shown(a,shownFrom,128);if(image!=null&&locked)image=PrivacyBadges.withPadlock(a,image,128);if(image!=null){icons.put(key,image);signatures.put(key,signature);}}
+                }
             }
             final Activity owner=a;
             LauncherIcon.IO.execute(new Runnable(){public void run(){try{
@@ -35,18 +47,25 @@ final class GoogleAliases {
                 }
                 Map<String,Integer> counts=new HashMap<String,Integer>();for(String title:nativeLabels.values()){Integer count=counts.get(title);counts.put(title,count==null?1:count+1);}
                 for(Map.Entry<String,String> original:originals.entrySet())if(Integer.valueOf(1).equals(counts.get(original.getValue())))root.getJSONObject(original.getKey()).put("uniqueOriginal",original.getValue());
-                for(Map.Entry<String,android.graphics.Bitmap> item:icons.entrySet()){
-                    String existing=exportedIcons.get(item.getValue());if(existing!=null){root.getJSONObject(item.getKey()).put("icon",existing);continue;}
-                    android.graphics.Bitmap image=android.graphics.Bitmap.createScaledBitmap(item.getValue(),128,128,true);
-                    java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);if(image!=item.getValue())image.recycle();byte[] png=out.toByteArray();
-                    StringBuilder hash=new StringBuilder();for(byte b:java.security.MessageDigest.getInstance("SHA-256").digest(png))hash.append(String.format(Locale.ROOT,"%02x",b&255));
-                    Bundle data=new Bundle();data.putByteArray("png",png);owner.getContentResolver().call(AliasProvider.URI,"icon",hash.toString(),data);root.getJSONObject(item.getKey()).put("icon",hash.toString());
-                    exportedIcons.put(item.getValue(),hash.toString());
+                Map<String,String> shownNames=new HashMap<String,String>();
+                for(Map.Entry<String,String> n:nativeLabels.entrySet()){org.json.JSONObject e=root.optJSONObject(n.getKey());String alias=e==null?"":e.optString("alias");shownNames.put(n.getKey(),alias.isEmpty()?n.getValue():alias);}
+                Map<String,Integer> shownCounts=new HashMap<String,Integer>();for(String title:shownNames.values()){Integer count=shownCounts.get(title);shownCounts.put(title,count==null?1:count+1);}
+                Iterator<String> each=root.keys();
+                while(each.hasNext()){String key=each.next();String shown=shownNames.get(key);if(shown!=null&&Integer.valueOf(1).equals(shownCounts.get(shown)))root.getJSONObject(key).put("uniqueShown",shown);}
+                for(Map.Entry<String,android.graphics.Picture> item:icons.entrySet()){
+                    try{
+                        android.graphics.Bitmap image=LauncherIcon.picture(item.getValue());
+                        java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);image.recycle();byte[] png=out.toByteArray();
+                        StringBuilder hash=new StringBuilder();for(byte b:java.security.MessageDigest.getInstance("SHA-256").digest(png))hash.append(String.format(Locale.ROOT,"%02x",b&255));
+                        if(!exportedIcons.contains(hash.toString())){Bundle data=new Bundle();data.putByteArray("png",png);owner.getContentResolver().call(AliasProvider.URI,"icon",hash.toString(),data);exportedIcons.add(hash.toString());}
+                        root.getJSONObject(item.getKey()).put("icon",hash.toString());
+                        synchronized(iconHashes){iconHashes.put(item.getKey(),new String[]{signatures.get(item.getKey()),hash.toString()});}
+                    }catch(Throwable error){LauncherFeatures.logOnce("Icon export for the Google app unavailable",error);}
                 }
                 String json=root.toString();if(json.equals(published))return;
                 Bundle data=new Bundle();data.putString("aliases",json);owner.getContentResolver().call(AliasProvider.URI,"replace",null,data);published=json;
                 Set<String> active=new HashSet<String>();Iterator<String> keys=root.keys();while(keys.hasNext())active.add(root.getJSONObject(keys.next()).optString("icon"));
-                Iterator<Map.Entry<android.graphics.Bitmap,String>> cached=exportedIcons.entrySet().iterator();while(cached.hasNext())if(!active.contains(cached.next().getValue()))cached.remove();
+                exportedIcons.retainAll(active);
             }catch(Throwable error){Module.log("Google app customization sync unavailable",error);}}});
         }catch(Throwable error){Module.log("Google app label sync unavailable",error);}
     }
@@ -103,6 +122,16 @@ final class GoogleAliases {
             ComponentName component=info instanceof ActivityInfo&&info.name!=null?new ComponentName(info.packageName,info.name):null;
             String value=alias(component,info.packageName,null);if(value!=null&&!value.isEmpty())p.setResult(value);
         }});
+        Xp.Callback icon=new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
+            try{
+                LauncherActivityInfo info=(LauncherActivityInfo)p.thisObject;
+                if(!android.os.Process.myUserHandle().equals(info.getUser()))return;
+                android.graphics.drawable.Drawable mine=GoogleAppCards.iconFor(info.getComponentName(),info.getUser());
+                if(mine!=null)p.setResult(mine);
+            }catch(Throwable ignored){}
+        }};
+        Xp.hookAllMethods(LauncherActivityInfo.class,"getIcon",icon);
+        Xp.hookAllMethods(LauncherActivityInfo.class,"getBadgedIcon",icon);
         Xp.hookAllMethods(Instrumentation.class,"callActivityOnResume",new Xp.Callback(){protected void beforeHookedMethod(Xp.Param p){loaded=0;reload();}});
         Module.log("Google app label hooks installed");
     }

@@ -74,6 +74,7 @@ final class DrawerFolderMenu {
             dismiss(); LauncherData.Folder now = DrawerFolders.record(info);
             if (now != null && now.sort == FolderSort.AUTO) FolderSort.drawerCustom(id);
         }});
+        PrivacyFolders.addDrawerRow(card, info, new Runnable() { public void run() { dismiss(); } });
         FolderOptions.row(card, "Remove", 8, false, new Runnable() { public void run() { dismiss(); remove(info); } });
     }
 
@@ -110,7 +111,11 @@ final class DrawerFolderMenu {
     static void remove(final Object info) {
         final LauncherData.Folder f = DrawerFolders.record(info); if (f == null) return;
         confirm("Remove folder?", "Remove “" + f.name + "”? Its apps go back to the app drawer. No apps are uninstalled.", new Runnable() {
-            public void run() { DrawerFolders.removeFolder(info); }
+            public void run() {
+                android.app.Activity a = LauncherFeatures.activity.get();
+                if (a != null && PrivacyGuard.ask(a, info, new Runnable() { public void run() { DrawerFolders.removeFolder(info); } })) return;
+                DrawerFolders.removeFolder(info);
+            }
         });
     }
 

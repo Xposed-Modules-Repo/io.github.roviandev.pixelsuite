@@ -17,6 +17,7 @@ final class FeaturePreview extends View implements ViewTreeObserver.OnPreDrawLis
     private static final long HOLD_MS=1100,RESET_MS=240,START_MS=220;
     private static final android.view.animation.LinearInterpolator LINEAR=new android.view.animation.LinearInterpolator();
     private final PreviewScenes scenes;
+    private final int normalSurface;
     private final PreviewIcons icons;
     private final Rect visible=new Rect();
     private ValueAnimator animator;
@@ -29,7 +30,7 @@ final class FeaturePreview extends View implements ViewTreeObserver.OnPreDrawLis
         else if(phase==START){phase=ACTION;progress=0;animate(false);}
     }};
     FeaturePreview(Context c,String key,int accent,int onAccent,int ink,int muted,int surface,boolean dark){
-        super(c);icons=new PreviewIcons(c);scenes=new PreviewScenes(key,accent,onAccent,ink,muted,surface,dark,icons);
+        super(c);normalSurface=AppSurfaces.normalCard(c);icons=new PreviewIcons(c);scenes=new PreviewScenes(key,accent,onAccent,ink,muted,surface,dark,icons);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
     }
     void setHostActive(boolean value){active=value;if(value){allowed=motionAllowed();check();}else stop();}
@@ -70,5 +71,5 @@ final class FeaturePreview extends View implements ViewTreeObserver.OnPreDrawLis
         });animator.start();
     }
     private void stop(){removeCallbacks(continuation);waiting=false;ValueAnimator running=animator;animator=null;if(running!=null)running.cancel();}
-    @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);scenes.draw(canvas,getWidth(),getHeight(),progress,phase==RESET?reset:0);}
+    @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);scenes.surfaceColor(AppSurfaces.active(getContext())?0xff0b0b0b:normalSurface);scenes.draw(canvas,getWidth(),getHeight(),progress,phase==RESET?reset:0);}
 }

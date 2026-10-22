@@ -16,7 +16,7 @@ final class GoogleAppCards {
     static final ThreadLocal<Boolean> writing=new ThreadLocal<Boolean>();
     static final ExecutorService IO=new ThreadPoolExecutor(0,1,10,TimeUnit.SECONDS,new LinkedBlockingQueue<Runnable>());
     static final Set<String> pending=new HashSet<String>();
-    static final android.util.LruCache<String,Bitmap> images=new android.util.LruCache<String,Bitmap>(4*1024*1024){protected int sizeOf(String key,Bitmap image){return image.getByteCount();}};
+    static final android.util.LruCache<String,Bitmap> images=new android.util.LruCache<String,Bitmap>(12*1024*1024){protected int sizeOf(String key,Bitmap image){return image.getByteCount();}};
     static int labelId,iconId;
     static boolean posted;
     static final class Card {
@@ -34,8 +34,8 @@ final class GoogleAppCards {
         long serial=GoogleAliases.serial(c,android.os.Process.myUserHandle());
         org.json.JSONObject match=null;Iterator<String> keys=map.keys();
         while(keys.hasNext()){
-            org.json.JSONObject e=map.optJSONObject(keys.next());if(e==null||e.optLong("user",-1)!=serial||!e.has("uniqueOriginal"))continue;
-            if(!text.equals(e.optString("uniqueOriginal"))&&!text.equals(e.optString("alias")))continue;
+            org.json.JSONObject e=map.optJSONObject(keys.next());if(e==null||e.optLong("user",-1)!=serial||(!e.has("uniqueOriginal")&&!e.has("uniqueShown")))continue;
+            if(!text.equals(e.optString("uniqueShown",null))&&!(e.has("uniqueOriginal")&&(text.equals(e.optString("uniqueOriginal"))||text.equals(e.optString("alias")))))continue;
             if(match!=null)return null;match=e;
         }
         return match;
@@ -54,10 +54,28 @@ final class GoogleAppCards {
             View found=((ViewGroup)label.getParent()).findViewById(iconId);if(!(found instanceof ImageView))return;ImageView icon=(ImageView)found;
             if(card.icon.get()!=icon){card.icon=new WeakReference<ImageView>(icon);card.nativeIcon=icon.getDrawable();card.replaced=false;}
             String hash=entry==null?"":entry.optString("icon");Bitmap bitmap=hash.isEmpty()?null:images.get(hash);
-            if(bitmap!=null){icon.setImageDrawable(new BitmapDrawable(icon.getResources(),bitmap));card.replaced=true;}
+            Drawable now=icon.getDrawable();
+            if(bitmap!=null){if(!(now instanceof BitmapDrawable&&((BitmapDrawable)now).getBitmap()==bitmap))icon.setImageDrawable(new BitmapDrawable(icon.getResources(),bitmap));card.replaced=true;}
             else if(hash.isEmpty()){if(card.replaced)icon.setImageDrawable(card.nativeIcon);card.replaced=false;}
             else load(hash);
         }finally{writing.remove();}
+    }
+    static Drawable iconFor(ComponentName component,UserHandle user){
+        if(component==null)return null;
+        GoogleAliases.reload();org.json.JSONObject map=GoogleAliases.aliases;if(map.length()==0)return null;
+        Context c=GoogleAliases.context();if(c==null)return null;
+        long serial=GoogleAliases.serial(c,user);if(serial<0)return null;
+        org.json.JSONObject e=map.optJSONObject(serial+"|"+component.flattenToString());if(e==null)return null;
+        String hash=e.optString("icon");if(hash.isEmpty()||!HASH.matcher(hash).matches())return null;
+        Bitmap bitmap=images.get(hash);
+        if(bitmap==null){
+            if(Looper.myLooper()==Looper.getMainLooper()){load(hash);return null;}
+            try(java.io.InputStream in=c.getContentResolver().openInputStream(AliasProvider.URI.buildUpon().appendPath("icons").appendPath(hash).build())){bitmap=BitmapFactory.decodeStream(in);}
+            catch(Throwable error){return null;}
+            if(bitmap==null||bitmap.getWidth()>256||bitmap.getHeight()>256)return null;
+            images.put(hash,bitmap);
+        }
+        return new BitmapDrawable(c.getResources(),bitmap);
     }
     static final java.util.regex.Pattern HASH=java.util.regex.Pattern.compile("[a-f0-9]{64}");
     static volatile boolean loggedIcon;
@@ -77,11 +95,24 @@ final class GoogleAppCards {
             card.original=entry==null?original:entry.optString("uniqueOriginal",original);
             String alias=entry==null?"":entry.optString("alias");if(!alias.isEmpty())p.args[0]=alias;changed();
         }});
-        Xp.hookAllMethods(ImageView.class,"setImageDrawable",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
-            if(Boolean.TRUE.equals(writing.get()))return;ImageView icon=(ImageView)p.thisObject;if(!target(icon,false)||!(icon.getParent() instanceof ViewGroup))return;
-            View label=((ViewGroup)icon.getParent()).findViewById(labelId);if(!(label instanceof TextView))return;Card card=cards.get((TextView)label);
-            if(card!=null){card.nativeIcon=icon.getDrawable();card.replaced=false;card.icon=new WeakReference<ImageView>(icon);changed();}
-        }});
+        Xp.hookAllMethods(ImageView.class,"setImageDrawable",new Xp.Callback(){
+            protected void beforeHookedMethod(Xp.Param p){
+                if(Boolean.TRUE.equals(writing.get())||p.args.length!=1)return;ImageView icon=(ImageView)p.thisObject;if(!target(icon,false)||!(icon.getParent() instanceof ViewGroup))return;
+                View label=((ViewGroup)icon.getParent()).findViewById(labelId);if(!(label instanceof TextView))return;Card card=cards.get((TextView)label);
+                if(card==null)return;
+                card.icon=new WeakReference<ImageView>(icon);card.nativeIcon=(Drawable)p.args[0];card.replaced=false;
+                if(card.original==null)return;
+                org.json.JSONObject entry=entry(card.original);String hash=entry==null?"":entry.optString("icon");if(hash.isEmpty())return;
+                Bitmap bitmap=images.get(hash);
+                if(bitmap!=null){p.args[0]=new BitmapDrawable(icon.getResources(),bitmap);card.replaced=true;}
+                else load(hash);
+            }
+            protected void afterHookedMethod(Xp.Param p){
+                if(Boolean.TRUE.equals(writing.get()))return;ImageView icon=(ImageView)p.thisObject;if(!target(icon,false)||!(icon.getParent() instanceof ViewGroup))return;
+                View label=((ViewGroup)icon.getParent()).findViewById(labelId);if(!(label instanceof TextView))return;Card card=cards.get((TextView)label);
+                if(card!=null&&!card.replaced)changed();
+            }
+        });
         Xp.hookAllMethods(View.class,"onAttachedToWindow",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){if(p.thisObject instanceof TextView&&target((View)p.thisObject,true))changed();}});
     }
 }

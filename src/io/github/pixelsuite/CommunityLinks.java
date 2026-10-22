@@ -8,7 +8,7 @@ import android.widget.Toast;
 
 final class CommunityLinks {
     static final String[] NAMES = {"Telegram", "Coffee", "Patreon"};
-    static final String[] CAPTIONS = {"Join the community", "Support development", "Become a patron"};
+    static final String[] CAPTIONS = {"Join the community", "Buy me a coffee", "Become a patron"};
     static final String[] ICONS = {"brand_telegram", "brand_coffee", "brand_patreon"};
     static final String[] URLS = {"https://t.me/RovianDev", "https://buymeacoffee.com/roviandev", "https://www.patreon.com/c/RovianDev"};
     static final int[] BADGES = {0xFFEAF7FF, 0xFFFFDD00, 0xFFFFFFFF};

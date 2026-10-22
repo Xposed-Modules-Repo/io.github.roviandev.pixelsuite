@@ -10,3 +10,11 @@ are applied; Patreon uses its current monochrome identity rather than the retire
 Preview43 demo icons: the settings app reads icons locally for a fixed list of known
 Google apps. These icons and app names belong to their respective owners. Missing
 apps use illustrative local fallback drawings. No affiliation or endorsement is implied.
+
+Miscellaneous module credits
+
+Secure screenshots are based on DisableFlagSecure by LSPosed (GPL-3.0): https://github.com/LSPosed/DisableFlagSecure .
+Accessibility hiding is based on DoNotTryAccessibility by Nitsuya (GPL-3.0): https://github.com/Nitsuya/DoNotTryAccessibility .
+The complete GPL-3.0 license is included in the repository LICENSE file.
+
+The Developer options gear is adapted from Google Material Design Icons settings, licensed under Apache 2.0; see LICENSES/material-icons-Apache-2.0.txt in the source tree.

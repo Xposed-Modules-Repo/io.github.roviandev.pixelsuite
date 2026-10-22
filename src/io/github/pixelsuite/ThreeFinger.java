@@ -26,10 +26,11 @@ final class ThreeFinger {
             "com.android.server.wm.SystemGesturesPointerEventListener";
 
     private static final int FINGERS = 3;
-    private static final long SWIPE_TIMEOUT_MS = 800L;
+    private static final long SWIPE_TIMEOUT_MS = 1500L;
     private static final long COOLDOWN_MS = 1200L;
-    private static final float DISTANCE_FRACTION = 0.12f;
-    private static final float MIN_DISTANCE_DP = 80f;
+    private static final float DISTANCE_FRACTION = 0.06f;
+    private static final float MIN_DISTANCE_DP = 48f;
+    private static final float EACH_FRACTION = 0.35f;
     private static final float VERTICAL_RATIO = 1.2f;
 
     private static final int TAKE_SCREENSHOT_FULLSCREEN = 1;
@@ -121,7 +122,7 @@ final class ThreeFinger {
             DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
             float byFraction = dm.heightPixels * DISTANCE_FRACTION;
             float byDp = MIN_DISTANCE_DP * dm.density;
-            sMinDistancePx = Math.max(byDp, Math.min(byFraction, dm.heightPixels * 0.25f));
+            sMinDistancePx = Math.max(byDp, Math.min(byFraction, dm.heightPixels * 0.12f));
 
             sScreenshotHelper = Xp.findClass(
                     "com.android.internal.util.ScreenshotHelper", sClassLoader)
@@ -307,14 +308,18 @@ final class ThreeFinger {
         private void detect(MotionEvent ev) {
             long now = ev.getEventTime();
             if (now - mThreeAt > SWIPE_TIMEOUT_MS) return;
+            float sumY = 0, sumX = 0;
             for (int p = 0; p < FINGERS; p++) {
                 int slot = indexOf(ev.getPointerId(p));
                 if (slot < 0) return;
                 float dy = ev.getY(p) - mDownY[slot];
                 float dx = Math.abs(ev.getX(p) - mDownX[slot]);
-                if (dy < sMinDistancePx) return;
-                if (dy < dx * VERTICAL_RATIO) return;
+                if (dy < sMinDistancePx * EACH_FRACTION) return;
+                sumY += dy; sumX += dx;
             }
+            float dy = sumY / FINGERS, dx = sumX / FINGERS;
+            if (dy < sMinDistancePx) return;
+            if (dy < dx * VERTICAL_RATIO) return;
             mFired = true;
             if (now - mLastShotAt < COOLDOWN_MS) return;
             mLastShotAt = now;

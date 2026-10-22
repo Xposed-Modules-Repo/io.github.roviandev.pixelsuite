@@ -164,6 +164,13 @@ final class DrawerFolders {
                 if(Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_drawer_delegate")))p.setResult(null);
             }
         });
+        Xp.Callback keepOne=new Xp.Callback(){
+            protected void beforeHookedMethod(Xp.Param p){
+                if(Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_drawer_delegate")))p.setResult(Boolean.FALSE);
+            }
+        };
+        Xp.hookAllMethods(type("folder.LauncherDelegate"),"replaceFolderWithFinalItem",keepOne);
+        try{Xp.hookAllMethods(type("folder.LauncherDelegate$FallbackDelegate"),"replaceFolderWithFinalItem",keepOne);}catch(Throwable ignored){}
         Xp.hookAllMethods(type("folder.LauncherDelegate"),"forEachVisibleWorkspacePage",new Xp.Callback(){
             protected void beforeHookedMethod(Xp.Param p){
                 if(Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_drawer_delegate")))p.setResult(null);
@@ -393,8 +400,12 @@ final class DrawerFolders {
     }
 
     private static void installOpenTracking(){
+        installOneAppClose();
         try{
             int n=Xp.hookAllMethods(type("folder.Folder"),"animateOpen",new Xp.Callback(){
+                protected void beforeHookedMethod(Xp.Param p){
+                    try{if(p.args.length==2&&p.args[1] instanceof List&&((List<?>)p.args[1]).size()==1&&p.thisObject instanceof View)p.args[1]=new OneApp((List<?>)p.args[1]);}catch(Throwable ignored){}
+                }
                 protected void afterHookedMethod(Xp.Param p){
                     View f=(View)p.thisObject;
                     if(drawerFolderView(f))markOpen(f,"animateOpen");
@@ -477,6 +488,28 @@ final class DrawerFolders {
         return null;
     }
 
+    private static final ThreadLocal<Boolean> closing=new ThreadLocal<Boolean>();
+    static void installOneAppClose(){
+        try{
+            Xp.hookAllMethods(type("folder.Folder"),"handleClose",new Xp.Callback(){
+                protected void beforeHookedMethod(Xp.Param p){if(p.args.length==1&&Boolean.TRUE.equals(p.args[0])&&p.thisObject instanceof View)closing.set(Boolean.TRUE);}
+                protected void afterHookedMethod(Xp.Param p){closing.remove();}
+            });
+            Xp.hookAllMethods(type("folder.Folder"),"getIconsInReadingOrder",new Xp.Callback(){
+                protected void afterHookedMethod(Xp.Param p){
+                    if(!Boolean.TRUE.equals(closing.get()))return;
+                    closing.remove();
+                    Object r=p.getResult();
+                    if(r instanceof List&&((List<?>)r).size()==1)p.setResult(new OneApp((List<?>)r));
+                }
+            });
+        }catch(Throwable error){LauncherFeatures.logOnce("Drawer folder one-app close unavailable",error);}
+    }
+    static final class OneApp extends ArrayList<Object>{
+        private boolean asked;
+        OneApp(List<?> items){super(items);}
+        @Override public int size(){if(!asked){asked=true;return Math.max(2,super.size());}return super.size();}
+    }
     static boolean drawerFolderView(View folder){
         try{Object info=get(folder,"mInfo");if(info!=null&&isFolder(info))return true;}catch(Throwable ignored){}
         try{Object d=get(folder,"mLauncherDelegate");if(d!=null&&Xp.getAdditionalInstanceField(d,"pixelsuite_drawer_delegate")!=null)return true;}catch(Throwable ignored){}
@@ -603,7 +636,7 @@ final class DrawerFolders {
         DrawerFolderAlignment.attach(icon);
         icon.setOnClickListener(new View.OnClickListener(){public void onClick(View v){
             Object folder=get(v,"mFolder");ArrayList<Object> content=new ArrayList<Object>((List<?>)get(info,"contents"));
-            if(content.size()<2){chooseApps(info);return;}
+            if(content.isEmpty()){chooseApps(info);return;}
             call(folder,"animateOpen",0,content);
             if(folder instanceof View&&openFolder.get()!=folder)markOpen((View)folder,"drawer icon tap");
         }});
@@ -668,15 +701,50 @@ final class DrawerFolders {
     }
     private static int busyWaits;
     private static boolean busyRebindPending;
+    private static android.graphics.Bitmap snapshot(View icon){
+        try{
+            if(icon==null||icon.getWidth()<=0||icon.getHeight()<=0)return null;
+            android.graphics.Bitmap b=android.graphics.Bitmap.createBitmap(icon.getWidth(),icon.getHeight(),android.graphics.Bitmap.Config.ARGB_8888);
+            icon.draw(new android.graphics.Canvas(b));
+            return b;
+        }catch(Throwable t){return null;}
+    }
+    private static void crossfade(final FrameLayout cell,View oldIcon,android.graphics.Bitmap before){
+        try{
+            final View now=cell.getChildAt(0);
+            if(now==null)return;
+            final android.graphics.drawable.BitmapDrawable ghost=new android.graphics.drawable.BitmapDrawable(cell.getResources(),before);
+            final int l=oldIcon.getLeft(),t=oldIcon.getTop(),w=before.getWidth(),h=before.getHeight();
+            ghost.setBounds(l,t,l+w,t+h);
+            cell.getOverlay().add(ghost);
+            final android.view.animation.PathInterpolator ease=new android.view.animation.PathInterpolator(0.2f,0f,0f,1f);
+            now.animate().cancel();
+            now.setAlpha(0f);now.setScaleX(0.55f);now.setScaleY(0.55f);
+            now.animate().alpha(1f).setDuration(120).start();
+            now.animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(new android.view.animation.OvershootInterpolator(1.6f)).start();
+            final android.animation.ValueAnimator fade=android.animation.ValueAnimator.ofFloat(0f,1f);
+            fade.setDuration(220);
+            fade.setInterpolator(ease);
+            fade.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener(){public void onAnimationUpdate(android.animation.ValueAnimator va){
+                float f=(Float)va.getAnimatedValue();
+                int dx=Math.round(w*0.12f*f),dy=Math.round(h*0.12f*f);
+                ghost.setBounds(l+dx,t+dy,l+w-dx,t+h-dy);
+                ghost.setAlpha(Math.round(255*(1f-f)));
+                cell.invalidate();
+            }});
+            fade.addListener(new android.animation.AnimatorListenerAdapter(){@Override public void onAnimationEnd(android.animation.Animator a){try{cell.getOverlay().remove(ghost);}catch(Throwable ignored){}}});
+            fade.start();
+        }catch(Throwable error){LauncherFeatures.logOnce("Drawer folder crossfade unavailable",error);}
+    }
     static void rebindStale(){
         if(LauncherFeatures.data==null||DrawerDrag.active())return;
         if(folderBusy()){
-            if(busyRebindPending||busyWaits>=20)return;
+            if(busyRebindPending||busyWaits>=125)return;
             busyWaits++;busyRebindPending=true;
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable(){public void run(){
                 busyRebindPending=false;
                 try{rebindStale();}catch(Throwable error){LauncherFeatures.logOnce("Drawer folder preview refresh unavailable",error);}
-            }},250);
+            }},40);
             return;
         }
         busyWaits=0;
@@ -694,7 +762,9 @@ final class DrawerFolders {
             if(icon!=null&&isOpen(icon))continue;
             Object bound=Xp.getAdditionalInstanceField(cell,"pixelsuite_bind_context");
             Context context=bound instanceof Context?(Context)bound:(a!=null?a:cell.getContext());
+            android.graphics.Bitmap before=f.apps.size()==1?snapshot(icon):null;
             bindFolder((FrameLayout)cell,context,id);
+            if(before!=null)crossfade((FrameLayout)cell,icon,before);
             Module.log("Drawer folder preview updated: "+f.name+" ("+((List<?>)get(cell.getTag(),"contents")).size()+" apps)");
         }
     }

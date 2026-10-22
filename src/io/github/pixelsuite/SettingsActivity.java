@@ -42,6 +42,9 @@ public class SettingsActivity extends Activity {
     private static final String LAUNCHER = "com.google.android.apps.nexuslauncher";
 
     private boolean mDark;
+    private boolean mAppSuperDark;
+    private View mAppRoot;
+    private android.database.ContentObserver mPaletteObserver;
     private float mDp;
     private int mBg, mCard, mText, mTextSecondary, mAccent, mOnAccent;
 
@@ -51,6 +54,7 @@ public class SettingsActivity extends Activity {
             TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private TextView mBanner;
+    private View mMiscChooseApps;
     private boolean mUpdating;
     private int mSaves;
     private android.widget.SeekBar mLabelSlider;
@@ -60,11 +64,17 @@ public class SettingsActivity extends Activity {
     private boolean mStyleSuperDark,mStyleLocked,mStyleLoaded;
     private int mSavedStyle=SurfaceStyle.FROSTED;
     private long mLastStyleRejection;
-    private static final String[] STYLE_LABELS={"Blur Off","Google's own look","Frosted Glass"};
+    private static final String[] STYLE_LABELS={"Blur Off","Stock","Frosted Glass"};
     private TextView mLabelPreview;
     private final TextView[] mLabelStops=new TextView[5];
     private FeaturePreview mFeaturePreview;
     private RestartPill mRestart;
+    private ImageView mDeveloperGear;
+    private android.animation.ObjectAnimator mGearRotation;
+    private PrivacyPageGate mPrivacyGate;
+    private View mPrivacyContent;
+    private android.os.CancellationSignal mPrivacyAuthSignal;
+    private int mPrivacyFailures;
     private final java.util.List<FeaturePreview> mPreviews=new java.util.ArrayList<FeaturePreview>();
 
     @Override
@@ -107,7 +117,7 @@ public class SettingsActivity extends Activity {
         if(subtitle.length()>0)heading.addView(subtitle);
         if("changelog".equals(pageId)){
             TextView version = text("  " + versionName() + "  \u00b7  RovianDev  ", 12, mAccent, true);
-            GradientDrawable chip = FrostedSurface.drawable(this,18);
+            GradientDrawable chip = AppSurfaces.card(this,18);
             version.setBackground(chip); version.setPadding(dp(12),dp(8),dp(12),dp(8));
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2,-2); chipParams.leftMargin=dp(8);chipParams.bottomMargin=dp(20);
             heading.addView(version,chipParams);
@@ -136,13 +146,25 @@ public class SettingsActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         root.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         mRestart = new RestartPill(this, root, mAccent, mOnAccent);
-        setContentView(root);
+        if("privacy".equals(pageId)){
+            mPrivacyGate=new PrivacyPageGate();mPrivacyContent=root;
+            root.setVisibility(View.INVISIBLE);
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        }
+        setContentView(root);mAppRoot=root;root.setBackgroundColor(mBg);
+        mPaletteObserver=new android.database.ContentObserver(mMain){@Override public void onChange(boolean self){refreshAppSurfaces();}};
+        getContentResolver().registerContentObserver(android.provider.Settings.Secure.getUriFor(SuperDark.KEY),false,mPaletteObserver);
         scroll.requestApplyInsets();
     }
 
     @Override
     protected void onResume() {
-        super.onResume();
+        super.onResume();refreshAppSurfaces();startDeveloperGear();
+        if(mPrivacyGate!=null){mPrivacyGate.resume();if(!mPrivacyGate.isOpen()){mPrivacyContent.setVisibility(View.INVISIBLE);authenticatePrivacy();return;}}
+        resumeSettingsContent();
+    }
+
+    private void resumeSettingsContent(){
         if (mRestart != null) mRestart.refresh();
         load();
         ReleaseUpdates.schedule(SettingsActivity.this); ReleaseUpdates.check(SettingsActivity.this,false,null);
@@ -152,8 +174,64 @@ public class SettingsActivity extends Activity {
 
     }
 
-    @Override protected void onPause(){for(FeaturePreview preview:mPreviews)preview.setHostActive(false);super.onPause();}
-    @Override protected void onDestroy(){if(mRestart!=null)mRestart.dispose();for(AlertDialog dialog:new java.util.ArrayList<AlertDialog>(mSettingsDialogs))dialog.dismiss();for(FeaturePreview preview:mPreviews)preview.dispose();super.onDestroy();}
+    @Override protected void onPause(){
+        stopDeveloperGear();
+        if(mPrivacyGate!=null){mPrivacyGate.pause();mPrivacyContent.setVisibility(View.INVISIBLE);}
+        for(FeaturePreview preview:mPreviews)preview.setHostActive(false);super.onPause();
+    }
+    @Override protected void onStop(){
+        if(mPrivacyGate!=null){mPrivacyGate.stop();if(mPrivacyAuthSignal!=null)mPrivacyAuthSignal.cancel();}
+        super.onStop();
+    }
+    private void authenticatePrivacy(){
+        final int attempt=mPrivacyGate.begin();if(attempt==0)return;
+        android.app.KeyguardManager lock=(android.app.KeyguardManager)getSystemService(KEYGUARD_SERVICE);
+        if(lock==null||!lock.isDeviceSecure()){
+            Toast.makeText(this,"Set a phone screen lock first",Toast.LENGTH_LONG).show();finish();return;
+        }
+        mPrivacyFailures=0;
+        try{
+            android.hardware.biometrics.BiometricPrompt.Builder b=privacyPrompt();
+            b.setAllowedAuthenticators(0x00ff);b.setConfirmationRequired(false);
+            b.setNegativeButton("Pin",privacyExecutor(),new DialogInterface.OnClickListener(){public void onClick(DialogInterface dialog,int which){privacyCredentialLater(attempt);}});
+            mPrivacyAuthSignal=new android.os.CancellationSignal();
+            b.build().authenticate(mPrivacyAuthSignal,privacyExecutor(),new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback(){
+                @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult result){privacyAuthenticated(attempt);}
+                @Override public void onAuthenticationFailed(){if(mPrivacyGate.isPending(attempt)&&++mPrivacyFailures>=3)privacyCredentialLater(attempt);}
+                @Override public void onAuthenticationError(int code,CharSequence message){
+                    if(code==13||code==7||code==9||code==11||code==12||code==1)privacyCredentialLater(attempt);
+                    else privacyAuthFailed(attempt);
+                }
+            });
+        }catch(Throwable error){privacyCredentialLater(attempt);}
+    }
+    private android.hardware.biometrics.BiometricPrompt.Builder privacyPrompt(){
+        android.hardware.biometrics.BiometricPrompt.Builder b=new android.hardware.biometrics.BiometricPrompt.Builder(this);
+        b.setTitle("Privacy & Security");b.setDescription("Confirm it's you to change privacy settings");return b;
+    }
+    private java.util.concurrent.Executor privacyExecutor(){return new java.util.concurrent.Executor(){public void execute(Runnable r){mMain.post(r);}};}
+    private void privacyCredentialLater(int attempt){
+        final int next=mPrivacyGate.replace(attempt);
+        if(next==0){mPrivacyGate.error(attempt);return;}
+        if(mPrivacyAuthSignal!=null)mPrivacyAuthSignal.cancel();
+        mMain.postDelayed(new Runnable(){public void run(){
+            if(isFinishing()||isDestroyed()||!mPrivacyGate.isPending(next)){mPrivacyGate.error(next);return;}
+            try{
+                android.hardware.biometrics.BiometricPrompt.Builder b=privacyPrompt();b.setAllowedAuthenticators(0x8000);
+                mPrivacyAuthSignal=new android.os.CancellationSignal();
+                b.build().authenticate(mPrivacyAuthSignal,privacyExecutor(),new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback(){
+                    @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult result){privacyAuthenticated(next);}
+                    @Override public void onAuthenticationError(int code,CharSequence message){privacyAuthFailed(next);}
+                });
+            }catch(Throwable error){privacyAuthFailed(next);}
+        }},250);
+    }
+    private void privacyAuthenticated(int attempt){
+        if(isFinishing()||isDestroyed()||!mPrivacyGate.success(attempt))return;
+        mPrivacyContent.setVisibility(View.VISIBLE);resumeSettingsContent();
+    }
+    private void privacyAuthFailed(int attempt){if(mPrivacyGate.error(attempt)&&!isFinishing())finish();}
+    @Override protected void onDestroy(){stopDeveloperGear();if(mPaletteObserver!=null)getContentResolver().unregisterContentObserver(mPaletteObserver);if(mPrivacyGate!=null){mPrivacyGate.stop();if(mPrivacyAuthSignal!=null)mPrivacyAuthSignal.cancel();}if(mRestart!=null)mRestart.dispose();for(AlertDialog dialog:new java.util.ArrayList<AlertDialog>(mSettingsDialogs))dialog.dismiss();for(FeaturePreview preview:mPreviews)preview.dispose();super.onDestroy();}
 
     private static boolean sPropChecked;
 
@@ -163,26 +241,27 @@ public class SettingsActivity extends Activity {
     }
     private static final FeaturePage[] PAGES={
         new FeaturePage("buttons",Feature.FLASHLIGHT,"ic_ps_flashlight","Power button flashlight","Double-press the power button to turn the flashlight on or off."),
-        new FeaturePage("buttons",Feature.VOLDOWN_CAMERA,"ic_ps_camera","Volume-down camera","Double-press volume down on the Always On Display to open the camera. Pauses during calls and media playback."),
-        new FeaturePage("gestures",Feature.THREE_FINGER,"ic_ps_threefinger","Three-finger screenshot","Swipe down with three fingers to take a screenshot. Protected content follows Android's usual restrictions."),
-        new FeaturePage("gestures",ScreenRecordTidy.KEY,"ic_ps_screen_record","Screen recording sheet","Move X and Start below the recording options for a cleaner prompt. Supports the English System UI prompt."),
-        new FeaturePage("gestures",Feature.SCREENSHOT_FREE_CROP,"ic_ps_crop_free","Free screenshot crop","Crop screenshots to any size in Pixel Studio, including thin strips or a single line of text."),
-        new FeaturePage("doodles",Feature.SCREENSHOT_DOODLES,"ic_ps_doodles","Pixel Studio","Add shapes, arrows and color to screenshots. Move, resize or fill shapes before saving."),
-        new FeaturePage("doodles",Feature.PHOTOS_DOODLES,"ic_ps_photos_doodles","Google Photos","Add shapes, arrows and colors from a Doodles tab beside Crop. Save them with your photo."),
-        new FeaturePage("gestures",Feature.DOUBLE_TAP_SLEEP,"ic_ps_sleep","Double tap to sleep","Double-tap empty space on the home screen to lock your phone."),
-        new FeaturePage("gestures",Feature.TAP_CHECK,"ic_ps_tapwake","Tap to wake","Choose single-tap or double-tap wake, with pocket protection. Double-tap the lock screen to sleep."),
-        new FeaturePage("launcher",LauncherFeatures.GRID,"ic_ps_folder_grid","Folder grid","Choose 3×3, 4×4 or 5×5 from each folder's three-dot menu. Home and drawer folders keep separate choices."),
-        new FeaturePage("drawer",LauncherFeatures.DRAWER,"ic_ps_drawer_folder","App drawer folders","Create and organize folders inside the app drawer, with custom grids and sorting."),
-        new FeaturePage("drawer",LauncherFeatures.DRAG_PILL,"ic_ps_home_drop","Drag to home screen","Hold a drawer app, then drag onto Add to home screen. Moving sideways or down keeps you in the drawer."),
-        new FeaturePage("launcher",LauncherFeatures.ICONS,"ic_ps_change_icon","Change icons","Hold an app and choose Change icon. Pick an image from Photos or Files; Pixel Launcher applies your current icon shape."),
-        new FeaturePage("launcher",FolderDrag.TWO_FINGER,"ic_ps_two_finger","Two-finger drag","Hold an app with one finger. Swipe with another to turn home or folder pages, or scroll the app drawer."),
-        new FeaturePage("launcher",MultiDrag.KEY,"ic_ps_multi_drag","Move several apps","Start dragging an app, then tap more apps with another finger. Drop the stack onto the home screen or into a folder."),
-        new FeaturePage("launcher",LauncherFeatures.RENAME,"ic_ps_rename","Rename apps","Hold an app and choose Rename. The new name appears immediately across home, folders, drawer and both app searches."),
-        new FeaturePage("launcher",LauncherFeatures.LABEL_SIZE,"ic_ps_label_size","Icon label size","Five text sizes for home, drawer and closed-folder labels. Smaller text fits more letters without resizing icons. Off by default."),
-        new FeaturePage("launcher",Feature.CLEAR_ALL,"ic_ps_clearall","Clear all in recents","Clear all stays visible beside Select and Screenshot in recents. No need to scroll to the far left."),
-        new FeaturePage("drawer",LauncherFeatures.HIDE_SHORTCUTS,"ic_ps_shortcuts","Hide app shortcuts","Hide app-provided drawer shortcuts, such as View orders. Standard launcher and Pixel Suite actions remain."),
-        new FeaturePage("themes",SuperDark.KEY,"ic_ps_super_dark","Super Dark-Mode","Black backgrounds and darker menus in dark theme. Follows your light/dark schedule. Off by default."),
-        new FeaturePage("files",Feature.FILES_SORT,"ic_ps_files","Newest first","Keep folders first and show newest files at the top in Files by Google and Android's file picker.")
+        new FeaturePage("buttons",Feature.VOLDOWN_CAMERA,"ic_ps_camera","Volume-down camera","Double-press volume down while the screen is off to open the camera. Doesn't work during calls or while media is playing."),
+        new FeaturePage("gestures",Feature.THREE_FINGER,"ic_ps_threefinger","Three-finger screenshot","Swipe down with three fingers to take a screenshot."),
+        new FeaturePage("gestures",ScreenRecordTidy.KEY,"ic_ps_screen_record","Screen recording sheet","Moves X and Start below the recording options for a cleaner screen. Works with System UI in English."),
+        new FeaturePage("gestures",Feature.SCREENSHOT_FREE_CROP,"ic_ps_crop_free","Free screenshot crop","Crop screenshots to any size in Pixel Studio, even a thin strip or a single line of text."),
+        new FeaturePage("doodles",Feature.SCREENSHOT_DOODLES,"ic_ps_doodles","Pixel Studio","Draw on screenshots with shapes, arrows, snapping guides, and Undo and Redo."),
+        new FeaturePage("doodles",Feature.PHOTOS_DOODLES,"ic_ps_photos_doodles","Google Photos","Draw from the Doodles tab next to Crop. Your shapes are saved, so you can edit them again later."),
+        new FeaturePage("gestures",Feature.DOUBLE_TAP_SLEEP,"ic_ps_sleep","Double tap to sleep","Double-tap an empty spot on the home screen to lock your phone."),
+        new FeaturePage("gestures",Feature.TAP_CHECK,"ic_ps_tapwake","Tap to wake","Wake your phone with a single or double tap, with pocket protection. Double-tap the lock screen to turn it off again."),
+        new FeaturePage("launcher",LauncherFeatures.GRID,"ic_ps_folder_grid","Folder grid","Folders grow with the number of apps inside. Pick a grid from each folder's three-dot menu."),
+        new FeaturePage("drawer",LauncherFeatures.DRAWER,"ic_ps_drawer_folder","App drawer folders","Make folders in the app drawer, with their own grids and sorting."),
+        new FeaturePage("drawer",LauncherFeatures.DRAG_PILL,"ic_ps_home_drop","Drag to home screen","Hold an app in the drawer and drag it onto Add to home screen. Dragging sideways or down keeps you in the drawer."),
+        new FeaturePage("launcher",LauncherFeatures.ICONS,"ic_ps_change_icon","Change icons","Hold an app and choose Change icon. Move and zoom your image, then confirm. It keeps your icon shape."),
+        new FeaturePage("launcher",FolderDrag.TWO_FINGER,"ic_ps_two_finger","Two-finger drag","Hold an app with one finger, and swipe with another to turn home or folder pages, or to scroll the app drawer."),
+        new FeaturePage("launcher",MultiDrag.KEY,"ic_ps_multi_drag","Move several apps","Start dragging an app, then tap more apps with another finger. Drop them all on the home screen or into a folder."),
+        new FeaturePage("launcher",LauncherFeatures.RENAME,"ic_ps_rename","Rename apps","Hold an app and choose Rename. The new name shows right away on the home screen, in folders, in the drawer and in search."),
+        new FeaturePage("launcher",LauncherFeatures.LABEL_SIZE,"ic_ps_label_size","Icon label size","Five text sizes for app names on the home screen, in the drawer and on closed folders. Smaller text fits longer names. Icons stay the same size. Off by default."),
+        new FeaturePage("recents",Feature.CLEAR_ALL,"ic_ps_clearall","Clear all in recents","Clear all is always next to Select and Screenshot in recents, so you don't have to scroll to the far left."),
+        new FeaturePage("recents",RecentsLock.KEY,"ic_ps_recents_lock","Lock apps in recents","Choose Lock from an app's recents menu: its card stays when you swipe it or use Clear all. Tap its lock badge to unlock it."),
+        new FeaturePage("drawer",LauncherFeatures.HIDE_SHORTCUTS,"ic_ps_shortcuts","Hide app shortcuts","Hides shortcuts that apps add to their drawer menu, such as View orders. The launcher's own options and Pixel Suite's stay."),
+        new FeaturePage("themes",SuperDark.KEY,"ic_ps_super_dark","Super Dark-Mode","Pure black backgrounds and darker menus in dark theme. Off by default."),
+        new FeaturePage("files",Feature.FILES_SORT,"ic_ps_files","Newest first","Shows folders first and the newest files at the top, in Files by Google and Android's file picker.")
     };
     private final Map<String,TextView> mChoiceLabels=new LinkedHashMap<String,TextView>();
     private final Map<String,Integer> mChoiceOffsets=new LinkedHashMap<String,Integer>();
@@ -194,103 +273,150 @@ public class SettingsActivity extends Activity {
         if("buttons".equals(id))return "Buttons";if("gestures".equals(id))return "Gestures";
         if("doodles".equals(id))return "Doodles";
         if("drawer".equals(id))return "App drawer";if("launcher".equals(id))return "Pixel Launcher";if("files".equals(id))return "Files";if("themes".equals(id))return "Themes";
+        if("privacy".equals(id))return "Privacy & Security";
+        if("recents".equals(id))return "Recent Apps";
+        if("miscellaneous".equals(id))return "Miscellaneous";
         if("changelog".equals(id))return "Changelog";
         if("updates".equals(id))return "Updates";if("about".equals(id))return "About and support";return "Pixel Suite";
     }
     private String pageSubtitle(String id){
         if(feature(id)!=null)return "Make it work your way.";
         if("buttons".equals(id))return "Quick actions from your phone's buttons.";
-        if("gestures".equals(id))return "Capture, lock and wake.";
+        if("gestures".equals(id))return "Capture, sleep and wake.";
         if("doodles".equals(id))return "Draw on screenshots and photos.";
         if("drawer".equals(id))return "Folders, dragging and app shortcuts.";if("launcher".equals(id))return "Folders, names, icons and recents.";
         if("files".equals(id))return "A better starting view for your files.";if("themes".equals(id))return "System colors, your way.";
-        if("changelog".equals(id))return "What's changed:";
-        if("updates".equals(id))return "";if("about".equals(id))return "Made by RovianDev";return "Your Pixel. Your Way.";
+        if("privacy".equals(id))return "Protected with your fingerprint or PIN.";
+        if("recents".equals(id))return "Keep what matters. Clear the rest.";
+        if("miscellaneous".equals(id))return "Small fixes, simple controls.";
+        if("changelog".equals(id))return "What's new";
+        if("updates".equals(id))return "";if("about".equals(id))return "Made by RovianDev";return "Your Pixel. Your way.";
     }
     private void openPage(String id){startActivity(new Intent(this,SettingsActivity.class).putExtra("page",id));}
     private void buildPage(LinearLayout page){
         String id=getIntent().getStringExtra("page");FeaturePage f=feature(id);
         if(f!=null){
-            LinearLayout controls=group(page);row(controls,f.key,f.icon,mAccent,(Feature.SCREENSHOT_DOODLES.equals(f.key)||Feature.PHOTOS_DOODLES.equals(f.key)?"Use Doodles":LauncherFeatures.HIDE_SHORTCUTS.equals(f.key)?"Hide app shortcuts":LauncherFeatures.ICONS.equals(f.key)?"Use custom app icons":LauncherFeatures.LABEL_SIZE.equals(f.key)?"Customize icon labels":SuperDark.KEY.equals(f.key)?"Use Super Dark-Mode":"Use "+f.title.toLowerCase(java.util.Locale.ROOT)),"Enable this feature.");finishGroup(controls);
+            LinearLayout controls=group(page);row(controls,f.key,f.icon,mAccent,(Feature.SCREENSHOT_DOODLES.equals(f.key)||Feature.PHOTOS_DOODLES.equals(f.key)?"Use Doodles":LauncherFeatures.HIDE_SHORTCUTS.equals(f.key)?"Hide app shortcuts":LauncherFeatures.ICONS.equals(f.key)?"Use custom app icons":LauncherFeatures.LABEL_SIZE.equals(f.key)?"Customize icon labels":SuperDark.KEY.equals(f.key)?"Use Super Dark-Mode":"Use "+f.title.toLowerCase(java.util.Locale.ROOT)),"Turn this feature on or off.");finishGroup(controls);
             section(page,"How it works");
             if(LauncherFeatures.DRAWER.equals(f.key)){
-                explanation(page,"Drag an app onto another to create a folder. Use Add apps to select more. Drag folders to reorder them.");
+                explanation(page,"Drag an app onto another to make a folder. Use Add apps to pick more. Drag folders to move them.");
                 featurePreview(page,f);
                 section(page,"Sort from the three-dot menu");
-                explanation(page,"Three-dot menu → Sort: Auto (A–Z) sorts alphabetically; Custom lets you arrange apps yourself.");
+                explanation(page,"Three-dot menu → Sort: Auto sorts apps A to Z; Custom lets you arrange them yourself.");
                 extraPreview(page,"folder_sort","Sorting and custom order");
-                explanation(page,"Choose a grid from the three-dot menu. Hold a folder to rename, sort or remove it. Removing it keeps the apps installed.");
+                explanation(page,"A folder can hold a single app and follows your icon shape. Hold a folder to rename, sort or remove it; removing a folder doesn't uninstall its apps.");
             }else{
                 explanation(page,f.summary);
                 if(!LauncherFeatures.LABEL_SIZE.equals(f.key))featurePreview(page,f);
             }
             if(SuperDark.KEY.equals(f.key)){
                 section(page,"Dark theme and schedules");
-                explanation(page,"Follows your dark-theme schedule. Light mode brings back normal colors and blur.");
+                explanation(page,"Follows your dark theme schedule. In light theme, normal colors and blur come back.");
                 section(page,"Where it applies");
-                explanation(page,"LSPosed scopes: System UI, Pixel Launcher, Google, Gboard and Settings. Also select Pixel Studio and Google Photos for their editors. Reboot to apply.");
+                explanation(page,"LSPosed scopes: System UI, Pixel Launcher, Google, Gboard, Settings and Package installer. Also select Pixel Studio and Google Photos for their editors. Reboot to apply.");
             }
             if(LauncherFeatures.GRID.equals(f.key))extraPreview(page,"folder_sort","Folder sorting");
             if(LauncherFeatures.LABEL_SIZE.equals(f.key)){
                 section(page,"Text size");LinearLayout options=group(page);labelSize(options);finishGroup(options);
-                section(page,"Choose your size");
-                explanation(page,"1 · Smallest\n2 · Small\n3 · Medium\n4 · Large\n5 · Largest");
-                explanation(page,"Updates instantly. Smaller text fits more letters; icons stay the same size. Respects your system font and Bold text. Does not change labels inside open folders or search results.");
-                section(page,"Different from Pixel settings");
-                explanation(page,"This changes launcher labels only. For phone-wide text size, use Settings > Display & touch > Display size and text > Font size.");
+                explanation(page,"Updates app names right away. Uses your system font and Bold text setting. Names inside open folders and in search results keep their usual size.");
             }
             if(Feature.TAP_CHECK.equals(f.key)){
                 section(page,"Wake the screen");LinearLayout wake=group(page);
                 choice(wake,Feature.DOUBLE_TAP_WAKE,"Wake gesture",new String[]{"Single tap","Double tap"});finishGroup(wake);
-                explanation(page,"If a double tap misses, tap once more within three seconds.");
+                explanation(page,"If a double tap doesn't register, tap once more within three seconds.");
                 section(page,"Lock-screen taps");LinearLayout lock=group(page);
-                choice(lock,Feature.LOCK_SHORTCUTS,"Lock-screen behavior",new String[]{"Modded behavior","Stock behavior"});finishGroup(lock);
-                explanation(page,"Modded: double-tap lock-screen cards to sleep without opening them or vibrating. Stock: keeps Google's normal actions.");
+                choice(lock,Feature.LOCK_SHORTCUTS,"Lock-screen behavior",new String[]{"Pixel Suite","Stock"});finishGroup(lock);
+                explanation(page,"Pixel Suite: double-tapping a lock-screen card turns the screen off without opening the card or vibrating. Stock: keeps Google's normal behavior.");
             }
-            if(LauncherFeatures.GRID.equals(f.key))explanation(page,"Use Add apps or Sort from the three-dot menu. Folders fit their contents; larger grids may shorten long labels.");
+            if(LauncherFeatures.GRID.equals(f.key))explanation(page,"Grid choices appear once a folder has 3 or more apps: 3×3, 4×4 from 10 apps, and 5×5 from 17 apps. With fewer apps, the folder uses a smaller grid; your choice comes back as the folder fills up.");
             if(Feature.SCREENSHOT_FREE_CROP.equals(f.key)||Feature.SCREENSHOT_DOODLES.equals(f.key)){
                 section(page,"Pixel Studio setup");
-                explanation(page,"Enable Pixel Studio in LSPosed, then restart it. Save edits before changing this switch—it restarts Pixel Studio.");
+                explanation(page,"Enable Pixel Studio in LSPosed, then restart it. Changing this switch restarts Pixel Studio, so save your edits first.");
             }
             if(Feature.PHOTOS_DOODLES.equals(f.key)){
                 section(page,"Google Photos setup");
-                explanation(page,"Enable Google Photos in LSPosed, then restart it. Open a photo → Edit → Doodles. Tap Doodles again after Done to reopen the toolbar. Changing this switch restarts Photos, so save your edits first.");
+                explanation(page,"Enable Google Photos in LSPosed, then restart it. Open a photo → Edit → Doodles. After tapping Done, tap Doodles again to bring the toolbar back. Changing this switch restarts Photos, so save your edits first.");
             }
-            if(Feature.PHOTOS_DOODLES.equals(f.key))explanation(page,"Reopen saved photos to adjust your shapes. Revert removes Doodles. Everything runs locally inside Photos; backup settings stay unchanged.");
-            if(Feature.SCREENSHOT_DOODLES.equals(f.key))explanation(page,"Tap the shape or rainbow icon for more choices; tap the arrow to fold. Drag or flick the menu up or down.");
-            if(Feature.SCREENSHOT_DOODLES.equals(f.key))explanation(page,"Use handles to move or resize shapes. Guides and snapping help align them.");
-            if(Feature.SCREENSHOT_DOODLES.equals(f.key))explanation(page,"Undo/Redo works with Doodles on supported Pixel Studio versions.");
-            if(LauncherFeatures.RENAME.equals(f.key))explanation(page,"Reset restores the original name. Enable Google in LSPosed for home-screen search. Work-profile names stay unchanged.");
-            if(LauncherFeatures.RENAME.equals(f.key))explanation(page,"Applies instantly across homescreen, drawer, folders and Google Search widget. Tap the reset arrow to restore the original name. Private Space is excluded.");
-            if(LauncherFeatures.ICONS.equals(f.key))explanation(page,"Enable Google in LSPosed to apply custom icons in home-screen Google search.");
+            if(Feature.PHOTOS_DOODLES.equals(f.key))explanation(page,"Reopen a saved photo to adjust its shapes. Revert removes the Doodles. Everything stays on your phone, inside Photos, and your backup settings aren't changed.");
+            if(Feature.SCREENSHOT_DOODLES.equals(f.key))explanation(page,"Tap the shape or rainbow icon for more choices, and tap the arrow to collapse them. Drag or flick the menu up or down.");
+            if(Feature.SCREENSHOT_DOODLES.equals(f.key))explanation(page,"Drag the handles to move or resize a shape. Guides and snapping help you line things up.");
+            if(Feature.SCREENSHOT_DOODLES.equals(f.key))explanation(page,"Undo and Redo work with Doodles on supported Pixel Studio versions.");
+            if(LauncherFeatures.RENAME.equals(f.key))explanation(page,"Reset brings back the original name. Enable Google in LSPosed to see new names in the Google search bar.");
+            if(LauncherFeatures.RENAME.equals(f.key))explanation(page,"Changes show right away on the home screen, in the drawer, in folders and in the Google search bar. Apps in your work profile and Private Space keep their names.");
+            if(LauncherFeatures.ICONS.equals(f.key))explanation(page,"Enable Google in LSPosed to show custom icons in the Google search bar too.");
             if(Feature.CLEAR_ALL.equals(f.key))explanation(page,"Changing this option restarts Pixel Launcher.");
-            if(Feature.FILES_SORT.equals(f.key))explanation(page,"Enable Files by Google and system Files in LSPosed. Turn this off to restore their normal sorting.");
-            if(FolderDrag.TWO_FINGER.equals(f.key))explanation(page,"Touch the drawer to stop scrolling while dragging.");
-            if(MultiDrag.KEY.equals(f.key))explanation(page,"Select apps from the same folder or screen. Remove deletes home shortcuts, not installed apps.");
-            if(LauncherFeatures.ICONS.equals(f.key))explanation(page,"Applies instantly across homescreen, drawer, folders and Google Search widget. Tap the reset arrow to restore the original icon. Private Space is excluded.");
+            if(RecentsLock.KEY.equals(f.key))explanation(page,"LSPosed scope: Pixel Launcher. Locks stay after a reboot. A locked card stays in recents, but Android can still close the app in the background.");
+            if(Feature.FILES_SORT.equals(f.key))explanation(page,"Enable Files by Google and Files (system) in LSPosed. Turn this off to go back to their normal sorting.");
+            if(FolderDrag.TWO_FINGER.equals(f.key))explanation(page,"Touch the drawer to stop it scrolling while you drag.");
+            if(MultiDrag.KEY.equals(f.key))explanation(page,"Pick apps from the same folder or screen. Removing them from the home screen doesn't uninstall them.");
+            if(LauncherFeatures.ICONS.equals(f.key))explanation(page,"Changes show right away on the home screen, in the drawer, in folders and in the Google search bar. Tap the reset arrow to bring back the original icon. Apps in Private Space aren't included.");
+            return;
+        }
+        if("miscellaneous".equals(id)){
+            LinearLayout controls=group(page);
+            row(controls,ScreenshotWarm.KEY,"ic_ps_fast_screenshot",mAccent,"Reduce screenshot delay","Keeps the screenshot service ready, so screenshots appear instantly. Takes effect from the second screenshot after a restart. Uses a little extra memory.");
+            row(controls,MiscSystem.SECURE_KEY,"ic_ps_secure_capture",mAccent,"Allow screenshots of secure screens","Take screenshots and recordings in apps that normally block them. Apps aren't told.\nIf you use the DisableFlagSecure module, remove it before turning this on.\nBased on DisableFlagSecure by LSPosed (GPL-3.0).");
+            row(controls,MiscSystem.A11Y_KEY,"ic_ps_accessibility",mAccent,"Hide accessibility from apps","Apps you choose can't see your accessibility services.\nIf you use the DoNotTryAccessibility module, remove it before turning this on.\nBased on DoNotTryAccessibility by Nitsuya (GPL-3.0).");
+            navigation(controls,"Choose apps","Choose which apps can't see your accessibility services","ic_ps_drawer",new Runnable(){public void run(){
+                MiscAppPicker.show(SettingsActivity.this,IO,mText,mTextSecondary,mAccent,new MiscAppPicker.Presenter(){public void show(AlertDialog dialog){showSettingsDialog(dialog);}});
+            }});
+            mMiscChooseApps=controls.getChildAt(controls.getChildCount()-1);updateMiscPicker();
+            row(controls,KeyboardBarTweak.KEY,"ic_ps_keyboard",mAccent,"Keyboard bar tweak","Hides the globe and moves the dismiss arrow to the right, in the bar under your keyboard. Restarts your keyboard.");
+            row(controls,MiscSystem.DEV_KEY,"ic_ps_developer",mAccent,"Hide Developer Options","Apps can't tell developer options or USB debugging are on, so apps that refuse to open with them on (like some banking apps) work normally.\nTap the gear to open Developer options.");
+            finishGroup(controls);
+            explanation(page,"LSPosed: System Framework for screenshots, accessibility and developer options; select your keyboard for the keyboard bar. The keyboard bar needs gesture navigation.");
+            return;
+        }
+        if("recents".equals(id)){
+            LinearLayout controls=group(page);
+            row(controls,Feature.CLEAR_ALL,"ic_ps_clearall",mAccent,"Always show Clear all","Keeps Clear all next to Screenshot and Select.");
+            row(controls,RecentsLock.KEY,"ic_ps_recents_lock",mAccent,"Lock apps in recents","Choose Lock from an app's recents menu to keep its card when you clear apps.");finishGroup(controls);
+            explanation(page,"In split screen, each app locks on its own. A recents lock only keeps the card; to require your fingerprint or PIN to open an app, use Privacy & Security.");
+            extraPreview(page,RecentsLock.KEY,"Locking recent apps");
+            section(page,"Landscape view");
+            explanation(page,"Turn your phone sideways: app names stay centered above their cards and the status bar fades out. It comes back when you turn the phone back or leave recents.");
+            extraPreview(page,"recents_landscape","Landscape recent apps");
+            return;
+        }
+        if("privacy".equals(id)){
+            LinearLayout protection=group(page);
+            row(protection,PrivacyLock.ENABLED_KEY,"ic_ps_app_folder_lock",mAccent,"App & folder lock","Asks for your fingerprint or PIN before locked apps and folders open. Turning it off keeps your locks for later.");
+            row(protection,PrivacyLock.PROTECT_KEY,"ic_ps_protect_apps",mAccent,"Protect locked apps","Asks before a locked app is uninstalled, disabled or paused, or a locked folder is removed.");
+            row(protection,PrivacyLock.GRACE_KEY,"ic_ps_unlock_timer",mAccent,"Keep unlocked for 1 minute","On: an app or folder you just unlocked stays open for 1 minute after you leave it. Off: apps lock as soon as you leave them, and folders as soon as you close them.");finishGroup(protection);
+            section(page,"How it works");
+            explanation(page,"Hold an app or folder and choose Lock. Open it with your fingerprint or PIN. Choose Unlock from the same menu to remove the lock.");
+            extraPreview(page,"privacy_lock","App lock");
+            section(page,"Folder locks");
+            explanation(page,"Locking a folder protects opening the folder. Its apps still open from the drawer or search, unless you lock them too.");
+            extraPreview(page,"privacy_folder","Folder lock and padlock badge");
+            section(page,"Setup");
+            explanation(page,"LSPosed scopes: System Framework, Pixel Launcher and System UI. Reboot after installing. Set up a screen lock on your phone first.");
             return;
         }
         if("updates".equals(id)){buildUpdates(page);return;}
         if("about".equals(id)){
-            explanation(page,"All Pixel Suite controls in one place. Return from a home-screen long press → Pixel Suite settings. Requires root and LSPosed.");
+            explanation(page,"All of Pixel Suite's settings in one place. To get back here, long-press the home screen → Pixel Suite settings. Needs root and LSPosed.");
             section(page,"Community and support");communityActions(page);
             return;
         }
         if("changelog".equals(id)){
-            explanation(page,"Latest changes, available offline.");
-            LinearLayout history=group(page);navigation(history,"Full changelog on GitHub","Complete feature lists, fixes and release history","ic_ps_changelog",new Runnable(){public void run(){startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/RovianDev/PixelSuite/releases")));}});finishGroup(history);
+            explanation(page,"The latest changes, available offline.");
+            LinearLayout history=group(page);navigation(history,"Full changelog on GitHub","Every feature, fix and release","ic_ps_changelog",new Runnable(){public void run(){startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/RovianDev/PixelSuite/releases")));}});finishGroup(history);
             String latest=Changelog.read(this);int next=latest.indexOf("\n## ");if(next>=0)latest=latest.substring(0,next);String[] entries=latest.split("(?m)^## ");
-            for(String entry:entries){if(entry.trim().isEmpty())continue;int end=entry.indexOf('\n');String heading=end<0?entry.trim():entry.substring(0,end).trim();String body=end<0?"":entry.substring(end+1).trim();section(page,heading);TextView notes=text(body,15,mText,false);notes.setText(ChangelogText.format(body));notes.setTextIsSelectable(true);notes.setLineSpacing(dp(4),1);notes.setPadding(dp(18),dp(16),dp(18),dp(18));notes.setBackground(FrostedSurface.drawable(this,20));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(12);page.addView(notes,lp);}
+            for(String entry:entries){if(entry.trim().isEmpty())continue;int end=entry.indexOf('\n');String heading=end<0?entry.trim():entry.substring(0,end).trim();String body=end<0?"":entry.substring(end+1).trim();section(page,heading);TextView notes=text(body,15,mText,false);notes.setText(ChangelogText.format(body));notes.setTextIsSelectable(true);notes.setLineSpacing(dp(4),1);notes.setPadding(dp(18),dp(16),dp(18),dp(18));notes.setBackground(AppSurfaces.card(this,20));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(12);page.addView(notes,lp);}
             return;
         }
         boolean category="buttons".equals(id)||"gestures".equals(id)||"doodles".equals(id)||"launcher".equals(id)||"drawer".equals(id)||"files".equals(id)||"themes".equals(id);
         if(category){
-            LinearLayout features=group(page);if("launcher".equals(id))navigation(features,"App drawer","Folders, drag target and app shortcuts","ic_ps_drawer",new Runnable(){public void run(){openPage("drawer");}});for(final FeaturePage item:PAGES)if(item.group.equals(id))navigation(features,item.title,item.summary,item.icon,new Runnable(){public void run(){openPage(item.key);}});finishGroup(features);
+            LinearLayout features=group(page);if("launcher".equals(id)){
+                navigation(features,"App drawer","Folders, dragging and app shortcuts","ic_ps_drawer",new Runnable(){public void run(){openPage("drawer");}});
+                navigation(features,"Recent Apps","Clear all, locked cards and landscape view","ic_ps_recent_apps",new Runnable(){public void run(){openPage("recents");}});
+            }for(final FeaturePage item:PAGES)if(item.group.equals(id))navigation(features,item.title,item.summary,item.icon,new Runnable(){public void run(){openPage(item.key);}});finishGroup(features);
             if("themes".equals(id)){
                 section(page,"Surfaces and blur");LinearLayout style=group(page);surfaceStyle(style);finishGroup(style);
                 section(page,"The three styles");
-                explanation(page,"Blur Off\nTurns off blur, including the phone’s window blur. White in light mode, tinted black in dark mode.\n\nStock\nKeeps Google’s surfaces. Your icon sizes and menu positions stay the same.\n\nFrosted Glass (Default)\nBlurs what’s behind folders, menus and messages, with Pixel Suite’s tint. Super Dark keeps surfaces black.");
-                explanation(page,"Tap a style or drag the slider to save. Photos restarts; use the restart shortcut for Launcher.");
+                explanation(page,"Blur Off\nTurns off blur everywhere, including Android's window blur. Surfaces are white in light theme and tinted black in dark theme.\n\nStock\nGoogle's own surfaces. Pixel Suite's other changes stay.\n\nFrosted Glass (Default)\nBlurs what's behind folders, menus and messages, with Pixel Suite's tint.");
+                explanation(page,"Tap a style or drag the slider to save it. Google Photos restarts on its own; use the restart button for Pixel Launcher.");
             }
             return;
         }
@@ -298,10 +424,11 @@ public class SettingsActivity extends Activity {
         navigation(categories,"Buttons","Flashlight and camera shortcuts","ic_ps_buttons",new Runnable(){public void run(){openPage("buttons");}});
         navigation(categories,"Gestures","Screenshots, sleep and wake","ic_ps_gestures",new Runnable(){public void run(){openPage("gestures");}});
         navigation(categories,"Doodles","Shapes and colors in Pixel Studio and Google Photos","ic_ps_doodles",new Runnable(){public void run(){openPage("doodles");}});
-        navigation(categories,"Pixel Launcher","Folder grids, drawer folders, icons and names","ic_ps_launcher",new Runnable(){public void run(){openPage("launcher");}});
+        navigation(categories,"Pixel Launcher","Folders, drawer, icons, names and recents","ic_ps_launcher",new Runnable(){public void run(){openPage("launcher");}});
         navigation(categories,"Themes","Super Dark-Mode, blur and surface styles","ic_ps_themes",new Runnable(){public void run(){openPage("themes");}});
-        navigation(categories,"Files","Files and the file picker, newest first","ic_ps_files_category",new Runnable(){public void run(){openPage("files");}});finishGroup(categories);
-        section(page,"Pixel Suite");LinearLayout about=group(page);navigation(about,"Changelog","Release notes, available offline","ic_ps_changelog",new Runnable(){public void run(){openPage("changelog");}});navigation(about,"Updates","Check official releases and manage notifications","ic_ps_update",new Runnable(){public void run(){openPage("updates");}});navigation(about,"About and support","Setup, community and support links","ic_ps_info",new Runnable(){public void run(){openPage("about");}});finishGroup(about);
+        navigation(categories,"Files","Newest files first, in Files and the file picker","ic_ps_files_category",new Runnable(){public void run(){openPage("files");}});navigation(categories,"Privacy & Security","Lock apps and folders","ic_ps_privacy",new Runnable(){public void run(){openPage("privacy");}});
+        navigation(categories,"Miscellaneous","Screenshots, accessibility, keyboard and developer options","ic_ps_miscellaneous",new Runnable(){public void run(){openPage("miscellaneous");}});finishGroup(categories);
+        section(page,"Pixel Suite");LinearLayout about=group(page);navigation(about,"Changelog","What's new, available offline","ic_ps_changelog",new Runnable(){public void run(){openPage("changelog");}});navigation(about,"Updates","Check for updates and manage notifications","ic_ps_update",new Runnable(){public void run(){openPage("updates");}});navigation(about,"About and support","Setup, community and support","ic_ps_info",new Runnable(){public void run(){openPage("about");}});finishGroup(about);
     }
     private LinearLayout supportCorner(){
         LinearLayout stack=new LinearLayout(this);stack.setOrientation(LinearLayout.VERTICAL);stack.setGravity(Gravity.RIGHT);
@@ -337,8 +464,8 @@ public class SettingsActivity extends Activity {
         });
     }
     private void supportBackground(View button,Drawable blur){
-        GradientDrawable tint=new GradientDrawable();tint.setColor((mCard & 0x00ffffff)|(blur==null?0xff000000:0xcc000000));tint.setCornerRadius(dp(24));
-        Drawable fill=blur==null?tint:new android.graphics.drawable.LayerDrawable(new Drawable[]{blur,tint});
+        GradientDrawable tint=new GradientDrawable();tint.setColor((AppSurfaces.normalCard(this) & 0x00ffffff)|(blur==null?0xff000000:0xcc000000));tint.setCornerRadius(dp(24));
+        Drawable fill=blur==null?tint:new android.graphics.drawable.LayerDrawable(new Drawable[]{blur,tint});fill=AppSurfaces.support(this,fill,24);
         GradientDrawable mask=new GradientDrawable();mask.setColor(Color.WHITE);mask.setCornerRadius(dp(24));
         button.setBackground(new android.graphics.drawable.InsetDrawable(new RippleDrawable(ColorStateList.valueOf(mDark?0x33FFFFFF:0x22000000),fill,mask),0,dp(2),0,dp(2)));
     }
@@ -357,8 +484,8 @@ public class SettingsActivity extends Activity {
         }
     }
     private void featurePreview(LinearLayout page,FeaturePage feature){
-        section(page,"Feature preview");LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setPadding(dp(12),dp(12),dp(12),dp(12));card.setBackground(FrostedSurface.drawable(this,24));LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.bottomMargin=dp(16);page.addView(card,cp);
-        mFeaturePreview=new FeaturePreview(this,feature.key,mAccent,mOnAccent,mText,mTextSecondary,mCard,mDark);mFeaturePreview.setContentDescription(feature.title+". Looping demonstration with a pause between actions. Does not change your settings.");card.addView(mFeaturePreview,new LinearLayout.LayoutParams(-1,dp((SuperDark.KEY.equals(feature.key)||LauncherFeatures.DRAWER.equals(feature.key)||LauncherFeatures.GRID.equals(feature.key)||"folder_sort".equals(feature.key)||FolderDrag.TWO_FINGER.equals(feature.key)||MultiDrag.KEY.equals(feature.key))?330:300)));mPreviews.add(mFeaturePreview);
+        section(page,"Feature preview");LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setPadding(dp(12),dp(12),dp(12),dp(12));card.setBackground(AppSurfaces.card(this,24));LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);cp.bottomMargin=dp(16);page.addView(card,cp);
+        mFeaturePreview=new FeaturePreview(this,feature.key,mAccent,mOnAccent,mText,mTextSecondary,mCard,mDark);mFeaturePreview.setContentDescription(feature.title+". A looping demo. It doesn't change your settings.");card.addView(mFeaturePreview,new LinearLayout.LayoutParams(-1,dp((SuperDark.KEY.equals(feature.key)||LauncherFeatures.DRAWER.equals(feature.key)||LauncherFeatures.GRID.equals(feature.key)||"folder_sort".equals(feature.key)||FolderDrag.TWO_FINGER.equals(feature.key)||MultiDrag.KEY.equals(feature.key))?330:300)));mPreviews.add(mFeaturePreview);
     }
     private void extraPreview(LinearLayout page,String key,String title){featurePreview(page,new FeaturePage("launcher",key,"ic_ps_folder_grid",title,""));}
     private TextView mUpdateStatus;
@@ -372,30 +499,33 @@ public class SettingsActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==202&&getIntent().getBooleanExtra("resume_update_install",false)){getIntent().removeExtra("resume_update_install");try{if((Boolean)getPackageManager().getClass().getMethod("canRequestPackageInstalls").invoke(getPackageManager()))beginUpdateInstall();else if(mUpdateStatus!=null)mUpdateStatus.setText("Installation permission was not enabled. Tap Download and install when ready.");}catch(Exception unavailable){}}}
     private void buildUpdates(LinearLayout page){
-        explanation(page,"Checks for official updates periodically. Download here, follow the progress bar, then confirm installation.");
-        final android.widget.Switch automatic=new android.widget.Switch(this);automatic.setText("Automatic release checks");android.graphics.drawable.Drawable updateIcon=drawable("ic_ps_update");if(updateIcon!=null){updateIcon=updateIcon.mutate();updateIcon.setTint(mAccent);updateIcon.setBounds(0,0,dp(24),dp(24));automatic.setCompoundDrawables(updateIcon,null,null,null);automatic.setCompoundDrawablePadding(dp(12));}automatic.setTextColor(mText);automatic.setChecked(ReleaseUpdates.enabled(this));automatic.setPadding(dp(18),dp(16),dp(18),dp(16));page.addView(automatic);
+        explanation(page,"Pixel Suite checks for official updates from time to time. Download an update here, follow its progress, then confirm the install.");
+        final android.widget.Switch automatic=new android.widget.Switch(this);automatic.setText("Check for updates automatically");android.graphics.drawable.Drawable updateIcon=drawable("ic_ps_update");if(updateIcon!=null){updateIcon=updateIcon.mutate();updateIcon.setTint(mAccent);updateIcon.setBounds(0,0,dp(24),dp(24));automatic.setCompoundDrawables(updateIcon,null,null,null);automatic.setCompoundDrawablePadding(dp(12));}automatic.setTextColor(mText);automatic.setChecked(ReleaseUpdates.enabled(this));automatic.setPadding(dp(18),dp(16),dp(18),dp(16));page.addView(automatic);
         automatic.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener(){public void onCheckedChanged(android.widget.CompoundButton v,boolean checked){ReleaseUpdates.prefs(SettingsActivity.this).edit().putBoolean("enabled",checked).apply();ReleaseUpdates.schedule(SettingsActivity.this);if(checked)ReleaseUpdates.check(SettingsActivity.this,false,null);}});
         final TextView status=text(ReleaseUpdates.status(this),15,mTextSecondary,false);mUpdateStatus=status;status.setPadding(dp(18),dp(12),dp(18),dp(16));page.addView(status);mUpdateProgress=new android.widget.ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);mUpdateProgress.setMax(100);mUpdateProgress.setVisibility(View.GONE);page.addView(mUpdateProgress,new LinearLayout.LayoutParams(-1,dp(8)));
         LinearLayout actions=group(page);
-        navigation(actions,"Check now","Verify both repositories","ic_ps_update",new Runnable(){public void run(){status.setText("Checking both repositories…");ReleaseUpdates.check(SettingsActivity.this,true,new ReleaseUpdates.Result(){public void done(String message){if(!isDestroyed())status.setText(message);}});}});
-        navigation(actions,"Allow update notifications","Enable notifications in Android","ic_ps_update",new Runnable(){public void run(){if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=0)requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},201);else{Intent settings=new Intent("android.settings.APP_NOTIFICATION_SETTINGS");settings.putExtra("android.provider.extra.APP_PACKAGE",getPackageName());try{startActivity(settings);}catch(Exception unavailable){android.widget.Toast.makeText(SettingsActivity.this,"Open Android app settings to manage notifications.",0).show();}}}});
-        navigation(actions,"Download and install","Get the verified update directly in Pixel Suite","ic_ps_update",new Runnable(){public void run(){beginUpdateInstall();}});
+        navigation(actions,"Check now","Check for updates now","ic_ps_update",new Runnable(){public void run(){status.setText("Checking both repositories…");ReleaseUpdates.check(SettingsActivity.this,true,new ReleaseUpdates.Result(){public void done(String message){if(!isDestroyed())status.setText(message);}});}});
+        navigation(actions,"Allow update notifications","Turn on notifications in Android settings","ic_ps_update",new Runnable(){public void run(){if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=0)requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},201);else{Intent settings=new Intent("android.settings.APP_NOTIFICATION_SETTINGS");settings.putExtra("android.provider.extra.APP_PACKAGE",getPackageName());try{startActivity(settings);}catch(Exception unavailable){android.widget.Toast.makeText(SettingsActivity.this,"Open Android app settings to manage notifications.",0).show();}}}});
+        navigation(actions,"Download and install","Download and install the update in Pixel Suite","ic_ps_update",new Runnable(){public void run(){beginUpdateInstall();}});
         finishGroup(actions);
     }
     private final java.util.List<AlertDialog> mSettingsDialogs=new java.util.ArrayList<AlertDialog>();
     private void showSettingsDialog(final AlertDialog dialog){
         dialog.setCancelable(true);dialog.setCanceledOnTouchOutside(true);dialog.show();mSettingsDialogs.add(dialog);dialog.setOnDismissListener(new DialogInterface.OnDismissListener(){public void onDismiss(DialogInterface d){mSettingsDialogs.remove(dialog);}});
         Window window=dialog.getWindow();if(window==null)return;
-        Drawable background=window.getDecorView().getBackground();
-        if(background!=null){background=background.mutate();background.setColorFilter(mBg,android.graphics.PorterDuff.Mode.SRC_IN);window.setBackgroundDrawable(background);}
-        else{GradientDrawable fill=new GradientDrawable();fill.setColor(mBg);fill.setCornerRadius(dp(28));window.setBackgroundDrawable(fill);}
-        window.setDimAmount(0f);
+        styleSettingsWindow(window);
         for(String name:new String[]{"parentPanel","topPanel","contentPanel","buttonPanel"}){
             int id=getResources().getIdentifier(name,"id","android");View panel=window.getDecorView().findViewById(id);if(panel!=null)panel.setBackgroundColor(Color.TRANSPARENT);
         }
         colorSettingsDialog(window.getDecorView());
         if(dialog.getListView()!=null)dialog.getListView().setOnHierarchyChangeListener(new ViewGroup.OnHierarchyChangeListener(){public void onChildViewAdded(View parent,View child){colorSettingsDialog(child);}public void onChildViewRemoved(View parent,View child){}});
         for(int which:new int[]{AlertDialog.BUTTON_POSITIVE,AlertDialog.BUTTON_NEGATIVE,AlertDialog.BUTTON_NEUTRAL})if(dialog.getButton(which)!=null)dialog.getButton(which).setTextColor(mAccent);
+    }
+    private void styleSettingsWindow(Window window){
+        if(window==null)return;
+        if(AppSurfaces.active(this)){window.setBackgroundDrawable(AppSurfaces.dialog(this,28));window.setDimAmount(.72f);}
+        else{GradientDrawable fill=new GradientDrawable();fill.setColor(mBg);fill.setCornerRadius(dp(28));window.setBackgroundDrawable(fill);window.setDimAmount(0f);}
+        AppSurfaces.invalidateTree(window.getDecorView());
     }
     private void colorSettingsDialog(View view){
         if(view instanceof TextView)((TextView)view).setTextColor(mText);
@@ -407,7 +537,7 @@ public class SettingsActivity extends Activity {
     }
     private void explanation(LinearLayout page,String value){
         TextView t=text(value,15,mTextSecondary,false);t.setPadding(dp(18),dp(16),dp(18),dp(18));t.setLineSpacing(dp(3),1);
-        GradientDrawable bg=FrostedSurface.drawable(this,20);t.setBackground(bg);
+        GradientDrawable bg=AppSurfaces.card(this,20);t.setBackground(bg);
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=dp(12);page.addView(t,lp);
     }
     private void navigation(LinearLayout group,String title,String summary,String icon,final Runnable action){
@@ -433,7 +563,7 @@ public class SettingsActivity extends Activity {
     private void showLabelSize(int value){
         int level=IconLabelScale.level(value);
         TextView meter=mChoiceLabels.get(LauncherFeatures.LABEL_LEVEL);
-        if(meter!=null)meter.setText("Level "+(level+1)+"  ·  "+IconLabelScale.name(level)+(level==2?" (Default)":""));
+        if(meter!=null)meter.setText("Level "+(level+1)+" · "+IconLabelScale.name(level)+(level==2?" (Default)":""));
         if(mLabelPreview!=null)mLabelPreview.setTextSize(16*IconLabelScale.factor(level));
         for(int i=0;i<5;i++)if(mLabelStops[i]!=null){mLabelStops[i].setTextColor(i==level?mAccent:mTextSecondary);mLabelStops[i].setTypeface(null,i==level?Typeface.BOLD:Typeface.NORMAL);}
     }
@@ -452,7 +582,7 @@ public class SettingsActivity extends Activity {
         mStyleSlider.setContentDescription("Surface style, three options");
         box.addView(mStyleSlider,new LinearLayout.LayoutParams(-1,dp(48)));
         LinearLayout stops=new LinearLayout(this);stops.setOrientation(0);
-        String[] captions={"(No blur anywhere)","(Stock)","(Modern)"};
+        String[] captions={"(No blur anywhere)","(Google's own look)","(Modern)"};
         for(int i=0;i<3;i++){final int stop=i;TextView label=text(STYLE_LABELS[i]+"\n"+captions[i],13,mTextSecondary,false);label.setGravity(Gravity.CENTER);label.setPadding(0,dp(4),0,dp(8));label.setContentDescription(STYLE_LABELS[i]+", "+captions[i]);label.setOnClickListener(new View.OnClickListener(){public void onClick(View v){if(mStyleLocked){rejectStyle();return;}if(mStyleSlider.isEnabled()){mStyleSlider.setProgress(stop);saveStyle(stop);}}});mStyleStops[i]=label;stops.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));}
         box.addView(stops,new LinearLayout.LayoutParams(-1,-2));
         mStylePreview=new SurfacePreview(this,mDark,mAccent,mText);mStylePreview.setContentDescription("Preview of the chosen surface style on a folder over a wallpaper");
@@ -506,10 +636,10 @@ public class SettingsActivity extends Activity {
         LinearLayout stops=new LinearLayout(this);stops.setOrientation(0);
         for(int i=0;i<5;i++){final int stop=i;TextView label=text((i+1)+"\n"+IconLabelScale.name(i),13,mTextSecondary,false);label.setGravity(Gravity.CENTER);label.setPadding(0,dp(4),0,dp(8));label.setContentDescription("Level "+(i+1)+", "+IconLabelScale.name(i));label.setOnClickListener(new View.OnClickListener(){public void onClick(View v){if(mLabelSlider.isEnabled()){mLabelSlider.setProgress(stop);saveLabelSize(stop);}}});mLabelStops[i]=label;stops.addView(label,new LinearLayout.LayoutParams(0,dp(56),1));}
         box.addView(stops,new LinearLayout.LayoutParams(-1,-2));
-        ImageView icon=new ImageView(this);Drawable image=drawable("ic_ps_launcher");if(image!=null){image=image.mutate();image.setTint(mAccent);icon.setImageDrawable(image);}
+        ImageView icon=new ImageView(this);Drawable image=drawable("ic_ps_label_size");if(image!=null){image=image.mutate();image.setTint(mAccent);icon.setImageDrawable(image);}
         LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(dp(48),dp(48));ip.gravity=Gravity.CENTER_HORIZONTAL;ip.topMargin=dp(16);box.addView(icon,ip);
-        mLabelPreview=text("Play Store",16*.85f,mText,false);mLabelPreview.setGravity(Gravity.CENTER);mLabelPreview.setPadding(0,dp(8),0,dp(8));box.addView(mLabelPreview,new LinearLayout.LayoutParams(-1,-2));
-        TextView note=text("Changes only the text beneath icons.\nIcon size and shape stay unchanged.",13,mTextSecondary,false);note.setGravity(Gravity.CENTER);box.addView(note,new LinearLayout.LayoutParams(-1,-2));
+        mLabelPreview=text("App name",16*.85f,mText,false);mLabelPreview.setGravity(Gravity.CENTER);mLabelPreview.setPadding(0,dp(8),0,dp(8));box.addView(mLabelPreview,new LinearLayout.LayoutParams(-1,-2));
+        TextView note=text("Changes only the text under icons.\nIcon size and shape stay the same.",13,mTextSecondary,false);note.setGravity(Gravity.CENTER);box.addView(note,new LinearLayout.LayoutParams(-1,-2));
         mLabelSlider.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(android.widget.SeekBar s){}public void onStopTrackingTouch(android.widget.SeekBar s){}public void onProgressChanged(android.widget.SeekBar s,int value,boolean user){showLabelSize(value);if(user&&!mUpdating)saveLabelSize(value);}});
         group.addView(box,new LinearLayout.LayoutParams(-1,-2));
     }
@@ -550,6 +680,13 @@ public class SettingsActivity extends Activity {
             @Override
             public void run() {
                 final int[] values = Root.readSecure(keys);
+                if(values!=null)for(int i=0;i<keys.length;i++)if(PrivacyLock.GRACE_KEY.equals(keys[i])){
+                    try{values[i]=PrivacyLock.graceOn(android.provider.Settings.Secure.getString(getContentResolver(),PrivacyLock.GRACE_KEY))?1:0;}catch(Throwable ignored){}
+                }else if(MiscOptions.defaultOff(keys[i])){
+                    try{values[i]="1".equals(android.provider.Settings.Secure.getString(getContentResolver(),keys[i]))?1:0;}catch(Throwable ignored){}
+                }else if(PrivacyLock.ENABLED_KEY.equals(keys[i])||PrivacyLock.PROTECT_KEY.equals(keys[i])){
+                    try{values[i]=PrivacyLock.onValue(android.provider.Settings.Secure.getString(getContentResolver(),keys[i]))?1:0;}catch(Throwable ignored){}
+                }
                 mMain.post(new Runnable() {
                     @Override
                     public void run() {
@@ -561,6 +698,7 @@ public class SettingsActivity extends Activity {
                         if (values == null) {
                             showRootBanner(true);
                             for (Switch sw : mSwitches.values()) sw.setEnabled(false);
+                            updateMiscPicker();
                             if(mLabelSlider!=null)mLabelSlider.setEnabled(false);
                             if(mStyleSlider!=null)mStyleSlider.setEnabled(false);
                             return;
@@ -573,6 +711,7 @@ public class SettingsActivity extends Activity {
                             if(sw!=null){boolean checked=values[i]==1;sSwitchValues.put(keys[i],checked);if(sw.isChecked()!=checked)sw.setChecked(checked);sw.jumpDrawablesToCurrentState();sw.setVisibility(View.VISIBLE);sw.setEnabled(true);}
                             updateChoiceLabel(keys[i],values[i]);
                         }
+                        updateMiscPicker();
                         mUpdating = false;
                     }
                 });
@@ -581,18 +720,24 @@ public class SettingsActivity extends Activity {
     }
 
     private void save(final String key, final boolean on, final Switch sw) {
+        if(mPrivacyGate!=null&&!mPrivacyGate.isOpen())return;
         mSaves++;
         IO.execute(new Runnable() {
             @Override
             public void run() {
                 final boolean ok = Root.run(command(key, on)) != null;
+                if(ok&&MiscSystem.A11Y_KEY.equals(key)){
+                    java.util.List<String> apps=Root.run("settings get secure "+MiscSystem.A11Y_APPS_KEY);
+                    if(apps!=null&&!apps.isEmpty())Root.run("true"+MiscOptions.stopCommands(MiscOptions.parse(apps.get(0))));
+                }
                 mMain.post(new Runnable() {
                     @Override
                     public void run() {
                         if (isFinishing() || isDestroyed()) return;
-                        if (ok) { RestartPill.changed(key); if (mRestart != null) mRestart.refresh(); return; }
+                        if (ok) {updateMiscPicker();if(MiscSystem.DEV_KEY.equals(key))Toast.makeText(SettingsActivity.this,"Reopen apps that were already open.",Toast.LENGTH_LONG).show();if(MiscSystem.A11Y_KEY.equals(key))Toast.makeText(SettingsActivity.this,"Changes apply the next time the chosen apps open.",Toast.LENGTH_LONG).show();RestartPill.changed(key); if (mRestart != null) mRestart.refresh(); return; }
                         mUpdating = true;
                         sSwitchValues.put(key,!on);sw.setChecked(!on);
+                        updateMiscPicker();
                         mUpdating = false;
                         showRootBanner(true);
                         Toast.makeText(SettingsActivity.this, "Couldn't save: root access needed",
@@ -604,6 +749,7 @@ public class SettingsActivity extends Activity {
     }
 
     private static String command(String key, boolean on) {
+        if(KeyboardBarTweak.KEY.equals(key))return MiscOptions.keyboardCommand(on);
         String put = "settings put secure " + key + " " + (on ? 1 : 0);
         if (Feature.FLASHLIGHT.equals(key) && on) {
             return put + "; settings put secure " + Flashlight.KEY_TARGET + " 0"
@@ -640,7 +786,19 @@ public class SettingsActivity extends Activity {
         badge.addView(iv, new FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER));
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(dp(40), dp(40));
         blp.rightMargin = dp(16);
-        row.addView(badge, blp);
+        if(MiscSystem.DEV_KEY.equals(key)){
+            row.setPadding(dp(10),dp(16),dp(16),dp(16));
+            FrameLayout target=new FrameLayout(this);target.setMinimumHeight(dp(48));
+            target.addView(badge,new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.CENTER));
+            LinearLayout.LayoutParams targetParams=new LinearLayout.LayoutParams(dp(56),ViewGroup.LayoutParams.MATCH_PARENT);
+            targetParams.rightMargin=dp(8);row.addView(target,targetParams);
+            target.setClickable(true);target.setFocusable(true);
+            target.setContentDescription("Open Developer options");
+            iv.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            target.setOnClickListener(new View.OnClickListener(){public void onClick(View v){openDeveloperOptions();}});
+            mDeveloperGear=iv;
+        }else row.addView(badge, blp);
 
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
@@ -655,7 +813,7 @@ public class SettingsActivity extends Activity {
         sw.setThumbTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
                 new int[]{mAccent, mTextSecondary}));
         sw.setTrackTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
-                new int[]{(mAccent & 0x00FFFFFF) | 0x66000000, mDark ? 0xFF49454F : 0xFFCAC4D0}));
+                new int[]{(mAccent & 0x00FFFFFF) | 0x66000000, mAppSuperDark ? 0xFF1A1A1A : mDark ? 0xFF49454F : 0xFFCAC4D0}));
         sw.setContentDescription(title);
         Boolean known=sSwitchValues.get(key);
         if(known!=null){sw.setChecked(known);sw.jumpDrawablesToCurrentState();}
@@ -664,7 +822,7 @@ public class SettingsActivity extends Activity {
         sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton b, boolean on) {
-                if (!mUpdating) {sSwitchValues.put(key,on);save(key, on, sw);}
+                if (!mUpdating) {sSwitchValues.put(key,on);save(key, on, sw);updateMiscPicker();}
             }
         });
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
@@ -687,9 +845,36 @@ public class SettingsActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
+    private void startDeveloperGear(){
+        if(mDeveloperGear==null||mGearRotation!=null)return;
+        float angle=mDeveloperGear.getRotation();
+        mGearRotation=android.animation.ObjectAnimator.ofFloat(mDeveloperGear,"rotation",angle,angle+360f);
+        mGearRotation.setDuration(14000L);
+        mGearRotation.setInterpolator(new android.view.animation.LinearInterpolator());
+        mGearRotation.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        mGearRotation.start();
+    }
+    private void stopDeveloperGear(){
+        if(mGearRotation==null)return;
+        mGearRotation.cancel();mGearRotation=null;
+        if(mDeveloperGear!=null)mDeveloperGear.setRotation(mDeveloperGear.getRotation()%360f);
+    }
+    private void openDeveloperOptions(){
+        try{startActivity(new Intent("android.settings.APPLICATION_DEVELOPMENT_SETTINGS"));}
+        catch(android.content.ActivityNotFoundException unavailable){
+            Toast.makeText(this,"Developer options aren't available on this device.",Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void updateMiscPicker(){
+        if(mMiscChooseApps==null)return;
+        Switch toggle=mSwitches.get(MiscSystem.A11Y_KEY);
+        boolean enabled=toggle!=null&&toggle.isEnabled()&&toggle.isChecked();
+        mMiscChooseApps.setEnabled(enabled);mMiscChooseApps.setClickable(enabled);mMiscChooseApps.setAlpha(enabled?1f:.4f);
+    }
+
     private TextView banner() {
-        TextView b = text("Pixel Suite needs root access to change these switches. Allow it "
-                + "in KernelSU, then reopen this screen.", 14, mDark ? 0xFFFFB4AB : 0xFF8C1D18, false);
+        TextView b = text("Pixel Suite needs root access to change these settings. Allow it in KernelSU, then reopen this screen.", 14, mDark ? 0xFFFFB4AB : 0xFF8C1D18, false);
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(20));
         bg.setColor(mDark ? 0xFF5C1F1A : 0xFFFCDAD6);
@@ -737,7 +922,7 @@ public class SettingsActivity extends Activity {
     }
 
     private Drawable rowBackground(float top, float bottom) {
-        GradientDrawable shape = FrostedSurface.drawable(this,24);
+        GradientDrawable shape = AppSurfaces.card(this,24);
         shape.setColor(mCard);
         shape.setCornerRadii(new float[]{top, top, top, top, bottom, bottom, bottom, bottom});
         GradientDrawable mask = new GradientDrawable();
@@ -757,6 +942,7 @@ public class SettingsActivity extends Activity {
     }
 
     private void resolvePalette() {
+        AppSurfaces.refresh(this);mAppSuperDark=AppSurfaces.active(this);
         if (mDark) {
             mBg = sys("system_surface_container_dark", 0xFF211F26);
             mCard = sys("system_surface_container_high_dark", 0xFF2B2930);
@@ -772,6 +958,15 @@ public class SettingsActivity extends Activity {
             mAccent = sys("system_primary_light", 0xFF6750A4);
             mOnAccent = sys("system_on_primary_light", 0xFFFFFFFF);
         }
+        if(mAppSuperDark){mBg=0xff000000;mCard=0xff0b0b0b;}
+    }
+
+    private void refreshAppSurfaces(){
+        AppSurfaces.refresh(this);boolean now=AppSurfaces.active(this);if(now==mAppSuperDark)return;
+        resolvePalette();styleWindow();if(mAppRoot!=null){mAppRoot.setBackgroundColor(mBg);AppSurfaces.invalidateTree(mAppRoot);}
+        for(Switch sw:mSwitches.values())sw.setTrackTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{(mAccent&0xffffff)|0x66000000,mAppSuperDark?0xff1a1a1a:mDark?0xff49454f:0xffcac4d0}));
+        for(AlertDialog dialog:new java.util.ArrayList<AlertDialog>(mSettingsDialogs))if(dialog.isShowing())styleSettingsWindow(dialog.getWindow());
+        if(mRestart!=null)mRestart.refreshPalette();
     }
 
     @SuppressWarnings("deprecation")

@@ -12,12 +12,13 @@ final class SuperDarkApps {
     private static boolean sActive;
 
     static final String SETTINGS = "com.android.settings";
+    static final String SETTINGS_SEARCH = "com.google.android.settings.intelligence";
     private static int sBlackMax = 0x2c;
 
     private static final java.util.List<Object> sHandles = new java.util.ArrayList<Object>();
 
     static void install(ClassLoader cl, String pkg) {
-        if (SETTINGS.equals(pkg)) sBlackMax = 0x18;
+        if (SETTINGS.equals(pkg) || SETTINGS_SEARCH.equals(pkg)) sBlackMax = 0x18;
         int n = 0;
         sHandles.clear();
         n += hookResult(android.content.res.Resources.class, "getColor");
@@ -28,6 +29,20 @@ final class SuperDarkApps {
         n += hookFirstArg(android.graphics.drawable.ColorDrawable.class, "setColor");
         n += hookFirstArg(android.view.View.class, "setBackgroundColor");
         if (!GBOARD.equals(pkg)) n += hookFirstArg(android.graphics.Paint.class, "setColor");
+        if (AliasProvider.GOOGLE.equals(pkg)) {
+            try {
+                n += keep(Xp.hookAllMethods(android.graphics.Paint.class, "setColor", new Xp.Callback() {
+                    @Override protected void beforeHookedMethod(Xp.Param p) {
+                        if (p.args.length != 1 || !(p.args[0] instanceof Long) || !active()) return;
+                        try {
+                            if (sToArgb == null) { sToArgb = android.graphics.Color.class.getMethod("toArgb", long.class); sPack = android.graphics.Color.class.getMethod("pack", int.class); }
+                            int c = (Integer) sToArgb.invoke(null, p.args[0]), v = remap(c);
+                            if (v != c) p.args[0] = sPack.invoke(null, v);
+                        } catch (Throwable ignored) { }
+                    }
+                }));
+            } catch (Throwable t) { Module.log("SuperDark apps: Paint.setColor(long)", t); }
+        }
         try {
             n += keep(Xp.hookAllMethods(android.graphics.drawable.GradientDrawable.class, "setColors", new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
@@ -38,9 +53,47 @@ final class SuperDarkApps {
                 }
             }));
         } catch (Throwable t) { Module.log("SuperDark apps: setColors", t); }
+        if (AliasProvider.GOOGLE.equals(pkg)) {
+            try {
+                n += keep(Xp.hookAllMethods(android.view.View.class, "setBackgroundDrawable", new Xp.Callback() {
+                    @Override protected void beforeHookedMethod(Xp.Param p) {
+                        if (p.args.length != 1 || !(p.args[0] instanceof android.graphics.drawable.ColorDrawable) || !active()) return;
+                        android.graphics.drawable.ColorDrawable d = (android.graphics.drawable.ColorDrawable) p.args[0];
+                        int c = d.getColor(), v = remap(c);
+                        if (v != c) d.setColor(v);
+                    }
+                }));
+            } catch (Throwable t) { Module.log("SuperDark apps: window background", t); }
+            try {
+                Xp.Callback black = new Xp.Callback() {
+                    @Override protected void afterHookedMethod(Xp.Param p) {
+                        try {
+                            if (!activeAnywhere() || Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject, "pixelsuite_task_black"))) return;
+                            Xp.setAdditionalInstanceField(p.thisObject, "pixelsuite_task_black", Boolean.TRUE);
+                            android.app.Activity a = (android.app.Activity) p.thisObject;
+                            Object td;
+                            try {
+                                Class<?> b = Class.forName("android.app.ActivityManager$TaskDescription$Builder");
+                                Object builder = b.getConstructor().newInstance();
+                                b.getMethod("setBackgroundColor", int.class).invoke(builder, 0xff000000);
+                                b.getMethod("setNavigationBarColor", int.class).invoke(builder, 0xff000000);
+                                td = b.getMethod("build").invoke(builder);
+                            } catch (Throwable old) {
+                                td = new android.app.ActivityManager.TaskDescription();
+                                android.app.ActivityManager.TaskDescription.class.getMethod("setBackgroundColor", int.class).invoke(td, 0xff000000);
+                            }
+                            a.setTaskDescription((android.app.ActivityManager.TaskDescription) td);
+                        } catch (Throwable ignored) { }
+                    }
+                };
+                n += keep(Xp.hookAllMethods(android.app.Activity.class, "onCreate", black));
+                n += keep(Xp.hookAllMethods(android.app.Activity.class, "onResume", black));
+            } catch (Throwable t) { Module.log("SuperDark apps: task background", t); }
+        }
         if (!sLogged) { sLogged = true; Module.log("SuperDark apps: " + n + " colour hooks in " + pkg); }
     }
     private static boolean sLogged;
+    private static java.lang.reflect.Method sToArgb, sPack;
 
     private static int keep(java.util.Set<Object> handles) { sHandles.addAll(handles); return handles.size(); }
 

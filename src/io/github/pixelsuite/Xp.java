@@ -95,6 +95,16 @@ final class Xp {
         return hook(m, cb);
     }
 
+    static void deoptimize(Executable executable) {
+        XposedInterface x = sX;
+        if (x == null || executable == null) return;
+        try { x.deoptimize(executable); } catch (Throwable t) { Xp.log("deoptimize " + executable.getName() + " failed", t); }
+    }
+    static void deoptimizeAll(Class<?> clazz, String name) {
+        if (clazz == null) return;
+        for (Method m : clazz.getDeclaredMethods()) if (m.getName().equals(name)) deoptimize(m);
+    }
+
     private static Object hook(Executable executable, final Callback cb) {
         XposedInterface x = sX;
         if (x == null || executable == null) return null;

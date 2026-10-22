@@ -32,6 +32,9 @@ public class Module extends XposedModule {
         ThreeFinger.installSystem(cl);
         DoubleTapSleep.installSystem(cl);
         DoubleTapWake.installSystem(cl);
+        PrivacyLock.installSystem(cl);
+        ScreenshotWarm.installSystem(cl);
+        MiscSystem.installSystem(cl);
     }
 
     @Override
@@ -39,14 +42,28 @@ public class Module extends XposedModule {
         if (!param.isFirstPackage()) return;
         ClassLoader cl = param.getClassLoader();
         String pkg = param.getPackageName();
-        if (SYSTEMUI.equals(pkg)) {
+        if (SYSTEMUI.equals(pkg) && screenshotProcess()) {
+            SuperDark.installSystemUi(cl);
+            SystemToasts.install(cl);
+        } else if (SYSTEMUI.equals(pkg)) {
             VolumeCamera.installSystemUi(cl);
             ScreenRecordTidy.install(cl);
             SuperDark.installSystemUi(cl);
+            StatusBarFade.installSystemUi(cl);
             SystemToasts.install(cl);
+            PromptStyle.install(cl);
         } else if (LAUNCHER.equals(pkg)) {
             ClearAll.installLauncher(cl);
+            RecentsLock.install(cl);
+            RecentsLandscape.install(cl);
+            PrivacyRecents.install(cl);
+            PrivacyFolders.install(cl);
+            PrivacyBadges.install(cl);
+            PrivacyGuard.install(cl);
+            FeedBackdrop.install();
+            OneAppFolders.install(cl);
             LauncherFeatures.install(cl);
+            FolderRules.install();
             SuperDarkApps.installLauncher(cl);
             SuperDarkApps.installLauncherSettings(cl);
         } else if (FILES.equals(pkg)) {
@@ -63,9 +80,19 @@ public class Module extends XposedModule {
         } else if (AliasProvider.GOOGLE.equals(pkg)) {
             GoogleAliases.install();
             SuperDarkApps.install(cl, pkg);
-        } else if (SuperDarkApps.GBOARD.equals(pkg) || SETTINGS.equals(pkg)) {
+        } else if (SuperDarkApps.GBOARD.equals(pkg) || SETTINGS.equals(pkg) || SuperDarkApps.SETTINGS_SEARCH.equals(pkg)
+                || "com.google.android.packageinstaller".equals(pkg) || "com.android.packageinstaller".equals(pkg)) {
             SuperDarkApps.install(cl, pkg);
+            if (SuperDarkApps.GBOARD.equals(pkg)) KeyboardBarTweak.install(pkg);
+        } else {
+            KeyboardBarTweak.install(pkg);
+            DevOptionsHide.install(pkg);
         }
+    }
+
+    private static boolean screenshotProcess() {
+        try { String name = (String) android.app.Application.class.getMethod("getProcessName").invoke(null); return name != null && name.endsWith(":screenshot"); }
+        catch (Throwable t) { return false; }
     }
 
     static void log(String msg) { Xp.log(msg); }

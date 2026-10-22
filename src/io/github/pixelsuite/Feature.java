@@ -22,6 +22,7 @@ final class Feature {
     private Feature() {}
 
     static int defaultFor(String key) {
+        if(PrivacyLock.GRACE_KEY.equals(key)||MiscOptions.defaultOff(key))return 0;
         if(LauncherFeatures.LABEL_LEVEL.equals(key))return 2;
         if(SurfaceStyle.KEY.equals(key))return SurfaceStyle.FROSTED;
         if(LauncherFeatures.GRID_SIZE.equals(key)||LauncherFeatures.DRAWER_GRID_SIZE.equals(key))return 3;
