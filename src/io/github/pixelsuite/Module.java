@@ -56,6 +56,7 @@ public class Module extends XposedModule {
             // taken; only what shows there is loaded (Super Dark's colours, the toasts), so it is ready sooner.
             SuperDark.installSystemUi(cl);
             SystemToasts.install(cl);
+            ScreenshotWarm.installScreenshotProcess(cl);   // preview90: Pixel Suite's keep-ready binding stays out of the service
         } else if (SYSTEMUI.equals(pkg)) {
             VolumeCamera.installSystemUi(cl);
             ScreenRecordTidy.install(cl);

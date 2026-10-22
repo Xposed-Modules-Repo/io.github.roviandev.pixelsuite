@@ -72,6 +72,10 @@ final class RecentsLandscape {
                             if (rv == null || !rv.isShown() || p.args.length != 1 || !(p.args[0] instanceof Integer)) return;
                             int deg = (Integer) p.args[0];
                             if (deg < 0) return;   // flat on a table: no reading
+                            // preview91 (owner's video: the bar flashed with the phone sideways and recents upright): with
+                            // auto-rotate off the launcher never turns recents, so the sensor alone must not hide the bar
+                            // (the layout check then brought it straight back, over and over).
+                            if (!autoRotate(rv)) return;
                             Object outer = Xp.getObjectField(p.thisObject, "this$0");
                             int now = ((Number) Xp.getObjectField(outer, "mRotation")).intValue();
                             final int r = ((Number) Xp.callStaticMethod(state, "getRotationForUserDegreesRotated", (float) deg, now)).intValue();
@@ -90,6 +94,12 @@ final class RecentsLandscape {
             n += Xp.hookAllMethods(recents, "onConfigurationChanged", watch).size();
         } catch (Throwable error) { Module.log("Recents landscape unavailable", error); }
         Module.log("Recents landscape: " + n + " hooks");
+    }
+
+    /** Auto-rotate is on (without it the launcher keeps recents upright whatever the sensor says). */
+    private static boolean autoRotate(View v) {
+        try { return android.provider.Settings.System.getInt(v.getContext().getContentResolver(), android.provider.Settings.System.ACCELEROMETER_ROTATION, 0) == 1; }
+        catch (Throwable t) { return true; }
     }
 
     static boolean landscape(View v) {

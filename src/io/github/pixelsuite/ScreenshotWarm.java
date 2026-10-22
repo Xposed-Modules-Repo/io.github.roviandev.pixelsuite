@@ -21,11 +21,10 @@ import android.provider.Settings;
  * button) finds it already up. Costs that process's memory while it runs. Secure setting {@link #KEY}: "0" = off
  * (the process starts on demand again, as stock).
  *
- * preview89 (owner's logs and video): when our own binding was the first thing to start the screenshot process (at
- * boot), every screenshot's preview card came out blank white (the file was fine); when a real screenshot had started
- * the process and ours joined afterwards, the previews were right. So the process is never started by us: our binding
- * is added right after the system's own screenshot binding (seen in bindServiceCommon) and then holds the process.
- * The first screenshot after a boot (or after the process died) is at stock speed; the ones after it are instant.
+ * preview89: our binding is added right after the system's own first screenshot binding (seen in bindServiceCommon)
+ * and then holds the process. The first screenshot after a boot (or after the process died) is at stock speed; the
+ * ones after it are instant. preview90: the real cause of the blank previews was the service running its own
+ * setup / teardown for our binding; see installScreenshotProcess.
  */
 final class ScreenshotWarm {
     private ScreenshotWarm() {}
@@ -61,6 +60,7 @@ final class ScreenshotWarm {
                             if (c == null || target == null || !c.equals(target) || KEEP.equals(in.getAction())) return;
                             // preview89: a real screenshot binding: the system starts the process; ours joins it right after
                             if (armed && connection == null && worker != null) worker.postDelayed(new Runnable() { public void run() { synchronized (ScreenshotWarm.class) { if (armed) bind(); } } }, 1500);
+                            for (Object a : p.args) if (a instanceof ServiceConnection) synchronized (real) { real.put((ServiceConnection) a, Boolean.TRUE); }
                             if (connection == null) return;
                             Intent fresh = new Intent(in);
                             Intent.class.getMethod("setIdentifier", String.class).invoke(fresh, "pixelsuite-shot-" + (++shots));
@@ -72,8 +72,66 @@ final class ScreenshotWarm {
             }).size();
             if (n == 0) Module.log("Fast screenshot: binding identity hook unavailable");
         } catch (Throwable error) { Module.log("Fast screenshot: binding identity hook unavailable", error); }
+        // preview92 (owner: the blank preview still came back on 311/312): stock Android makes a new screenshot service
+        // for every screenshot (created, bound, unbound, destroyed). Ours kept one service alive for all of them, so
+        // whatever it leaves behind after a screenshot carried into the next one. Now, when a screenshot's binding
+        // ends, ours steps away too, so the service is destroyed as in stock, and binds again a moment later: a new
+        // service is ready in the same, still running process (its own onBind is skipped, see installScreenshotProcess).
+        try {
+            int n = Xp.hookAllMethods(Class.forName("android.app.ContextImpl"), "unbindService", new Xp.Callback() {
+                @Override protected void afterHookedMethod(Xp.Param p) {
+                    try {
+                        if (p.args.length != 1 || !(p.args[0] instanceof ServiceConnection)) return;
+                        boolean was; synchronized (real) { was = real.remove(p.args[0]) != null; }
+                        if (was && worker != null) worker.postDelayed(new Runnable() { public void run() { recycle(); } }, 400);
+                    } catch (Throwable ignored) { }
+                }
+            }).size();
+            if (n == 0) Module.log("Fast screenshot: unbind hook unavailable");
+        } catch (Throwable error) { Module.log("Fast screenshot: unbind hook unavailable", error); }
     }
     private static int shots;
+    /** The system's own screenshot bindings that are still open. */
+    private static final java.util.WeakHashMap<ServiceConnection, Boolean> real = new java.util.WeakHashMap<ServiceConnection, Boolean>();
+    private static boolean loggedReady;
+
+    /** A screenshot ended: let the service be destroyed as in stock, then make a new one ready. */
+    private static synchronized void recycle() {
+        synchronized (real) { if (!real.isEmpty()) return; }   // another screenshot is still running
+        if (connection == null) return;
+        unbind();
+        worker.postDelayed(new Runnable() { public void run() { synchronized (ScreenshotWarm.class) { if (armed) bind(); } } }, 600);
+    }
+
+    /**
+     * preview90 (owner: the blank preview came back on 310 after ~20 minutes; his log: turning the option off crashed the
+     * screenshot process in TakeScreenshotService.onUnbind, "Receiver not registered"): Android ran the screenshot
+     * service's own onBind / onUnbind for Pixel Suite's keep-ready binding too, as if it were a screenshot. Its setup and
+     * teardown are shared by the whole service, so the real screenshots' preview ended up drawn on a half torn-down
+     * setup. In the screenshot process, our binding (action KEEP) now gets a plain Binder without the service's onBind,
+     * and its unbind skips the service's onUnbind: it only keeps the process alive. Real screenshots run exactly as stock.
+     */
+    static void installScreenshotProcess(ClassLoader cl) {
+        try {
+            Class<?> service = Class.forName("com.android.systemui.screenshot.TakeScreenshotService", false, cl);
+            int n = Xp.hookAllMethods(service, "onBind", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    if (p.args.length == 1 && p.args[0] instanceof Intent && KEEP.equals(((Intent) p.args[0]).getAction())) p.setResult(new android.os.Binder());
+                }
+            }).size();
+            n += Xp.hookAllMethods(service, "onUnbind", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    if (p.args.length == 1 && p.args[0] instanceof Intent && KEEP.equals(((Intent) p.args[0]).getAction())) p.setResult(Boolean.FALSE);
+                }
+            }).size();
+            n += Xp.hookAllMethods(service, "onRebind", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    if (p.args.length == 1 && p.args[0] instanceof Intent && KEEP.equals(((Intent) p.args[0]).getAction())) p.setResult(null);
+                }
+            }).size();
+            if (n < 2) Module.log("Fast screenshot: service hooks incomplete (" + n + ")");
+        } catch (Throwable error) { Module.log("Fast screenshot: service hooks unavailable", error); }
+    }
 
     private static synchronized void start(final Context c) {
         if (system != null || c == null) return;
@@ -86,16 +144,20 @@ final class ScreenshotWarm {
             });
         } catch (Throwable ignored) { }
         worker.post(new Runnable() { public void run() { target = pick(); update(); } });
+        // preview92: with the real causes fixed (our binding skips the service's own setup, and every screenshot gets a
+        // fresh service), the process is made ready again after the boot settles, so the first screenshot is instant too.
+        worker.postDelayed(new Runnable() { public void run() { synchronized (ScreenshotWarm.class) { if (armed) bind(); } } }, 30_000);
     }
 
     private static boolean on() {
         try { return !"0".equals(Settings.Secure.getString(system.getContentResolver(), KEY)); } catch (Throwable t) { return true; }
     }
 
-    /** On: wait for the next real screenshot and hold the process from then on. Off: let it go. */
+    /** On: keep the process ready. Off: let it go. */
     private static synchronized void update() {
         armed = on();
-        if (!armed) unbind();
+        if (armed) { if (system != null && worker != null && android.os.SystemClock.elapsedRealtime() > 60_000) bind(); }
+        else unbind();
     }
 
     /** A service that lives in the screenshot process and is not the screenshot service itself. */
@@ -136,7 +198,7 @@ final class ScreenshotWarm {
                 ok = (Boolean) Context.class.getMethod("bindServiceAsUser", Intent.class, ServiceConnection.class, int.class, android.os.UserHandle.class)
                         .invoke(system, i, conn, Context.BIND_AUTO_CREATE, user);
             } catch (Throwable older) { ok = system.bindService(i, conn, Context.BIND_AUTO_CREATE); }
-            if (ok) { connection = conn; Module.log("Fast screenshot: screenshot process kept ready after a screenshot (" + c.getShortClassName() + ")"); }
+            if (ok) { connection = conn; if (!loggedReady) { loggedReady = true; Module.log("Fast screenshot: screenshot process kept ready (" + c.getShortClassName() + ")"); } }
             else Module.log("Fast screenshot: bind refused (stock start kept)");
         } catch (Throwable error) { Module.log("Fast screenshot: bind failed (stock start kept)", error); }
     }
