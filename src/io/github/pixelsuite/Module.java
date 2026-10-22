@@ -45,6 +45,7 @@ public class Module extends XposedModule {
         if (SYSTEMUI.equals(pkg) && screenshotProcess()) {
             SuperDark.installSystemUi(cl);
             SystemToasts.install(cl);
+            ScreenshotWarm.installScreenshotProcess(cl);
         } else if (SYSTEMUI.equals(pkg)) {
             VolumeCamera.installSystemUi(cl);
             ScreenRecordTidy.install(cl);

@@ -1,6 +1,6 @@
-[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/310-2.0.6)
+[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/314-2.0.7)
 
-# Pixel Suite 2.0.6
+# Pixel Suite 2.0.7
 
 Your Pixel. Your way.
 
@@ -8,9 +8,18 @@ Made by **RovianDev**. A free, open-source LSPosed module for Pixel customizatio
 
 **Open Pixel Suite from your home screen:** touch and hold an empty area, then choose **Pixel Suite settings**.
 
-[📥 GitHub download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.6) · [📥 Xposed download](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/310-2.0.6) · [Full 2.0.6 release notes](RELEASE-NOTES-v2.0.6.md) · [Changelog](CHANGELOG.md)
+[📥 GitHub download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.7) · [📥 Xposed download](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/314-2.0.7) · [Full 2.0.7 release notes](RELEASE-NOTES-v2.0.7.md) · [Changelog](CHANGELOG.md)
 
-## What's new in 2.0.6
+## What's new in 2.0.7
+
+🐛 **Fixes**
+
+- Screenshot previews no longer go blank after the first screenshot with Reduce screenshot delay on.
+- The first screenshot after a restart is instant again.
+- Turning Reduce screenshot delay off no longer crashes the screenshot service.
+- The status bar no longer flashes in recents when the phone is sideways with auto-rotate off.
+
+## Features added in 2.0.6
 
 ## 🔒 **Privacy & Security**
 
@@ -40,7 +49,7 @@ Made by **RovianDev**. A free, open-source LSPosed module for Pixel customizatio
 
 ## ⚙️ **Miscellaneous**
 
-- **Reduce screenshot delay:** keeps the screenshot service ready after a real screenshot, making later captures appear instantly. The first screenshot after a restart runs at normal speed. Uses a little extra memory while enabled.
+- **Reduce screenshot delay:** keeps the screenshot service ready so captures appear instantly, including the first screenshot after a restart. Uses a little extra memory while enabled.
 - **Allow screenshots of secure screens:** take screenshots and recordings in apps that normally block them.
 - **Hide accessibility from apps:** choose which apps cannot see your enabled accessibility services. The searchable picker includes user/system filters, and checked apps move to the top immediately.
 - **Keyboard bar tweak:** hide the globe and move the dismiss arrow to the right in the bar beneath your keyboard (**Gboard and FUTO Keyboard**). Requires gesture navigation and restarts your keyboard when changed.
@@ -118,7 +127,7 @@ Choose the look of supported folders, shortcut menus, toast messages, Google Pho
 
 **Root + LSPosed API 102 required.**
 
-1. Install **PixelSuite-v2.0.6.apk** over the current official build.
+1. Install **PixelSuite-v2.0.7.apk** over the current official build.
 2. Enable Pixel Suite in LSPosed and grant its app root access to save settings.
 3. Select **System Framework, System UI and Pixel Launcher** for Privacy/Recents, and **System Framework** for the screenshot, accessibility and Developer options controls.
 4. Select **Settings, Settings Intelligence, Google, Gboard and Package installer** alongside System UI/Pixel Launcher for Super Dark. Select **Google** for search customization.

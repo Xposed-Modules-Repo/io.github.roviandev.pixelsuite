@@ -41,6 +41,7 @@ final class ScreenshotWarm {
                             ComponentName c = in.getComponent();
                             if (c == null || target == null || !c.equals(target) || KEEP.equals(in.getAction())) return;
                             if (armed && connection == null && worker != null) worker.postDelayed(new Runnable() { public void run() { synchronized (ScreenshotWarm.class) { if (armed) bind(); } } }, 1500);
+                            for (Object a : p.args) if (a instanceof ServiceConnection) synchronized (real) { real.put((ServiceConnection) a, Boolean.TRUE); }
                             if (connection == null) return;
                             Intent fresh = new Intent(in);
                             Intent.class.getMethod("setIdentifier", String.class).invoke(fresh, "pixelsuite-shot-" + (++shots));
@@ -52,8 +53,51 @@ final class ScreenshotWarm {
             }).size();
             if (n == 0) Module.log("Fast screenshot: binding identity hook unavailable");
         } catch (Throwable error) { Module.log("Fast screenshot: binding identity hook unavailable", error); }
+        try {
+            int n = Xp.hookAllMethods(Class.forName("android.app.ContextImpl"), "unbindService", new Xp.Callback() {
+                @Override protected void afterHookedMethod(Xp.Param p) {
+                    try {
+                        if (p.args.length != 1 || !(p.args[0] instanceof ServiceConnection)) return;
+                        boolean was; synchronized (real) { was = real.remove(p.args[0]) != null; }
+                        if (was && worker != null) worker.postDelayed(new Runnable() { public void run() { recycle(); } }, 400);
+                    } catch (Throwable ignored) { }
+                }
+            }).size();
+            if (n == 0) Module.log("Fast screenshot: unbind hook unavailable");
+        } catch (Throwable error) { Module.log("Fast screenshot: unbind hook unavailable", error); }
     }
     private static int shots;
+    private static final java.util.WeakHashMap<ServiceConnection, Boolean> real = new java.util.WeakHashMap<ServiceConnection, Boolean>();
+    private static boolean loggedReady;
+
+    private static synchronized void recycle() {
+        synchronized (real) { if (!real.isEmpty()) return; }
+        if (connection == null) return;
+        unbind();
+        worker.postDelayed(new Runnable() { public void run() { synchronized (ScreenshotWarm.class) { if (armed) bind(); } } }, 600);
+    }
+
+    static void installScreenshotProcess(ClassLoader cl) {
+        try {
+            Class<?> service = Class.forName("com.android.systemui.screenshot.TakeScreenshotService", false, cl);
+            int n = Xp.hookAllMethods(service, "onBind", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    if (p.args.length == 1 && p.args[0] instanceof Intent && KEEP.equals(((Intent) p.args[0]).getAction())) p.setResult(new android.os.Binder());
+                }
+            }).size();
+            n += Xp.hookAllMethods(service, "onUnbind", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    if (p.args.length == 1 && p.args[0] instanceof Intent && KEEP.equals(((Intent) p.args[0]).getAction())) p.setResult(Boolean.FALSE);
+                }
+            }).size();
+            n += Xp.hookAllMethods(service, "onRebind", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    if (p.args.length == 1 && p.args[0] instanceof Intent && KEEP.equals(((Intent) p.args[0]).getAction())) p.setResult(null);
+                }
+            }).size();
+            if (n < 2) Module.log("Fast screenshot: service hooks incomplete (" + n + ")");
+        } catch (Throwable error) { Module.log("Fast screenshot: service hooks unavailable", error); }
+    }
 
     private static synchronized void start(final Context c) {
         if (system != null || c == null) return;
@@ -66,6 +110,7 @@ final class ScreenshotWarm {
             });
         } catch (Throwable ignored) { }
         worker.post(new Runnable() { public void run() { target = pick(); update(); } });
+        worker.postDelayed(new Runnable() { public void run() { synchronized (ScreenshotWarm.class) { if (armed) bind(); } } }, 30_000);
     }
 
     private static boolean on() {
@@ -74,7 +119,8 @@ final class ScreenshotWarm {
 
     private static synchronized void update() {
         armed = on();
-        if (!armed) unbind();
+        if (armed) { if (system != null && worker != null && android.os.SystemClock.elapsedRealtime() > 60_000) bind(); }
+        else unbind();
     }
 
     private static ComponentName pick() {
@@ -110,7 +156,7 @@ final class ScreenshotWarm {
                 ok = (Boolean) Context.class.getMethod("bindServiceAsUser", Intent.class, ServiceConnection.class, int.class, android.os.UserHandle.class)
                         .invoke(system, i, conn, Context.BIND_AUTO_CREATE, user);
             } catch (Throwable older) { ok = system.bindService(i, conn, Context.BIND_AUTO_CREATE); }
-            if (ok) { connection = conn; Module.log("Fast screenshot: screenshot process kept ready after a screenshot (" + c.getShortClassName() + ")"); }
+            if (ok) { connection = conn; if (!loggedReady) { loggedReady = true; Module.log("Fast screenshot: screenshot process kept ready (" + c.getShortClassName() + ")"); } }
             else Module.log("Fast screenshot: bind refused (stock start kept)");
         } catch (Throwable error) { Module.log("Fast screenshot: bind failed (stock start kept)", error); }
     }

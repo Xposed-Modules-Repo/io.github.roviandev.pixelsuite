@@ -61,6 +61,7 @@ final class RecentsLandscape {
                             if (rv == null || !rv.isShown() || p.args.length != 1 || !(p.args[0] instanceof Integer)) return;
                             int deg = (Integer) p.args[0];
                             if (deg < 0) return;
+                            if (!autoRotate(rv)) return;
                             Object outer = Xp.getObjectField(p.thisObject, "this$0");
                             int now = ((Number) Xp.getObjectField(outer, "mRotation")).intValue();
                             final int r = ((Number) Xp.callStaticMethod(state, "getRotationForUserDegreesRotated", (float) deg, now)).intValue();
@@ -79,6 +80,11 @@ final class RecentsLandscape {
             n += Xp.hookAllMethods(recents, "onConfigurationChanged", watch).size();
         } catch (Throwable error) { Module.log("Recents landscape unavailable", error); }
         Module.log("Recents landscape: " + n + " hooks");
+    }
+
+    private static boolean autoRotate(View v) {
+        try { return android.provider.Settings.System.getInt(v.getContext().getContentResolver(), android.provider.Settings.System.ACCELEROMETER_ROTATION, 0) == 1; }
+        catch (Throwable t) { return true; }
     }
 
     static boolean landscape(View v) {

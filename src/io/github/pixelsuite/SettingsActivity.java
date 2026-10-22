@@ -354,7 +354,7 @@ public class SettingsActivity extends Activity {
         }
         if("miscellaneous".equals(id)){
             LinearLayout controls=group(page);
-            row(controls,ScreenshotWarm.KEY,"ic_ps_fast_screenshot",mAccent,"Reduce screenshot delay","Keeps the screenshot service ready, so screenshots appear instantly. Takes effect from the second screenshot after a restart. Uses a little extra memory.");
+            row(controls,ScreenshotWarm.KEY,"ic_ps_fast_screenshot",mAccent,"Reduce screenshot delay","Keeps the screenshot service ready, so screenshots appear instantly. Uses a little extra memory.");
             row(controls,MiscSystem.SECURE_KEY,"ic_ps_secure_capture",mAccent,"Allow screenshots of secure screens","Take screenshots and recordings in apps that normally block them. Apps aren't told.\nIf you use the DisableFlagSecure module, remove it before turning this on.\nBased on DisableFlagSecure by LSPosed (GPL-3.0).");
             row(controls,MiscSystem.A11Y_KEY,"ic_ps_accessibility",mAccent,"Hide accessibility from apps","Apps you choose can't see your accessibility services.\nIf you use the DoNotTryAccessibility module, remove it before turning this on.\nBased on DoNotTryAccessibility by Nitsuya (GPL-3.0).");
             navigation(controls,"Choose apps","Choose which apps can't see your accessibility services","ic_ps_drawer",new Runnable(){public void run(){
