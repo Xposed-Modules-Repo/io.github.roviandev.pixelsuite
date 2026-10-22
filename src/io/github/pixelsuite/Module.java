@@ -41,6 +41,9 @@ public class Module extends XposedModule {
         ThreeFinger.installSystem(cl);
         DoubleTapSleep.installSystem(cl);
         DoubleTapWake.installSystem(cl);
+        PrivacyLock.installSystem(cl);   // 2.0.6-preview56: app lock
+        ScreenshotWarm.installSystem(cl);   // 2.0.6-preview69: the screenshot process kept ready
+        MiscSystem.installSystem(cl);   // 2.0.6-preview79: Miscellaneous (secure screenshots, hide accessibility, settings for the keyboard bar)
     }
 
     @Override
@@ -48,14 +51,30 @@ public class Module extends XposedModule {
         if (!param.isFirstPackage()) return;
         ClassLoader cl = param.getClassLoader();
         String pkg = param.getPackageName();
-        if (SYSTEMUI.equals(pkg)) {
+        if (SYSTEMUI.equals(pkg) && screenshotProcess()) {
+            // preview69 (owner: screenshots were slow): System UI's screenshot process starts when a screenshot is
+            // taken; only what shows there is loaded (Super Dark's colours, the toasts), so it is ready sooner.
+            SuperDark.installSystemUi(cl);
+            SystemToasts.install(cl);
+        } else if (SYSTEMUI.equals(pkg)) {
             VolumeCamera.installSystemUi(cl);
             ScreenRecordTidy.install(cl);
             SuperDark.installSystemUi(cl);
+            StatusBarFade.installSystemUi(cl);   // recents sideways: the status bar fades (asked by Pixel Launcher)
             SystemToasts.install(cl);
+            PromptStyle.install(cl);   // 2.0.6-preview57: the app lock's fingerprint sheet (Pin pill, the app's icon)
         } else if (LAUNCHER.equals(pkg)) {
             ClearAll.installLauncher(cl);
+            RecentsLock.install(cl);
+            RecentsLandscape.install(cl);   // landscape recents: centred chips, status bar faded away
+            PrivacyRecents.install(cl);   // 2.0.6-preview59: app lock in recents (blur, tap asks, no split)
+            PrivacyFolders.install(cl);   // 2.0.6-preview60: locked folders
+            PrivacyBadges.install(cl);   // 2.0.6-preview63: padlock badge on locked apps and folders
+            PrivacyGuard.install(cl);   // 2.0.6-preview68: removing a locked app / folder asks first
+            FeedBackdrop.install();   // Super Dark: the feed's grey panel (launcher side)
+            OneAppFolders.install(cl);
             LauncherFeatures.install(cl);
+            FolderRules.install();   // after LauncherFeatures (its class loader)
             SuperDarkApps.installLauncher(cl);
             SuperDarkApps.installLauncherSettings(cl);
         } else if (FILES.equals(pkg)) {
@@ -73,9 +92,23 @@ public class Module extends XposedModule {
         } else if (AliasProvider.GOOGLE.equals(pkg)) {
             GoogleAliases.install();
             SuperDarkApps.install(cl, pkg);
-        } else if (SuperDarkApps.GBOARD.equals(pkg) || SETTINGS.equals(pkg)) {
+        } else if (SuperDarkApps.GBOARD.equals(pkg) || SETTINGS.equals(pkg) || SuperDarkApps.SETTINGS_SEARCH.equals(pkg)
+                || "com.google.android.packageinstaller".equals(pkg) || "com.android.packageinstaller".equals(pkg)) {   // preview77: the "Uninstall this app?" dialog too
             SuperDarkApps.install(cl, pkg);
+            if (SuperDarkApps.GBOARD.equals(pkg)) KeyboardBarTweak.install(pkg);   // preview79: Miscellaneous > Keyboard bar
+        } else {
+            // preview79: any other app Pixel Suite is enabled for in LSPosed (FUTO Keyboard in the scope, or one the owner
+            // ticked: a keyboard, a banking app): Miscellaneous > Keyboard bar and Hide Developer Options (both off by
+            // default; framework classes only)
+            KeyboardBarTweak.install(pkg);
+            DevOptionsHide.install(pkg);   // preview80: Miscellaneous > Hide Developer Options (apps the owner ticks)
         }
+    }
+
+    /** This is System UI's screenshot process ("com.android.systemui:screenshot"). */
+    private static boolean screenshotProcess() {
+        try { String name = (String) android.app.Application.class.getMethod("getProcessName").invoke(null); return name != null && name.endsWith(":screenshot"); }
+        catch (Throwable t) { return false; }
     }
 
     static void log(String msg) { Xp.log(msg); }

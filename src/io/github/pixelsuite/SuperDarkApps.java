@@ -21,6 +21,8 @@ final class SuperDarkApps {
     private static boolean sActive;
 
     static final String SETTINGS = "com.android.settings";
+    /** 2.0.6 (owner: Settings' search page was not fully black): the search page is its own app, Settings Intelligence. */
+    static final String SETTINGS_SEARCH = "com.google.android.settings.intelligence";
     /** Greys up to this become black; above it they step from near-black. Settings keeps its cards a step above. */
     private static int sBlackMax = 0x2c;
 
@@ -28,7 +30,7 @@ final class SuperDarkApps {
     private static final java.util.List<Object> sHandles = new java.util.ArrayList<Object>();
 
     static void install(ClassLoader cl, String pkg) {
-        if (SETTINGS.equals(pkg)) sBlackMax = 0x18;
+        if (SETTINGS.equals(pkg) || SETTINGS_SEARCH.equals(pkg)) sBlackMax = 0x18;
         int n = 0;
         sHandles.clear();
         n += hookResult(android.content.res.Resources.class, "getColor");
@@ -43,6 +45,22 @@ final class SuperDarkApps {
         // Paint.setColor runs for every piece of text and shape an app draws, so it is only hooked where needed: the
         // Google app and Settings (Compose). Gboard went black without it (preview86).
         if (!GBOARD.equals(pkg)) n += hookFirstArg(android.graphics.Paint.class, "setColor");
+        // 2.0.6-preview11 (the Google feed's grey panel survived everything else): newer Compose screens hand Paint their
+        // colours as a packed long (Paint.setColor(long)), which the int hook above never sees. Same remap for those.
+        if (AliasProvider.GOOGLE.equals(pkg)) {
+            try {
+                n += keep(Xp.hookAllMethods(android.graphics.Paint.class, "setColor", new Xp.Callback() {
+                    @Override protected void beforeHookedMethod(Xp.Param p) {
+                        if (p.args.length != 1 || !(p.args[0] instanceof Long) || !active()) return;
+                        try {
+                            if (sToArgb == null) { sToArgb = android.graphics.Color.class.getMethod("toArgb", long.class); sPack = android.graphics.Color.class.getMethod("pack", int.class); }
+                            int c = (Integer) sToArgb.invoke(null, p.args[0]), v = remap(c);
+                            if (v != c) p.args[0] = sPack.invoke(null, v);
+                        } catch (Throwable ignored) { }
+                    }
+                }));
+            } catch (Throwable t) { Module.log("SuperDark apps: Paint.setColor(long)", t); }
+        }
         try {
             n += keep(Xp.hookAllMethods(android.graphics.drawable.GradientDrawable.class, "setColors", new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
@@ -53,10 +71,56 @@ final class SuperDarkApps {
                 }
             }));
         } catch (Throwable t) { Module.log("SuperDark apps: setColors", t); }
+        // 2.0.6 (owner's slow-motion videos: opening the Google feed, or the Google app from search, showed a blue-grey
+        // #202228 panel for a moment before its black content): in the Google app only, a plain colour background (the
+        // windows' own background, inflated from the theme, which no colour call above sees) takes the same remap.
+        if (AliasProvider.GOOGLE.equals(pkg)) {
+            try {
+                n += keep(Xp.hookAllMethods(android.view.View.class, "setBackgroundDrawable", new Xp.Callback() {
+                    @Override protected void beforeHookedMethod(Xp.Param p) {
+                        if (p.args.length != 1 || !(p.args[0] instanceof android.graphics.drawable.ColorDrawable) || !active()) return;
+                        // preview9: the same drawable takes the colour (a new one broke apps that fade their own drawable away:
+                        // Google search stayed blank)
+                        android.graphics.drawable.ColorDrawable d = (android.graphics.drawable.ColorDrawable) p.args[0];
+                        int c = d.getColor(), v = remap(c);
+                        if (v != c) d.setColor(v);
+                    }
+                }));
+            } catch (Throwable t) { Module.log("SuperDark apps: window background", t); }
+            // 2.0.6-preview10 (the feed's grey panel is not its window, nor a starting window): Android paints a window's
+            // task background colour under it while it slides in, taken from the app's theme (#202228). Each Google app
+            // screen tells Android its background is black instead, under Super Dark.
+            try {
+                Xp.Callback black = new Xp.Callback() {
+                    @Override protected void afterHookedMethod(Xp.Param p) {
+                        try {
+                            if (!activeAnywhere() || Boolean.TRUE.equals(Xp.getAdditionalInstanceField(p.thisObject, "pixelsuite_task_black"))) return;
+                            Xp.setAdditionalInstanceField(p.thisObject, "pixelsuite_task_black", Boolean.TRUE);
+                            android.app.Activity a = (android.app.Activity) p.thisObject;
+                            Object td;
+                            try {
+                                Class<?> b = Class.forName("android.app.ActivityManager$TaskDescription$Builder");
+                                Object builder = b.getConstructor().newInstance();
+                                b.getMethod("setBackgroundColor", int.class).invoke(builder, 0xff000000);
+                                b.getMethod("setNavigationBarColor", int.class).invoke(builder, 0xff000000);
+                                td = b.getMethod("build").invoke(builder);
+                            } catch (Throwable old) {
+                                td = new android.app.ActivityManager.TaskDescription();
+                                android.app.ActivityManager.TaskDescription.class.getMethod("setBackgroundColor", int.class).invoke(td, 0xff000000);
+                            }
+                            a.setTaskDescription((android.app.ActivityManager.TaskDescription) td);
+                        } catch (Throwable ignored) { }
+                    }
+                };
+                n += keep(Xp.hookAllMethods(android.app.Activity.class, "onCreate", black));   // as early as the screen exists
+                n += keep(Xp.hookAllMethods(android.app.Activity.class, "onResume", black));
+            } catch (Throwable t) { Module.log("SuperDark apps: task background", t); }
+        }
         // Pixel Launcher re-installs these each time one of its settings screens comes to the front: one line is enough.
         if (!sLogged) { sLogged = true; Module.log("SuperDark apps: " + n + " colour hooks in " + pkg); }
     }
     private static boolean sLogged;
+    private static java.lang.reflect.Method sToArgb, sPack;
 
     private static int keep(java.util.Set<Object> handles) { sHandles.addAll(handles); return handles.size(); }
 

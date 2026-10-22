@@ -88,13 +88,12 @@ final class RestartPill {
     RestartPill(Activity a, FrameLayout root, int accent, int onAccent) {
         activity = a;
         boolean dark = FrostedSurface.dark(a);
-        this.accent = dark ? (SuperDark.inEffect(a) ? FrostedSurface.SUPER_DARK_PANEL
-                : LauncherFeatures.surface(a,"system_surface_container_high_dark",0xff2b2930)) : accent;
+        this.accent = dark ? LauncherFeatures.surface(a,"system_surface_container_high_dark",0xff2b2930) : accent;
         this.onAccent = dark ? 0xfff5f5f7 : onAccent;
         float d = a.getResources().getDisplayMetrics().density;
         pill = new LinearLayout(a); pill.setOrientation(LinearLayout.HORIZONTAL); pill.setGravity(Gravity.CENTER_VERTICAL);
         pill.setPadding(dp(d, 14), 0, dp(d, 18), 0); pill.setMinimumHeight(dp(d, 48));
-        pill.setBackground(outlinedBackground(this.accent,dark,d));
+        pill.setBackground(AppSurfaces.pill(a,outlinedBackground(this.accent,dark,d)));
         pill.setElevation(dp(d, 6));
         status = new RestartStatusIcon(a,this.onAccent);
         icon = new ImageView(a){
@@ -117,7 +116,7 @@ final class RestartPill {
         notice=new TextView(a);notice.setTextColor(this.onAccent);notice.setTextSize(13);notice.setGravity(Gravity.CENTER);
         notice.setPadding(dp(d,18),dp(d,12),dp(d,18),dp(d,12));notice.setMinimumHeight(dp(d,48));
         notice.setMaxLines(2);notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        notice.setBackground(outlinedBackground(this.accent,dark,d));notice.setElevation(dp(d,6));
+        notice.setBackground(AppSurfaces.pill(a,outlinedBackground(this.accent,dark,d)));notice.setElevation(dp(d,6));
         FrameLayout.LayoutParams np=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);np.setMargins(dp(d,24),dp(d,16),dp(d,24),dp(d,16));root.addView(notice,np);notice.setVisibility(View.GONE);
         notice.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener(){public WindowInsets onApplyWindowInsets(View v,WindowInsets in){np.bottomMargin=dp(d,16)+in.getSystemWindowInsetBottom();np.leftMargin=dp(d,24)+in.getSystemWindowInsetLeft();np.rightMargin=dp(d,24)+in.getSystemWindowInsetRight();v.setLayoutParams(np);return in;}});
         // Above the gesture bar, whatever the insets.
@@ -132,9 +131,10 @@ final class RestartPill {
     }
 
     void showRestriction(){
+        refreshPalette();
         if(activity.isFinishing()||activity.isDestroyed())return;
         main.removeCallbacks(clearNotice);
-        android.text.SpannableString message=new android.text.SpannableString("Super Dark-Mode uses Frosted Glass by Default.\nTurn it off to change styles.");
+        android.text.SpannableString message=new android.text.SpannableString("Super Dark-Mode uses its own black style.\nTurn it off to change styles.");
         message.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),0,"Super Dark-Mode".length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);notice.setText(message);
         if(pill.getVisibility()==View.VISIBLE)pill.setVisibility(View.INVISIBLE);
         boolean already=notice.getVisibility()==View.VISIBLE;
@@ -148,7 +148,10 @@ final class RestartPill {
     void dispose(){stopNoticeAnimation();main.removeCallbacks(clearNotice);main.removeCallbacks(finishDone);status.setActive(false);}
 
     /** Shows or hides the pill for the current pending list (call from onResume and after each save). */
+    void refreshPalette(){int color=AppSurfaces.active(activity)?0xffffffff:onAccent;label.setTextColor(color);notice.setTextColor(color);status.setColor(color);pill.invalidate();notice.invalidate();}
+
     void refresh() {
+        refreshPalette();
         if (busy) return;
         if(showingDone)return;
         String text;
@@ -161,7 +164,7 @@ final class RestartPill {
         ViewGroup.LayoutParams width=pill.getLayoutParams();width.width=ViewGroup.LayoutParams.WRAP_CONTENT;pill.setLayoutParams(width);
         LinearLayout.LayoutParams textSize=(LinearLayout.LayoutParams)label.getLayoutParams();textSize.width=ViewGroup.LayoutParams.WRAP_CONTENT;textSize.weight=0;label.setLayoutParams(textSize);
         label.setText(text);status.show(0);
-        pill.setContentDescription(text + ". Applies your changes. Long-press to dismiss.");
+        pill.setContentDescription(text + ". Applies your changes. Long-press to hide.");
         if(notice.getVisibility()==View.VISIBLE){pill.setVisibility(View.INVISIBLE);return;}
         if (pill.getVisibility() == View.VISIBLE) return;
         pill.setVisibility(View.VISIBLE);

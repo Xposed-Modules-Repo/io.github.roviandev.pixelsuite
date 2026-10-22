@@ -139,7 +139,7 @@ final class MultiDrag {
             picks.add(pick);
             if (!attach(a)) { picks.remove(pick); why("tap ignored: could not attach the stack to the drag layer"); return; }
             // Picked apps leave their place completely; rebound() keeps that true when the drawer list recycles its views.
-            Xp.setAdditionalInstanceField(hit, "pixelsuite_picked", Boolean.TRUE);
+            Xp.setAdditionalInstanceField(hit, "pixelsuite_picked", Boolean.TRUE); hidden.put(hit, Boolean.TRUE);
             float left = 0f;
             hit.animate().alpha(left).scaleX(.82f).scaleY(.82f).setDuration(160).setInterpolator(STANDARD).start();
             badge.count(1 + picks.size());
@@ -170,7 +170,7 @@ final class MultiDrag {
         for (Pick p : picks) if (drawerItem(p.info) ? key != null && key.equals(p.key) : p.view == v && p.info == tag) match = p;
         v.animate().cancel();
         if (match != null) {
-            match.view = v; Xp.setAdditionalInstanceField(v, "pixelsuite_picked", Boolean.TRUE);
+            match.view = v; Xp.setAdditionalInstanceField(v, "pixelsuite_picked", Boolean.TRUE); hidden.put(v, Boolean.TRUE);
             v.setAlpha(0f); v.setScaleX(.82f); v.setScaleY(.82f);
         } else if (flagged) {
             Xp.setAdditionalInstanceField(v, "pixelsuite_picked", null);
@@ -248,6 +248,20 @@ final class MultiDrag {
             if (d == null || size <= 0) return null;
             float scale = v.getScaleX();
             Bitmap b = null;
+            // preview51 (owner: dragging several apps showed them in their own colours with themed icons on): the held
+            // icons are the icon exactly as shown (themed colours, shape), drawn through the hardware path; the plain
+            // picture below is only the fallback.
+            try {
+                android.graphics.Picture picture = new android.graphics.Picture();
+                Rect old = d.copyBounds();
+                Canvas rec = picture.beginRecording(size, size);
+                try { d.setBounds(0, 0, size, size); d.draw(rec); } finally { picture.endRecording(); d.setBounds(old); }
+                Bitmap drawn = LauncherIcon.picture(picture);
+                int[] at = new int[2]; v.getLocationInWindow(at);
+                float left = at[0] + (v.getWidth() - size) / 2f * scale, top = at[1] + v.getPaddingTop() * scale;
+                out.set(left, top, left + size * scale, top + size * scale);
+                return drawn;
+            } catch (Throwable t) { why("icon as shown unavailable: " + t); }
             // The launcher's icons are hardware bitmaps, which a software canvas refuses to draw: take the
             // icon's own bitmap and copy it to a software one; draw the drawable only when it holds none.
             Bitmap own = findBitmap(d, 0);
@@ -604,7 +618,21 @@ final class MultiDrag {
         }
     }
 
+    /**
+     * 2.0.6 (owner's video: after removing a folder and making a new one from several held apps, holding an app in the
+     * new folder hid its other apps): every view hidden for a picked app during a drag. A picked app's view can change
+     * during the drag (the drawer or a folder binds the app to another view); the earlier one stayed hidden and marked
+     * as picked for good, and a later folder drag kept it hidden. When the drag is over, every one of them shows again.
+     */
+    private static final java.util.WeakHashMap<View, Boolean> hidden = new java.util.WeakHashMap<View, Boolean>();
+
     private static void reset() {
+        for (View v : new ArrayList<View>(hidden.keySet())) {
+            if (v == null || !Boolean.TRUE.equals(Xp.getAdditionalInstanceField(v, "pixelsuite_picked"))) continue;
+            Xp.setAdditionalInstanceField(v, "pixelsuite_picked", null);
+            v.animate().cancel(); v.setAlpha(1f); v.setScaleX(1f); v.setScaleY(1f);
+        }
+        hidden.clear();
         restoreStarters();
         generation++;
         for (Pick p : picks) try { p.icon.recycle(); } catch (Throwable ignored) { }

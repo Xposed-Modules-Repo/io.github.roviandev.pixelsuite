@@ -133,11 +133,11 @@ final class LauncherFeatures {
             installGrid();
             installBackdropDrawing();
             DrawerFolders.install();
-            DrawerDrag.install();DrawerHomeTarget.install();FolderDrag.install();installFolderDropSettle();Balloon.install();ScatterEffect.install();MultiDrag.install();ShapeWatch.install();
+            DrawerDrag.install();DrawerHomeTarget.install();FolderDrag.install();installFolderDropSettle();Balloon.install();ScatterEffect.install();MultiDrag.install();ShapeWatch.install();SnackbarPlace.install();
             ThemeFolderRestore.install();
             installMenus();
             try{HomeOptions.install();}catch(Throwable error){Module.log("Pixel Suite settings row unavailable",error);}
-            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.5)");
+            Module.log("Launcher customization hooks installed (Launcher 17, 2.0.6)");
         } catch (Throwable error) { Module.log("Launcher customization unavailable", error); }
     }
     static Class<?> type(String name) { return Xp.findClass(ROOT + name, loader); }
@@ -376,7 +376,7 @@ final class LauncherFeatures {
             });
         }
         Xp.hookAllMethods(type("folder.Folder"), "animateOpen", new Xp.Callback() {
-            protected void beforeHookedMethod(Xp.Param p) { styleFolder(p.thisObject);attachFolderMenu(p.thisObject);if(gridFor(get(p.thisObject,"mInfo"))>0)((View)get(p.thisObject,"mFolderName")).setVisibility(View.VISIBLE); }
+            protected void beforeHookedMethod(Xp.Param p) { styleFolder(p.thisObject);attachFolderMenu(p.thisObject);if(gridFor(get(p.thisObject,"mInfo"))>0)((View)get(p.thisObject,"mFolderName")).setVisibility(View.VISIBLE);FolderRules.layoutFooter(p.thisObject,false); }
         });
         for(Method method:type("folder.Folder").getDeclaredMethods())if(method.getName().equals("onSizeChanged"))Xp.x().hook(method).intercept(new XposedInterface.Hooker(){public Object intercept(XposedInterface.Chain chain)throws Throwable{
             View folder=(View)chain.getThisObject();View footer=(View)get(folder,"mFooter");
@@ -735,10 +735,10 @@ final class LauncherFeatures {
     static int gridFor(Object info) {
         if (info == null || data == null) return 0;
         int id = ((Number) get(info, "id")).intValue();
-        if (DrawerFolders.isFolder(info)) { LauncherData.Folder f = DrawerFolders.record(info); return f == null ? 4 : f.grid; }
+        if (DrawerFolders.isFolder(info)) { LauncherData.Folder f = DrawerFolders.record(info); return FolderRules.cap(info, f == null ? 4 : f.grid); }
         if (!on(GRID)) return 0;
         Activity a = activity.get(); int fallback = Settings.Secure.getInt(a.getContentResolver(), GRID_SIZE, 3);
-        return data.homeGrid(id, LauncherData.grid(fallback));
+        return FolderRules.cap(info, data.homeGrid(id, LauncherData.grid(fallback)));   // preview20: capped by the app count
     }
     static int defaultDrawerGrid(){Activity a=activity.get();return a==null?3:LauncherData.grid(Settings.Secure.getInt(a.getContentResolver(),DRAWER_GRID_SIZE,3));}
     /** 4x4 folder icons: the owner asked for a slight increase ("roughly 1.3%") over preview25's size. */
@@ -1006,6 +1006,11 @@ final class LauncherFeatures {
                 // Module rows ("Change icon", "Rename", "Create folder") in the stock rows' font and weight.
                 try{MenuFont.match((ViewGroup)p.thisObject);}catch(Throwable error){logOnce("Menu font matching unavailable",error);}
                 FrostedSurface.popup((ViewGroup)p.thisObject);
+                // preview76 (owner's video: a tall menu, e.g. Keep or Chrome, came up over the app and the app then showed
+                // on top of it): the launcher placed the menu while its rows were still the stock size; too tall for
+                // the space above the app, it was centred on the screen over the app. Once the rows are final it is
+                // placed again, so it sits above (or below) the app whenever it fits.
+                try{if(Xp.getAdditionalInstanceField(p.thisObject,"pixelsuite_compact_menu")==null)PopupAbove.place((ViewGroup)p.thisObject);}catch(Throwable error){logOnce("Menu placement unavailable",error);}
             }
         }});
         Xp.hookAllMethods(type("popup.ArrowPopup"),"onLayout",new Xp.Callback(){protected void afterHookedMethod(Xp.Param p){
@@ -1033,11 +1038,12 @@ final class LauncherFeatures {
                     public void onClick(View v) { call(popup,"close",true); DrawerFolders.create(info); }
                 }, true);
                 if (on(ICONS)) addMenuRow(rows, "Change icon", "pixelsuite_icon", new View.OnClickListener() {
-                    public void onClick(View v) { call(popup,"close",true); LauncherIcon.choose(info); }
+                    public void onClick(View v) { call(popup,"close",true); LauncherIcon.choose(info, popup); }
                 }, false);
                 if (on(RENAME)) addMenuRow(rows, "Rename", "pixelsuite_rename", new View.OnClickListener() {
                     public void onClick(View v) { call(popup,"close",true); rename(info); }
                 }, false);
+                if (!drawer || !DrawerFolders.isFolder(info)) PrivacyLock.addRow(rows, popup, info);   // 2.0.6-preview56: Lock app, above Rename
             }
         });
     }
@@ -1054,6 +1060,7 @@ final class LauncherFeatures {
         addFolderRow(rows, "Sort", "pixelsuite_folder_sort", 9, 1, new View.OnClickListener() {
             public void onClick(View v) { toggleHomeSort(popup, list, v, info); }
         });
+        PrivacyFolders.addHomeRow(rows, popup, info);   // 2.0.6-preview60: Lock folder (preview65: right above Remove)
     }
 
     /**

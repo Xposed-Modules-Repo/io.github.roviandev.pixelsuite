@@ -1,29 +1,86 @@
-[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/221-2.0.5)
+[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/310-2.0.6)
 
-# Pixel Suite 2.0.5
+# Pixel Suite 2.0.6
 
-Your Pixel. Your Way.
+Your Pixel. Your way.
+
+Made by **RovianDev**. A free, open-source LSPosed module for Pixel customization, app and folder locks, gestures, screenshot tools and file sorting. Each feature has its own control.
 
 **Open Pixel Suite from your home screen:** touch and hold an empty area, then choose **Pixel Suite settings**.
 
-Made by **RovianDev**. A free, open-source LSPosed module for Pixel customization, gestures, screenshot tools and file sorting. Each feature has its own control.
+[📥 GitHub download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.6) · [📥 Xposed download](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/310-2.0.6) · [Full 2.0.6 release notes](RELEASE-NOTES-v2.0.6.md) · [Changelog](CHANGELOG.md)
 
-## 🐛 What’s fixed in 2.0.5
+## What's new in 2.0.6
 
-- Fixed moving apps inside **drawer folders** not working correctly.
+## 🔒 **Privacy & Security**
 
-- Fixed the first app shrinking away and leaving an empty spot when creating a **drawer folder** from several held apps.
+- **Lock apps and folders** with your fingerprint or phone PIN. Open the app or folder’s long-press menu and choose **Lock**. Choose **Unlock** from the same menu to remove its lock.
+- **Protect locked apps:** require authentication before uninstalling, disabling or pausing them, including uninstalling through the **Play Store**, or removing a locked folder. Cancel a folder’s removal, and it pops back into place.
+- **Fingerprint prompt:** shows the locked app’s own icon and name, with a **Pin** button to switch to your PIN.
+- **Private recents previews:** protected apps show a blurred preview and can’t be opened in split screen from recents.
+- **Relock timing:** lock apps again as soon as you leave and folders when you close them, or enable **Keep unlocked for 1 minute**.
+- **Animated padlocks** identify locked apps and folders on the home screen, in the drawer and in Google search. They animate when you lock or unlock.
+- Deleting a locked folder or uninstalling a locked app removes its lock, so new folders and reinstalled apps start unlocked.
+- A folder lock protects opening the folder. Its apps can still open from elsewhere unless you lock them individually.
 
-- Fixed a square background appearing behind the scatter animation when removing a **drawer folder**.
+**Setup:** select **System Framework, Pixel Launcher and System UI** in Pixel Suite’s LSPosed scope, then reboot. Your phone needs a screen lock configured.
 
-- Fixed folder icons briefly showing the old app order after reordering. The preview now shows the new order as soon as the folder closes.
+## 🗂️ **Recent Apps**
+
+- **Lock cards in recents:** choose **Lock** from a card’s menu to keep it when swiping or using **Clear all**. Tap its padlock badge to unlock it.
+- **Separate split-screen locks:** lock either app independently. Clearing the pair removes unlocked apps while keeping locked ones.
+- Recents locks survive a reboot. They protect the card from dismissal; Android can still close the app in the background.
+- **Clear all:** locked cards fade back in, each removal gives a light tick, and the action row sits lower to make room for lock badges. Split pairs dim **Screenshot** and **Select** instead of hiding them.
+- **Landscape view:** app names stay centered above their cards, and the status bar fades out. It returns when you rotate back or leave recents.
+- **Always show Clear all** and **Lock apps in recents** now share the **Recent Apps** settings page.
+
+## 🖐️ **Gestures**
+
+- **Three-finger screenshot** responds faster and triggers more reliably.
+
+## ⚙️ **Miscellaneous**
+
+- **Reduce screenshot delay:** keeps the screenshot service ready after a real screenshot, making later captures appear instantly. The first screenshot after a restart runs at normal speed. Uses a little extra memory while enabled.
+- **Allow screenshots of secure screens:** take screenshots and recordings in apps that normally block them.
+- **Hide accessibility from apps:** choose which apps cannot see your enabled accessibility services. The searchable picker includes user/system filters, and checked apps move to the top immediately.
+- **Keyboard bar tweak:** hide the globe and move the dismiss arrow to the right in the bar beneath your keyboard (**Gboard and FUTO Keyboard**). Requires gesture navigation and restarts your keyboard when changed.
+- **Hide Developer Options:** regular apps can’t tell Developer options, USB debugging or wireless debugging are on, so apps that refuse to open with them on work normally. Settings and debugging keep working as usual.
+- **Developer options shortcut:** tap the animated gear to open Developer options. The gear works independently of the hiding switch; tapping the rest of the row toggles the option.
+
+**Setup:** select **System Framework** for the screenshot, accessibility and Developer options controls. Select your keyboard for the keyboard bar tweak. Reopen apps that were already running after changing **Hide Developer Options**.
+
+Remove **DisableFlagSecure** before enabling secure screenshots, and **DoNotTryAccessibility** before enabling accessibility hiding. Credits are shown under their respective options.
+
+## 🎨 **Improvements**
+
+- **Custom icon editor:** move and zoom your selected image before applying it, with **Reset** to restore its position and zoom.
+- **Consistent icon shapes:** app icons and folder previews follow your chosen shape, including icons in Google search.
+- **Themed icons:** now color every app in the drawer and the icons you drag together.
+- **Adaptive folder grids:** folders resize to fit their contents. Grid choices appear from **3 apps**, with **4×4** available from **10 apps** and **5×5** from **17 apps**. Your larger grid choice returns as the folder fills.
+- **Single-app folders:** folders can keep one app and still open and close normally.
+- **Drag to home screen:** the pill lights up and gives a light vibration as soon as the icon touches it.
+- **Split-screen previews:** improved how app previews fill their cards after leaving split screen.
+- **Shortcut menus:** long-press menus stay beside the app instead of covering its icon.
+- **Super Dark inside Pixel Suite:** the app now uses matching black backgrounds, cards, menus and dialogs when **Super Dark-Mode** and the phone’s dark theme are enabled.
+- **Clearer settings:** revised descriptions, improved feature previews and updated setup notes.
+
+## 🐛 **Fixes**
+
+- Fixed apps disappearing after moving them between folders and the drawer.
+- Fixed outdated folder previews and incorrect drag targets after moving apps.
+- Fixed icon reset, thin edges around custom icons and inconsistent icon shapes.
+- Fixed themed icons briefly flashing their original colors.
+- Fixed app icons flickering in **Google search** while typing, and apps with the same name now show their own icons.
+- Fixed the **Item removed / Undo** pill appearing in the wrong place, and it now follows **Super Dark**.
+- Fixed a blue-grey flash when opening the **Google feed or Google app** with Super Dark on, and made **Settings search** fully black.
+- Fixed missing **Super Dark** styling in uninstall dialogs.
 
 ## Frosted Glass Slider
 
 Choose the look of supported folders, shortcut menus, toast messages, Google Photos menus and dialogs under **Themes**:
 
 - **Blur Off:** solid surfaces, with window blur turned off. White in light mode, tinted black in dark mode.
-- **Google’s own look (Stock):** Google’s surfaces, keeping your icon sizes and menu positions.
+- **Stock (Google’s own look):** Google’s surfaces, keeping your icon sizes and menu positions.
 - **Frosted Glass (Modern):** blurred backgrounds with Pixel Suite’s tint. The default style.
 
 **Super Dark-Mode** keeps surfaces black with blur off. When both Super Dark and the phone’s dark theme are active, turn off Super Dark before changing styles. Light mode remains unrestricted. The animated preview lets you see the styles without changing your settings.
@@ -41,56 +98,34 @@ Choose the look of supported folders, shortcut menus, toast messages, Google Pho
 
 **Pixel Suite adds the Doodles tab and draws shapes over your photo while you edit. Photos’ own editor saves the result. Editable shapes remain in Photos’ private storage so you can adjust them later. Your account, subscription, device identity and backup settings stay as they are.**
 
-**Also in 2.0.4:** Doodles snapping guides, themed Photos bars and message pills, matching shortcut-menu panels, folder uninstall cleanup and Pixel Studio control fixes. Drawing effects do less background work and only run while the screens that need them are open.
+## More Pixel Suite features
 
-[📥 Download 2.0.5](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/221-2.0.5) · [Full 2.0.5 release notes](RELEASE-NOTES-v2.0.5.md) · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/RovianDev/PixelSuite) · [Xposed](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/221-2.0.5)
-
-## 📱 Launcher and folders
-
-- 📁 **Drawer folders:** drag apps together, add apps, reorder folders, and choose **Auto (A–Z)** or **Custom** sorting.
-- 🔲 **Folder grids:** choose **3×3, 4×4 or 5×5** from each folder’s menu, separately for home and drawer folders.
-- 📦 **Move several apps:** select a stack and move it to a folder or home screen. Remove home shortcuts together without uninstalling their apps.
-- ↔️ **Two-finger navigation:** hold an app while another finger scrolls the drawer or changes home/folder pages.
-- ↗️ **Drag to home:** use **Add to home screen** to continue a drawer drag onto the home screen.
-- ✏️ **Rename apps** and 🖼️ **change/reset icons:** updates apply instantly across homescreen, drawer, folders and the Google Search widget. Include **Google** in the LSPosed scope for its search integration. Private Space is excluded.
-- 🔤 **Label size:** five text sizes without resizing icons; system fonts and Bold text are respected.
-- 🧩 **Hide app shortcuts:** hide app-provided drawer actions while keeping the launcher’s basic controls.
-- 🧹 **Clear all:** always visible in recents alongside **Select** and **Screenshot**.
-
-## 🌑 Super Dark-Mode
-
-Optional black and near-black surfaces across supported Settings, System UI, Pixel Launcher, Google and Gboard screens. Follows your dark-theme tile and schedule, restoring normal light-mode colors when the phone switches back. **Disabled by default.**
-
-## ⚡ Buttons and gestures
-
-- 🔦 Double-press **Power** for the flashlight.
-- 📷 Double-press **Volume down** on the always-on display for the camera, with media/call safeguards.
-- 📸 Swipe down with three fingers for a screenshot.
-- 🌙 Double-tap empty home-screen space to sleep.
-- ☀️ Choose tap or double-tap wake, plus lock-screen sleep and stock/modded interactions.
-
-## ✂️ Editors, files and recording
-
-- **Pixel Studio:** free screenshot crop and Doodles with shapes, colors, thickness, fill and Undo/Redo. Tap the shapes or rainbow icon to expand; use the arrow to fold back. Drag or flick the toolbar vertically.
-- **Newest first:** folders stay above files; files sort newest-to-oldest in Files by Google and the supported file picker.
-- **Screen recording:** a cleaner prompt keeps **X** and **Start** under the options. Recording still requires **Start**.
-
-## ⚙️ Inside Pixel Suite
-
-Separate feature pages, short descriptions, light/dark themes, animated previews and a latest-update changelog. Previews pause between loops and stop when the page or app is inactive.
-
-The **Restart** shortcut lets you reload Pixel Launcher or Files after relevant changes. Optional update notifications appear for newer stable releases verified on **both GitHub and Xposed**. **Updates → Download and install** downloads inside Pixel Suite with progress, verification and Android’s installation prompt.
+- **Drawer folders:** drag apps together, add apps and reorder folders. Choose **Auto (A–Z)** or **Custom** sorting from the three-dot menu.
+- **Move several apps:** select a stack and move it into a folder or onto the home screen. Removing home shortcuts does not uninstall their apps.
+- **Two-finger drag:** hold an app while another finger scrolls the drawer or changes home/folder pages.
+- **Rename apps and change/reset icons:** changes appear instantly across the home screen, drawer, folders and Google search. Include **Google** in LSPosed for search customization. Private Space is excluded.
+- **Icon label size:** five sizes without resizing icons, using your system font and Bold text setting.
+- **Hide app shortcuts:** hide app-provided drawer actions while keeping launcher and Pixel Suite controls.
+- **Buttons:** double-press **Power** for the flashlight or **Volume down** while the screen is off for the camera, with call/media safeguards.
+- **Sleep and wake:** double-tap empty home-screen space to sleep; choose single/double-tap wake and Pixel Suite/Stock lock-screen behavior.
+- **Pixel Studio:** free screenshot crop and Doodles with shapes, colors, snapping and Undo/Redo. Expand shapes/colors, collapse with the arrow, or drag/flick the toolbar vertically.
+- **Newest first:** folders stay above files in Files by Google and Android's file picker.
+- **Screen recording sheet:** puts **X** and **Start** below the options. Works with System UI in English.
+- **In-app controls:** separate feature pages, light/dark themes, animated previews and an offline changelog. The restart shortcut reloads Pixel Launcher or Files after relevant changes.
+- **Verified updates:** optional notifications for stable releases checked against both repositories. Download inside Pixel Suite with progress, verification and Android's installation prompt.
 
 ## 📥 Install and scope
 
-**Root + LSPosed API 102 required.** Tested on a Pixel 11 Pro; it should also work on other Pixel devices.
+**Root + LSPosed API 102 required.**
 
-1. Install **PixelSuite-v2.0.5.apk** over the current official version.
-2. Enable Pixel Suite in LSPosed and grant the module app root access to save settings.
-3. Keep the recommended scopes: **System Framework, System UI, Pixel Launcher, Settings, Google, Gboard, Files by Google**, your installed **Files / DocumentsUI** picker, and **Pixel Studio** for screenshot tools. **Add Google Photos for Photos Doodles.**
-4. Reboot, open Pixel Suite and choose your features.
+1. Install **PixelSuite-v2.0.6.apk** over the current official build.
+2. Enable Pixel Suite in LSPosed and grant its app root access to save settings.
+3. Select **System Framework, System UI and Pixel Launcher** for Privacy/Recents, and **System Framework** for the screenshot, accessibility and Developer options controls.
+4. Select **Settings, Settings Intelligence, Google, Gboard and Package installer** alongside System UI/Pixel Launcher for Super Dark. Select **Google** for search customization.
+5. Select **Pixel Studio** for screenshot editing, **Google Photos** for Photos Doodles, and **Files by Google** plus your **Files / DocumentsUI** picker for file sorting. Select **Gboard or FUTO Keyboard**, whichever you use, for the keyboard bar tweak.
+6. Reboot, open Pixel Suite and choose your features.
 
-Save editor work before changing its feature toggle. **Some features require compatible Android and Google app versions.**
+Set up a phone screen lock before using Privacy & Security. Save editor work before changing its feature toggle. Reopen apps that were already running after changing Hide Developer Options.
 
 ## 💬 Community and support
 
@@ -104,4 +139,4 @@ Save editor work before changing its feature toggle. **Some features require com
 
 ## Source and credits
 
-GPL-3.0. Build instructions are in **BUILD.md**; artwork credits are in **THIRD-PARTY-NOTICES.md**. Release signing keys and private signing files are not distributed. Pixel Suite is an independent project and is not affiliated with Google.
+GPL-3.0. Build instructions are in **BUILD.md**; artwork and module credits are in **THIRD-PARTY-NOTICES.md**. Release signing keys and private signing files are not distributed. Pixel Suite is an independent project and is not affiliated with Google.

@@ -86,13 +86,18 @@ final class DrawerHomeTarget {
         view.setTranslationY(0);
         Balloon.inflate(view,first?0:45,new Runnable(){public void run(){if(first&&pill==view){intro=false;motion();}}});
     }
-    /** Hover over the Remove pill; true while the finger is inside it. */
+    /**
+     * Hover over the Remove pill; true while the held app touches it.
+     * preview38 (owner: a pill lit up before it counted, so letting go there did nothing until the vibration came):
+     * a pill now counts the moment the held app's icon touches it (the finger within half an icon of the pill), and
+     * it lights up, vibrates and takes effect at that same moment. Between the two pills, the nearer one wins.
+     */
     static boolean updateRemove(int x,int y,ViewGroup layer){
         LinearLayout view=removePill;if(view==null){overRemove=false;return false;}
-        view.getLocationOnScreen(position);layer.getLocationOnScreen(origin);bounds.set(position[0],position[1],position[0]+view.getWidth(),position[1]+view.getHeight());
-        int rawX=x+origin[0],rawY=y+origin[1];boolean inside=bounds.contains(rawX,rawY);
-        int pad=FrostedSurface.dp(view.getContext(),42);boolean near=rawX>bounds.left-pad&&rawX<bounds.right+pad&&rawY>bounds.top-pad&&rawY<bounds.bottom+pad;
-        int next=inside?2:near?1:0;
+        layer.getLocationOnScreen(origin);int rawX=x+origin[0],rawY=y+origin[1];
+        float d=distance(view,rawX,rawY),other=pill==null?Float.MAX_VALUE:distance(pill,rawX,rawY);
+        boolean inside=d<=reach(view)&&d<=other;
+        int next=inside?2:0;
         if(next!=removeHover){removeHover=next;removeBackground.setStroke(FrostedSurface.dp(view.getContext(),1),next>0?0x66ffffff:0x25ffffff);
             view.animate().scaleX(next>0?1.035f:1).scaleY(next>0?1.035f:1).translationY(next>0?-FrostedSurface.dp(view.getContext(),3):0).setDuration(110).setInterpolator(new DecelerateInterpolator()).start();}
         if(inside&&!overRemove)view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
@@ -100,13 +105,23 @@ final class DrawerHomeTarget {
     }
     static boolean update(int x,int y,ViewGroup layer){
         LinearLayout view=pill;if(view==null)return false;
-        view.getLocationOnScreen(position);layer.getLocationOnScreen(origin);bounds.set(position[0],position[1],position[0]+view.getWidth(),position[1]+view.getHeight());
-        int rawX=x+origin[0],rawY=y+origin[1];boolean inside=bounds.contains(rawX,rawY);
-        int pad=FrostedSurface.dp(view.getContext(),42);boolean near=rawX>bounds.left-pad&&rawX<bounds.right+pad&&rawY>bounds.top-pad&&rawY<bounds.bottom+pad;
-        int next=inside?2:near?1:0;
+        layer.getLocationOnScreen(origin);int rawX=x+origin[0],rawY=y+origin[1];
+        float d=distance(view,rawX,rawY),other=removePill==null?Float.MAX_VALUE:distance(removePill,rawX,rawY);
+        boolean inside=d<=reach(view)&&d<other;
+        int next=inside?2:0;
         if(next!=hover){hover=next;background.setStroke(FrostedSurface.dp(view.getContext(),1),next>0?0x66ffffff:0x25ffffff);if(!intro)motion();}
         if(inside)view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         return inside;
+    }
+    /** How far the finger may be from a pill while the held icon already touches it: half an icon. */
+    private static float reach(View v){return FrostedSurface.dp(v.getContext(),26);}
+    /** Distance from a screen point to a pill's resting area (0 inside); its hover lift is left out, so it does not flicker. */
+    private static float distance(View v,int rawX,int rawY){
+        v.getLocationOnScreen(position);
+        float tx=v.getTranslationX(),ty=v.getTranslationY();
+        float left=position[0]-tx,top=position[1]-ty,right=left+v.getWidth(),bottom=top+v.getHeight();
+        float dx=rawX<left?left-rawX:rawX>right?rawX-right:0,dy=rawY<top?top-rawY:rawY>bottom?rawY-bottom:0;
+        return (float)Math.sqrt(dx*dx+dy*dy);
     }
     static void motion(){LinearLayout view=pill;if(view==null)return;view.animate().scaleX(hover>0?1.035f:1).scaleY(hover>0?1.035f:1).translationY(hover>0?-FrostedSurface.dp(view.getContext(),3):0).setDuration(110).setInterpolator(new DecelerateInterpolator()).start();}
     static void release(){if(!DrawerDrag.active())hide();}

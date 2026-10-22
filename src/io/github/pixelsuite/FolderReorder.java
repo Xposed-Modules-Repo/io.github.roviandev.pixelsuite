@@ -153,7 +153,8 @@ final class FolderReorder {
         for (View v : original) if (v != source && !picked(v)) r.add(v);
         return r;
     }
-    private static boolean picked(View v) { return Boolean.TRUE.equals(Xp.getAdditionalInstanceField(v, "pixelsuite_picked")); }
+    /** An app picked up with a second finger (only while such a pick is going on: a leftover mark never hides an app). */
+    private static boolean picked(View v) { return MultiDrag.active() && Boolean.TRUE.equals(Xp.getAdditionalInstanceField(v, "pixelsuite_picked")); }
     private int lastGroupSize = 1;
     private boolean groupChanged() { return group().size() != lastGroupSize; }
 

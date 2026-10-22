@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Pixel Suite</string>
-    <string name="description">Pixel gestures, launcher customization, file sorting, free screenshot crop and Doodles in Pixel Studio and Google Photos. All controls are inside Pixel Suite. Enable the recommended LSPosed scopes, including the editor you use, then restart the affected apps or reboot.</string>
+    <string name="description">Gestures, Pixel Launcher customization, app and folder locks, Super Dark-Mode, file sorting, free screenshot crop and Doodles in Pixel Studio and Google Photos. Everything is set up in the Pixel Suite app. Enable the recommended LSPosed scopes, including the editors you use, then restart those apps or reboot.</string>
 </resources>

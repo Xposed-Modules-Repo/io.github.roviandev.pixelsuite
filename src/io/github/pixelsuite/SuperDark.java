@@ -90,7 +90,7 @@ final class SuperDark {
         n2 += hookPanel(android.graphics.drawable.ColorDrawable.class, "setColor");
         n2 += hookPanel(android.graphics.drawable.GradientDrawable.class, "setColor");
         n2 += hookPanel(android.view.View.class, "setBackgroundColor");
-        sHooks += n2 + backdropHooks();
+        sHooks += n2 + backdropHooks() + splashHooks(cl);
         Module.log("SuperDark: " + sHooks + " hooks");
     }
 
@@ -116,6 +116,45 @@ final class SuperDark {
             }) != null ? 1 : 0;
         } catch (Throwable t) { Module.log("Blur Off: TypedArray.getColor hook", t); }
         return n;
+    }
+    /**
+     * 2.0.6 (owner's slow-motion video: opening the Google app from search showed a blue-grey #202228 panel for a moment
+     * before its black content): that panel is the app's starting window, which System UI draws in the app's own window
+     * colour. Under Super Dark, for the Google app only, a neutral dark grey there is black (alpha kept).
+     */
+    private static final String GOOGLE_APP = "com.google.android.googlequicksearchbox";
+    private static volatile boolean sGoogleSplash;
+    private static int splashHooks(ClassLoader cl) {
+        int n = 0;
+        try {
+            Class<?> drawer = Class.forName("com.android.wm.shell.startingsurface.SplashscreenContentDrawer", false, cl);
+            n += Xp.hookAllMethods(drawer, "getBGColorFromCache", new Xp.Callback() {
+                @Override protected void afterHookedMethod(Xp.Param p) {
+                    try {
+                        String pkg = p.args.length > 0 && p.args[0] instanceof android.content.pm.ActivityInfo ? ((android.content.pm.ActivityInfo) p.args[0]).packageName : null;
+                        sGoogleSplash = GOOGLE_APP.equals(pkg);
+                        if (!sGoogleSplash || !(p.getResult() instanceof Integer) || !effective(app())) return;
+                        int c = (Integer) p.getResult();
+                        if (darkGrey(c)) p.setResult(c & 0xff000000);
+                    } catch (Throwable ignored) { }
+                }
+            }).size();
+            n += Xp.hookAllMethods(Class.forName("android.window.SplashScreenView$Builder"), "setOverlayDrawable", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    try {
+                        if (!sGoogleSplash || p.args.length != 1 || !(p.args[0] instanceof android.graphics.drawable.ColorDrawable) || !effective(app())) return;
+                        int c = ((android.graphics.drawable.ColorDrawable) p.args[0]).getColor();
+                        if (darkGrey(c)) p.args[0] = new android.graphics.drawable.ColorDrawable(c & 0xff000000);
+                    } catch (Throwable ignored) { }
+                }
+            }).size();
+        } catch (Throwable t) { Module.log("SuperDark: starting window colour unavailable", t); }
+        return n;
+    }
+    /** A neutral dark grey (no real colour, darker than #404040). */
+    private static boolean darkGrey(int c) {
+        int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff, max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b));
+        return max > 0 && max <= 0x40 && max - min <= 0x14;
     }
     private static final android.util.SparseIntArray sBackdropKind = new android.util.SparseIntArray();   // id -> 1 other, 3 the backdrop
     private static void backdrop(Xp.Param p, android.content.res.Resources r, int id) {

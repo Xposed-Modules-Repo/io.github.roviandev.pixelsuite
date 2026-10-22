@@ -28,6 +28,7 @@ final class RestartStatusIcon extends Drawable {
         paint.setColor(color); paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
     }
+    void setColor(int color){arrow.setTintList(android.content.res.ColorStateList.valueOf(color));paint.setColor(color);invalidateSelf();}
     boolean motion() {
         return android.provider.Settings.Global.getFloat(context.getContentResolver(), android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0;
     }

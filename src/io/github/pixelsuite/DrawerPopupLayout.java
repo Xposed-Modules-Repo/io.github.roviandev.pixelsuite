@@ -98,13 +98,13 @@ final class DrawerPopupLayout {
     }
     private static final int ROW_DP=48,MIN_ROW_DP=38;
     /** Menu rows (stock and module ones are all DeepShortcutView). */
-    private static int countRows(View v){
+    static int countRows(View v){
         if(LauncherFeatures.type("shortcuts.DeepShortcutView").isInstance(v))return v.getVisibility()==View.GONE?0:1;
         int n=0;if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)n+=countRows(g.getChildAt(i));}
         return n;
     }
     /** Sets every row's height without a layout request (called while measuring). */
-    private static void fitRows(View v,int height){
+    static void fitRows(View v,int height){
         if(LauncherFeatures.type("shortcuts.DeepShortcutView").isInstance(v)){
             ViewGroup.LayoutParams p=v.getLayoutParams();if(p!=null&&p.height!=height)p.height=height;
             if(v.getMinimumHeight()>height)v.setMinimumHeight(height);

@@ -34,8 +34,10 @@ final class FolderOptions {
         window.setOnDismissListener(new PopupWindow.OnDismissListener(){public void onDismiss(){anchor.removeOnAttachStateChangeListener(lifecycle);}});
         // Add apps: drawer folders and home screen folders, with the searchable picker.
         row(card,"Add apps",7,false,new Runnable(){public void run(){window.dismiss();LauncherFeatures.afterClose(folder,new Runnable(){public void run(){if(DrawerFolders.isFolder(info))DrawerFolders.chooseApps(info);else HomeFolderApps.choose(folder);}});}});
-        // Sort: the same Auto (A-Z) / Custom choice as the held folder's menu, for drawer and home folders.
+        // preview20 (owner's design): one app, Add apps alone; two, Sort too; three and more, the grid sizes that matter.
+        final int apps=FolderRules.count(info);
         final boolean drawer=DrawerFolders.isFolder(info);
+        if(apps>=2){
         LauncherData.Folder f=drawer?DrawerFolders.record(info):null;
         final boolean auto=drawer?(f!=null&&f.sort==FolderSort.AUTO):FolderSort.homeMode(info)==FolderSort.AUTO;
         final int id=f==null?0:f.id;
@@ -50,13 +52,14 @@ final class FolderOptions {
             if(drawer){DrawerFolders.reopenId=id;LauncherFeatures.afterClose(folder,new Runnable(){public void run(){FolderSort.drawerCustom(id);}});}
             else FolderSort.setHomeMode(info,FolderSort.CUSTOM);
         }});
-        for(final int n:new int[]{5,4,3})row(card,n==3?"3\u00d73 (Stock)":n+"\u00d7"+n,50+n,LauncherFeatures.gridFor(info)==n,new Runnable(){public void run(){
+        }
+        if(apps>=3)for(final int n:new int[]{5,4,3}){if(n>FolderRules.largestGrid(apps))continue;row(card,n==3?"3\u00d73 (Stock)":n+"\u00d7"+n,50+n,LauncherFeatures.gridFor(info)==n,new Runnable(){public void run(){
             window.dismiss();LauncherFeatures.afterClose(folder,new Runnable(){public void run(){
                 if(DrawerFolders.isFolder(info))DrawerFolders.changeGrid(info,n);else LauncherFeatures.data.prefs.edit().putInt("grid:"+LauncherFeatures.get(info,"id"),n).apply();
                 LauncherFeatures.call(LauncherFeatures.get(folder,"mFolderIcon"),"updatePreviewItems",false);
                 LauncherFeatures.call(folder,"animateOpen",0,new java.util.ArrayList<Object>((java.util.List<?>)LauncherFeatures.get(info,"contents")));
             }});
-        }});
+        }});}
         // No "Remove folder" here: removal is only in the held folder's menu, with a Yes/No confirmation.
         Rect frame=new Rect();anchor.getWindowVisibleDisplayFrame(frame);int[] xy=new int[2];anchor.getLocationOnScreen(xy);
         int gap=FrostedSurface.dp(c,12);

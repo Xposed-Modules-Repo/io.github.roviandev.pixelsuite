@@ -9,9 +9,12 @@ import android.graphics.Typeface;
 /** All demonstrations share one front-facing frame and the same right-side hardware. */
 final class PreviewScenes {
     private final String key;
-    private final int accent,onAccent,ink,muted,surface;
+    private final int accent,onAccent,ink,muted;
+    private int surface;
+    void surfaceColor(int color){surface=color;}
     private final boolean dark;
     private final PreviewIcons icons;
+    private final PrivacyBadges.Glyph privacyLockGlyph;
     private final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path=new Path();
     private final Typeface font=Typeface.create("sans-serif-medium",0);
@@ -26,8 +29,10 @@ final class PreviewScenes {
     private static final int[] FILE_RANK={1,3,0,4,5,2};
     private static final String[] DARK_ROWS={"Display & touch","Notifications","Wallpaper & style"};
     private static final String[] DARK_TILES={"Internet","Bluetooth","Flashlight","Do Not Disturb"};
-    PreviewScenes(String key,int accent,int onAccent,int ink,int muted,int surface,boolean dark,PreviewIcons icons){this.key=key;this.accent=accent;this.onAccent=onAccent;this.ink=ink;this.muted=muted;this.surface=surface;this.dark=dark;this.icons=icons;}
+    PreviewScenes(String key,int accent,int onAccent,int ink,int muted,int surface,boolean dark,PreviewIcons icons){this.key=key;this.accent=accent;this.onAccent=onAccent;this.ink=ink;this.muted=muted;this.surface=surface;this.dark=dark;this.icons=icons;this.privacyLockGlyph=new PrivacyBadges.Glyph(dark?0xffffffff:0xff1c1b1f,dark?0x8c000000:0xb3ffffff,1f);}
     long duration(){
+        if("recents_landscape".equals(key))return 6000;
+        if("privacy_lock".equals(key)||"privacy_folder".equals(key))return 4500;
         if(SuperDark.KEY.equals(key))return 4500;
         // Shared pacing for these previews: at most 4.5 seconds, plus FeaturePreview's separate loop pause.
         if("folder_sort".equals(key)||LauncherFeatures.GRID.equals(key)||FolderDrag.TWO_FINGER.equals(key)||MultiDrag.KEY.equals(key))return 4500;
@@ -61,6 +66,11 @@ final class PreviewScenes {
     private void dock(Canvas c){for(int i=0;i<4;i++)app(c,DOCK[i],36+56*i,448,35,false);}
 
     void draw(Canvas c,int width,int height,float t,float reset){
+        if("recents_landscape".equals(key)){
+            if(reset<=0)landscapeFrame(c,width,height,t);
+            else{c.saveLayerAlpha(0,0,width,height,Math.round(255*(1-reset)));landscapeFrame(c,width,height,1);c.restore();c.saveLayerAlpha(0,0,width,height,Math.round(255*reset));landscapeFrame(c,width,height,0);c.restore();}
+            return;
+        }
         float scale=Math.min(width/336f,height/300f);if(scale<=0)return;
         c.save();c.translate((width-336*scale)/2,(height-300*scale)/2);c.scale(scale,scale);
         box(c,0,0,336,300,24,tint(surface,accent,.035f));
@@ -234,8 +244,62 @@ final class PreviewScenes {
     private void heldTouch(Canvas c,float x,float y,float show){
         if(show<=0)return;float old=opacity;opacity*=show*.85f;outline(c,x-23,y-23,46,46,23,accent);circle(c,x+17,y+17,6,accent);circle(c,x+17,y+17,2.5f,onAccent);opacity=old;
     }
+    /** Curved, nested fingerprint ridges, kept separate at this small preview scale. */
+    private void fingerprint(Canvas c,float x,float y,int color){
+        c.save();c.translate(x-17,y-19);paint(color,true,1.6f);
+        path.reset();path.moveTo(2,15);path.cubicTo(2,-2,32,-2,32,15);path.cubicTo(32,25,28,31,25,36);c.drawPath(path,p);
+        path.reset();path.moveTo(6,26);path.cubicTo(7,22,6,19,6,15);path.cubicTo(6,3,28,3,28,15);path.cubicTo(28,24,24,31,21,36);c.drawPath(path,p);
+        path.reset();path.moveTo(2,25);path.cubicTo(4,31,5,34,8,36);c.drawPath(path,p);
+        path.reset();path.moveTo(11,34);path.cubicTo(13,27,10,22,10,16);path.cubicTo(10,8,24,8,24,16);path.cubicTo(24,25,20,31,17,36);c.drawPath(path,p);
+        path.reset();path.moveTo(14,29);path.cubicTo(16,24,14,20,14,16);path.cubicTo(14,12,20,12,20,16);path.cubicTo(20,24,17,28,16,31);c.drawPath(path,p);c.restore();
+    }
+    private void landscapeFrame(Canvas c,int width,int height,float t){
+        float scale=Math.min(width/336f,height/300f);if(scale<=0)return;
+        c.save();c.translate((width-336*scale)/2,(height-300*scale)/2);c.scale(scale,scale);
+        box(c,0,0,336,300,24,tint(surface,accent,.035f));
+        float turn=e(.15f,.38f,t),land=e(.32f,.43f,t);
+        c.save();c.rotate(-90*turn,168,150);
+        box(c,94,2,148,296,25,tint(surface,ink,.24f));box(c,97,5,142,290,23,0xff111216);
+        box(c,243,55,3.8f,25,1.8f,muted);box(c,243,103,3.8f,50,1.8f,muted);
+        c.save();path.reset();path.addRoundRect(100,8,236,292,20,20,Path.Direction.CW);c.clipPath(path);c.translate(100,8);c.scale(136/240f,284/500f);
+        box(c,0,0,240,500,0,surface);
+        if(land<1){alpha(c,1-land);text(c,"10:08",38,28,12,ink);text(c,"100%",206,28,10,ink);box(c,28,105,184,280,17,tint(surface,accent,.13f));app(c,3,59,83,22,false);text(c,"Photos",115,88,14,ink);for(int i=0;i<6;i++)box(c,40+(i%2)*82,120+(i/2)*77,72,66,9,tint(surface,i%2==0?BLUE:GREEN,.3f));recentsActions(c);pill(c,1);c.restore();}
+        if(land>0){alpha(c,land);c.translate(120,250);c.rotate(90);c.translate(-250,-120);
+            box(c,0,0,500,240,0,surface);
+            float bar=1-e(.43f,.56f,t);float old=opacity;opacity*=bar;text(c,"10:08",30,16,10,ink);text(c,"100%",468,16,9,ink);opacity=old;
+            float centered=e(.43f,.59f,t);
+            for(int i=0;i<2;i++){float x=42+i*226;box(c,x,55,190,145,14,tint(surface,accent,.14f));float cx=mix(x+44,x+95,centered);box(c,cx-42,25,84,23,11,tint(surface,accent,.18f));text(c,i==0?"Photos":"Gmail",cx,41,11,ink);
+                if(i==0){for(int n=0;n<6;n++)box(c,x+9+(n%3)*59,65+(n/3)*63,54,56,7,tint(surface,n%2==0?BLUE:GREEN,.35f));}
+                else for(int n=0;n<4;n++){circle(c,x+20,76+n*31,8,accent);box(c,x+37,70+n*31,130,5,2,tint(surface,ink,.2f));box(c,x+37,81+n*31,95,4,2,tint(surface,ink,.12f));}
+            }
+            box(c,209,225,82,3,2,ink);c.restore();}
+        c.restore();c.restore();
+        float old=opacity;opacity*=e(.6f,.7f,t);text(c,"Centered labels. Clearer view.",168,278,12,muted);opacity=old;c.restore();
+    }
+
+    private void privacyFolderScene(Canvas c,float t){
+        home(c,true);box(c,95,239,50,50,24,tint(surface,accent,.18f));
+        app(c,4,108,252,14,false);app(c,6,132,252,14,false);app(c,3,108,276,14,false);app(c,1,132,276,14,false);
+        text(c,"Private",120,311,13,ink);
+        float unlocked=e(.58f,.69f,t)*(1-e(.91f,.99f,t));
+        privacyLockGlyph.draw(c,120,264,18,unlocked,1f);touch(c,120,264,t,.12f,.1f);
+        float sheet=e(.22f,.31f,t)*(1-e(.59f,.68f,t));
+        if(sheet>0){alpha(c,sheet);box(c,0,0,240,500,0,tint(surface,0xff000000,.3f));box(c,14,182,212,288,24,surface);text(c,"Private folder",120,228,19,ink);text(c,"Authenticate to open",120,263,12,muted);circle(c,120,320,26,tint(surface,accent,.16f));fingerprint(c,120,320,accent);text(c,"Touch fingerprint sensor",120,369,11,muted);box(c,77,390,86,34,17,tint(surface,accent,.18f));text(c,"PIN",120,412,13,accent);touch(c,120,320,t,.49f,.1f);c.restore();}
+        float opened=e(.69f,.76f,t)*(1-e(.88f,.96f,t));
+        if(opened>0){alpha(c,opened);box(c,0,0,240,500,0,tint(surface,0xff000000,.18f));c.save();c.translate(120,264);float scale=.75f+.25f*opened;c.scale(scale,scale);c.translate(-120,-264);box(c,24,164,192,201,24,surface);for(int i=0;i<6;i++)app(c,i,61+(i%3)*59,207+(i/3)*64,31,true);text(c,"Private",107,344,15,ink);for(int j=0;j<3;j++)circle(c,197,334+j*4,1.3f,muted);c.restore();touch(c,221,400,t,.84f,.08f);c.restore();}
+        pill(c,1);
+    }
+
     private void scene(Canvas c,float t){
-        if(SuperDark.KEY.equals(key)){
+        if("privacy_folder".equals(key)){privacyFolderScene(c,t);
+        }else if("privacy_lock".equals(key)){
+            home(c,true);app(c,3,120,263,42,true);
+            privacyLockGlyph.draw(c,120,263,17,e(.60f,.72f,t),1f);
+            touch(c,120,263,t,.18f,.12f);
+            float sheet=e(.31f,.42f,t)*(1-e(.73f,.8f,t));
+            if(sheet>0){alpha(c,sheet);box(c,0,0,240,500,0,tint(surface,0xff000000,.3f));box(c,14,177,212,301,24,surface);app(c,3,120,211,31,false);text(c,"Photos",120,249,20,ink);text(c,"Authenticate to open",120,278,12,muted);circle(c,120,332,27,tint(surface,accent,.16f));fingerprint(c,120,332,accent);text(c,"Touch fingerprint sensor",120,380,11,muted);box(c,77,400,86,34,17,tint(surface,accent,.18f));text(c,"PIN",120,422,13,accent);touch(c,120,333,t,.61f,.1f);c.restore();}
+            if(t>.79f){float opened=e(.79f,.87f,t);alpha(c,opened);background(c);text(c,"Photos",120,52,22,ink);for(int i=0;i<6;i++){float x=12+(i%2)*114,y=84+(i/2)*105;box(c,x,y,102,94,10,tint(surface,i%2==0?BLUE:GREEN,.3f));circle(c,x+70,y+27,12,YELLOW);}pill(c,1);c.restore();}else pill(c,1);
+        }else if(SuperDark.KEY.equals(key)){
             float enabled=e(.23f,.42f,t),shade=e(.57f,.76f,t);
             int bg=tint(0xff222327,0xff000000,enabled),card=tint(0xff393a40,0xff0d0d0d,enabled),raised=tint(0xff48494f,0xff1e1e1e,enabled),white=0xfff3f1f5,secondary=0xffb9b8c0;
             box(c,0,0,240,500,0,bg);text(c,"10:08",36,27,12,white);text(c,"100%",207,27,10,white);
@@ -322,6 +386,13 @@ final class PreviewScenes {
         }else if(Feature.CLEAR_ALL.equals(key)){
             background(c);float dismiss=e(.23f,.53f,t);if(dismiss<1){for(int i=0;i<3;i++){float x=-44+i*112,y=78-dismiss*620;box(c,x,y,104,303,15,tint(surface,ink,.12f));box(c,x+3,y+4,98,295,12,surface);app(c,i==0?0:i==1?5:1,x+52,y+33,24,false);for(int j=0;j<5;j++)box(c,x+12,y+64+j*30,80-j%2*22,8,4,tint(surface,accent,.15f));}}else text(c,"No recent apps",120,245,17,muted);
             float old=opacity;opacity=1-dismiss;recentsActions(c);opacity=old;touch(c,198,439,t,.12f,.1f);pill(c,1);
+        }else if(RecentsLock.KEY.equals(key)){
+            background(c);float push=e(.5f,.57f,t)*(1-e(.57f,.68f,t));
+            for(int i=0;i<3;i++){float x=-44+i*112,y=78-(i==1?push*36:0);box(c,x,y,104,303,15,tint(surface,ink,.12f));box(c,x+3,y+4,98,295,12,surface);app(c,i==0?0:i==1?5:1,x+52,y+33,24,false);for(int j=0;j<5;j++)box(c,x+12,y+64+j*30,80-j%2*22,8,4,tint(surface,accent,.15f));}
+            touch(c,120,111,t,.04f,.1f);popup(c,23,126,"App info","Split screen","Lock",e(.12f,.18f,t)*(1-e(.3f,.35f,t)));touch(c,120,209,t,.25f,.07f);
+            float badge=e(.34f,.42f,t);if(badge>0){c.save();c.translate(120,52-push*36);c.scale(badge,badge);circle(c,0,0,14,tint(surface,ink,.1f));box(c,-6,-1,12,9,2,ink);paint(ink,true,2.2f);c.drawArc(new android.graphics.RectF(-4,-8,4,0),180,180,false,p);line(c,-4,-4,-4,-1,ink);line(c,4,-4,4,-1,ink);c.restore();}
+            touch(c,120,300,t,.47f,.12f);float msg=e(.57f,.63f,t)*(1-e(.86f,.92f,t));if(msg>0){alpha(c,msg);box(c,66,10,108,26,13,tint(surface,ink,.1f));text(c,"App is locked",120,27,11,ink);c.restore();}
+            recentsActions(c);pill(c,1);
         }else if(LauncherFeatures.HIDE_SHORTCUTS.equals(key)){
             drawer(c,0,11);app(c,11,33,104,34,true);app(c,0,207,246,34,true);touch(c,33,104,t,.03f,.1f);float show=e(.11f,.18f,t),hide=e(.33f,.59f,t);if(show>0){alpha(c,show);box(c,13,140,214,166-48*hide,18,tint(surface,ink,.08f));float old=opacity;opacity=1-hide;text(c,"Search",120,163,12,ink);text(c,"Voice search",120,187,12,ink);opacity=old;text(c,"App info",120,211-48*hide,12,ink);text(c,"Add to home screen",120,235-48*hide,12,ink);text(c,"Change icon",120,259-48*hide,12,ink);text(c,"Rename",120,283-48*hide,12,ink);c.restore();}pill(c,1);
         }else if(MultiDrag.KEY.equals(key)){
