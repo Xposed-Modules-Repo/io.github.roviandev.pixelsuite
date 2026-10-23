@@ -63,7 +63,39 @@ final class PrivacyFolders {
     }
     private static final Map<String, Boolean> passing = new ConcurrentHashMap<String, Boolean>();
 
+    private static java.lang.ref.WeakReference<Object> lockedCopy; private static long lockedCopyAt;
+    static void draggedToHome(Context c, Object drawerFolder, Object copy) {
+        try {
+            String key = key(drawerFolder);
+            if (key != null && locked(c).contains(key)) { lockedCopy = new java.lang.ref.WeakReference<Object>(copy); lockedCopyAt = android.os.SystemClock.uptimeMillis(); }
+            else lockedCopy = null;
+        } catch (Throwable ignored) { lockedCopy = null; }
+    }
+    private static void installCopyLock(ClassLoader cl) {
+        Xp.Callback saved = new Xp.Callback() {
+            @Override protected void afterHookedMethod(Xp.Param p) {
+                try {
+                    java.lang.ref.WeakReference<Object> ref = lockedCopy;
+                    Object copy = ref == null ? null : ref.get();
+                    if (copy == null || p.args.length == 0 || p.args[0] != copy) return;
+                    if (android.os.SystemClock.uptimeMillis() - lockedCopyAt > 60000) { lockedCopy = null; return; }
+                    int id = ((Number) LauncherFeatures.get(copy, "id")).intValue();
+                    if (id < 0) return;
+                    lockedCopy = null;
+                    PrivacyGuard.relock("h:" + id);
+                    Module.log("App lock: locked drawer folder put on the home screen, the copy is locked too");
+                } catch (Throwable error) { LauncherFeatures.logOnce("App lock: home copy of a locked folder not locked", error); }
+            }
+        };
+        try {
+            Class<?> writer = Xp.findClass("com.android.launcher3.model.ModelWriter", cl);
+            int n = Xp.hookAllMethods(writer, "addItemToDatabase", saved).size() + Xp.hookAllMethods(writer, "addOrMoveItemInDatabase", saved).size();
+            if (n == 0) Module.log("App lock: home copies of locked drawer folders stay unlocked (save step not found)");
+        } catch (Throwable error) { Module.log("App lock: home copies of locked drawer folders stay unlocked", error); }
+    }
+
     static void install(ClassLoader cl) {
+        installCopyLock(cl);
         int n = 0;
         try {
             Class<?> folder = Xp.findClass("com.android.launcher3.folder.Folder", cl);

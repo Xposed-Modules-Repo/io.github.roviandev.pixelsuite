@@ -113,8 +113,9 @@ final class DrawerFolderMenu {
         confirm("Remove folder?", "Remove “" + f.name + "”? Its apps go back to the app drawer. No apps are uninstalled.", new Runnable() {
             public void run() {
                 android.app.Activity a = LauncherFeatures.activity.get();
-                if (a != null && PrivacyGuard.ask(a, info, new Runnable() { public void run() { DrawerFolders.removeFolder(info); } })) return;
-                DrawerFolders.removeFolder(info);
+                final String lockKey = a == null ? null : PrivacyBadges.lockedKey(a, info);
+                if (a != null && PrivacyGuard.ask(a, info, new Runnable() { public void run() { DrawerFolders.removeFolder(info, lockKey); } })) return;
+                DrawerFolders.removeFolder(info, null);
             }
         });
     }

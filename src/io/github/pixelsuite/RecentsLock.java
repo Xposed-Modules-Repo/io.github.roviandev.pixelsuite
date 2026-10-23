@@ -179,7 +179,12 @@ final class RecentsLock {
             return n;
         } catch (Throwable error) { Module.log("Recents lock: picture fill unavailable", error); return 0; }
     }
-    private static final Set<Integer> wasSplit = new HashSet<Integer>();
+    private static final Set<Integer> wasSplit = java.util.Collections.newSetFromMap(RecentsLock.<Boolean>lastUsedIds(64));
+    private static <V> java.util.Map<Integer, V> lastUsedIds(final int max) {
+        return new java.util.LinkedHashMap<Integer, V>(16, 0.75f, false) {
+            @Override protected boolean removeEldestEntry(java.util.Map.Entry<Integer, V> eldest) { return size() > max; }
+        };
+    }
     private static final WeakHashMap<android.graphics.Bitmap, Band> bands = new WeakHashMap<android.graphics.Bitmap, Band>();
     private static final Band NO_BAND = new Band(0, 0, null);
     private static final WeakHashMap<android.graphics.Bitmap, Boolean> made = new WeakHashMap<android.graphics.Bitmap, Boolean>();
@@ -288,8 +293,13 @@ final class RecentsLock {
             } });
         } catch (Throwable ignored) { }
     }
-    private static final java.util.Map<Integer, Object[]> byTask = new java.util.HashMap<Integer, Object[]>();
-    private static final java.util.Map<Integer, Object[]> ahead = new java.util.HashMap<Integer, Object[]>();
+    private static final java.util.Map<Integer, Object[]> byTask = lastUsed(12);
+    private static final java.util.Map<Integer, Object[]> ahead = lastUsed(6);
+    private static <V> java.util.Map<Integer, V> lastUsed(final int max) {
+        return new java.util.LinkedHashMap<Integer, V>(16, 0.75f, true) {
+            @Override protected boolean removeEldestEntry(java.util.Map.Entry<Integer, V> eldest) { return size() > max; }
+        };
+    }
 
     private static final WeakHashMap<android.graphics.Bitmap, android.graphics.Bitmap> squats = new WeakHashMap<android.graphics.Bitmap, android.graphics.Bitmap>();
     private static boolean squat(final View thumbnail, android.widget.ImageView image, Drawable picture, float[] m, float bw, float bh, float vw, float vh) {
@@ -1145,6 +1155,20 @@ final class RecentsLock {
         @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
     }
 
+    static int turnOf(View card) {
+        try {
+            for (Object c : containers(card)) {
+                View chip = (View) Xp.callMethod(c, "getIconView");
+                if (chip == null) continue;
+                float r = ((chip.getRotation() % 360f) + 360f) % 360f;
+                if (r > 45f && r < 135f) return 90;
+                if (r > 225f && r < 315f) return 270;
+                return 0;
+            }
+        } catch (Throwable ignored) { }
+        return 0;
+    }
+
     private static TextView shown;
     static void toast(View card, String message) {
         try {
@@ -1174,6 +1198,32 @@ final class RecentsLock {
             if (!overCard) cx = layer.getWidth() / 2f;
             float half = pill.getMeasuredWidth() / 2f + 16 * d;
             if (layer.getWidth() > 2 * half) cx = Math.max(half, Math.min(layer.getWidth() - half, cx));
+            int turn = turnOf(card);
+            if (turn != 0) {
+                float cardLeft = at[0] - base[0], cardRight = cardLeft + card.getWidth() * s;
+                float gx = turn == 90 ? cardLeft / 2f : (cardRight + layer.getWidth()) / 2f;
+                gx += (turn == 90 ? -14 : 14) * d;
+                float edge = pill.getMeasuredHeight() / 2f + 8 * d;
+                gx = Math.max(edge, Math.min(layer.getWidth() - edge, gx));
+                if ((turn == 90 ? cardLeft : layer.getWidth() - cardRight) < pill.getMeasuredHeight() + 8 * d)
+                    gx = turn == 90 ? pill.getMeasuredHeight() / 2f + 8 * d : layer.getWidth() - pill.getMeasuredHeight() / 2f - 8 * d;
+                float gy = layer.getHeight() / 2f;
+                int mt = 0, ml = 0;
+                if (pill.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) { mt = ((ViewGroup.MarginLayoutParams) pill.getLayoutParams()).topMargin; ml = ((ViewGroup.MarginLayoutParams) pill.getLayoutParams()).leftMargin; }
+                pill.setRotation(turn);
+                pill.setTranslationX(gx - pill.getMeasuredWidth() / 2f - ml);
+                pill.setTranslationY(gy - pill.getMeasuredHeight() / 2f - mt);
+                pill.setAlpha(0f); pill.setScaleX(.92f); pill.setScaleY(.92f);
+                pill.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(160).setInterpolator(new DecelerateInterpolator()).start();
+                shown = pill;
+                pill.postDelayed(new Runnable() { public void run() {
+                    pill.animate().alpha(0f).setDuration(200).setListener(new AnimatorListenerAdapter() { @Override public void onAnimationEnd(Animator x) {
+                        if (pill.getParent() != null) ((ViewGroup) pill.getParent()).removeView(pill);
+                        if (shown == pill) shown = null;
+                    } }).start();
+                } }, 2500);
+                return;
+            }
             float y = cardTop - pill.getMeasuredHeight() - 10 * d;
             int topInset = 0;
             try { topInset = layer.getRootWindowInsets().getSystemWindowInsetTop(); } catch (Throwable ignored) { }

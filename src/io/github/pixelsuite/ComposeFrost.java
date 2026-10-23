@@ -155,10 +155,10 @@ final class ComposeFrost {
         int n = 0;
         try {
             if (Xp.hookMethod(android.app.Activity.class.getDeclaredMethod("onCreate", android.os.Bundle.class), new Xp.Callback() {
-                @Override protected void afterHookedMethod(Xp.Param p) { if (p.thisObject.getClass().getName().endsWith(activityFilter)) enableDraw(); }
+                @Override protected void afterHookedMethod(Xp.Param p) { if (named(p.thisObject.getClass().getName())) enableDraw(); }
             }) != null) n++;
             if (Xp.hookMethod(android.app.Activity.class.getDeclaredMethod("onDestroy"), new Xp.Callback() {
-                @Override protected void afterHookedMethod(Xp.Param p) { if (p.thisObject.getClass().getName().endsWith(activityFilter)) disableDraw(); }
+                @Override protected void afterHookedMethod(Xp.Param p) { if (named(p.thisObject.getClass().getName())) disableDraw(); }
             }) != null) n++;
         } catch (Throwable error) { Module.log("compose frost: activity hooks unavailable, always on", error); n += enableDraw(); }
         return n;
@@ -221,6 +221,7 @@ final class ComposeFrost {
 
     static void editor(android.app.Activity a, boolean frosted) {
         synchronized (editors) { editors.put(a, frosted); }
+
         View decor = a.getWindow().getDecorView();
         if (frosted) { synchronized (editorWindows) { editorWindows.put(decor, Boolean.TRUE); } }
         else { synchronized (stockDecors) { stockDecors.put(decor, Boolean.TRUE); } }
@@ -235,6 +236,11 @@ final class ComposeFrost {
         return f == null ? 0 : f ? 2 : 1;
     }
 
+    static boolean named(String className) {
+        if (activityFilter == null) return true;
+        for (String n : activityFilter.split("\\|")) if (className.endsWith(n)) return true;
+        return false;
+    }
     static android.app.Activity activityOf(Context c) {
         while (c instanceof android.content.ContextWrapper && !(c instanceof android.app.Activity)) c = ((android.content.ContextWrapper) c).getBaseContext();
         return c instanceof android.app.Activity ? (android.app.Activity) c : null;
@@ -242,7 +248,7 @@ final class ComposeFrost {
     static boolean activityWanted(Context c) {
         if (activityFilter == null) return true;
         android.app.Activity a = activityOf(c);
-        return a != null && a.getClass().getName().endsWith(activityFilter);
+        return a != null && named(a.getClass().getName());
     }
     static boolean phoneDark() {
         return (android.content.res.Resources.getSystem().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
@@ -274,12 +280,14 @@ final class ComposeFrost {
             } else {
                 View v = f.view;
                 android.app.Activity a = v == null ? null : activityOf(v.getContext());
-                ok = v != null && (a == null || a.getWindow().getDecorView() != v) && (activityFilter == null || (a != null && a.getClass().getName().endsWith(activityFilter)));
+                ok = v != null && (a == null || a.getWindow().getDecorView() != v) && (activityFilter == null || (a != null && named(a.getClass().getName())));
             }
         } catch (Throwable t) { ok = false; }
         synchronized (wantedCache) { wantedCache.put(f.root, ok); }
         return ok;
     }
+
+    static boolean frostedPanels(Context c) { return c != null && editorMode && !phoneDark() && active(c); }
 
     static boolean active(Context c) {
         return c != null && SurfaceStyle.get(c) == SurfaceStyle.FROSTED && !SuperDark.inEffect(c) && FrostedSurface.blurEnabled(c);
@@ -360,9 +368,16 @@ final class ComposeFrost {
             Integer was; synchronized (shownAlpha) { was = shownAlpha.get(d); }
             if ((was == null ? 255 : was) == a) continue;
             synchronized (shownAlpha) { shownAlpha.put(d, a); }
-            d.setAlpha(a); changed = true;
+            d.setAlpha(a * paintAlpha(d) / 255); changed = true;
         }
         if (changed && f.view != null) f.view.invalidate();
+    }
+    static final Map<Drawable, Integer> paintAlphas = new WeakHashMap<Drawable, Integer>();
+    static int paintAlpha(Drawable d) { synchronized (paintAlphas) { Integer v = paintAlphas.get(d); return v == null ? 255 : v; } }
+    static void colourAlpha(Drawable d, int alpha) {
+        synchronized (paintAlphas) { Integer was = paintAlphas.get(d); if (was != null && was == alpha) return; paintAlphas.put(d, alpha); }
+        Integer layer; synchronized (shownAlpha) { layer = shownAlpha.get(d); }
+        d.setAlpha((layer == null ? 255 : layer) * alpha / 255);
     }
     static float shown(Object node, Method alpha) throws Exception {
         float a = 1f;
@@ -379,16 +394,19 @@ final class ComposeFrost {
         final boolean rectF; Card(boolean rectF) { this.rectF = rectF; }
         @Override protected void beforeHookedMethod(Xp.Param p) {
             try {
+                if (blends((Paint) p.args[rectF ? 3 : 6])) return;
                 if (fullFill(p)) return;
                 Frame f = frame.get(); if (f == null) return;
                 Paint paint = (Paint) p.args[rectF ? 3 : 6];
                 if (f.editor == 2 && frameCard(p, paint)) return;
                 if (!wanted(f)) return;
                 if (paint == null || paint.getStyle() != Paint.Style.FILL || paint.getShader() != null) return;
-                int c = paint.getColor(); if ((c >>> 24) != 0xff) return;
+                int c = paint.getColor();
                 float l, t, r, b, rx;
                 if (rectF) { RectF box = (RectF) p.args[0]; if (box == null) return; l = box.left; t = box.top; r = box.right; b = box.bottom; rx = (Float) p.args[1]; }
                 else { l = (Float) p.args[0]; t = (Float) p.args[1]; r = (Float) p.args[2]; b = (Float) p.args[3]; rx = (Float) p.args[4]; }
+                if (f.editor == 2 && editorPill(p, f, paint, l, t, r, b, rx)) return;
+                if ((c >>> 24) != 0xff) return;
                 float w = r - l, h = b - t;
                 int lum = luminance(c); boolean darkCard = lum <= 70;
                 if (w < 150 * density || w > screenW - 8 * density || h < 40 * density || h > screenH * 0.7f || (!darkCard && lum < 230)) return;
@@ -397,10 +415,23 @@ final class ComposeFrost {
                     if (w >= 330 * density && h <= 200 * density) toolbarColour = c;
                     return;
                 }
+                if (darkCard && phoneDark() && SuperDark.inEffect(ctx)) {
+                    if (c == 0xff000000) return;
+                    paint.setColor(0xff000000);
+                    Xp.setAdditionalInstanceField(p, "pixelsuite_card", c);
+                    Xp.setAdditionalInstanceField(p, "pixelsuite_rim", new float[]{l, t, r, b, rx});
+                    return;
+                }
                 boolean flip = invertDark && darkCard && !phoneDark() && !SuperDark.inEffect(ctx);
                 if (flip) invert(f.view);
                 if (!active(ctx)) return;
+                if (f.editor == 2 && !f.dialog) {
+                    paint.setColor(tone(ctx, darkCard));
+                    Xp.setAdditionalInstanceField(p, "pixelsuite_card", c);
+                    return;
+                }
                 Drawable d = region(f, f.regions++); if (d == null) return;
+                colourAlpha(d, 255);
                 d.setBounds(Math.round(l), Math.round(t), Math.round(r), Math.round(b));
                 try { Xp.callMethod(d, "setCornerRadius", rx); } catch (Throwable ignored) { }
                 d.draw((Canvas) p.thisObject);
@@ -412,7 +443,45 @@ final class ComposeFrost {
             restore(p);
             Object was = Xp.getAdditionalInstanceField(p, "pixelsuite_card");
             if (was instanceof Integer) try { ((Paint) p.args[rectF ? 3 : 6]).setColor((Integer) was); } catch (Throwable ignored) { }
+            Object rim = Xp.getAdditionalInstanceField(p, "pixelsuite_rim");
+            if (rim instanceof float[]) try { float[] k = (float[]) rim; DarkChips.drawRim((Canvas) p.thisObject, k[0], k[1], k[2], k[3], k[4], 255); } catch (Throwable ignored) { }
         }
+    }
+
+    static boolean editorPill(Xp.Param p, Frame f, Paint paint, float l, float t, float r, float b, float rx) {
+        try {
+            if (f == null || f.editor != 2 || f.dialog || paint == null || Boolean.TRUE.equals(PillFrost.DRAWING.get())) return false;
+            Canvas canvas = (Canvas) p.thisObject;
+            if (!canvas.isHardwareAccelerated() || !plain(paint)) return false;
+            int c = paint.getColor(), alpha = c >>> 24; if (alpha < 0x08) return false;
+            int cr = (c >> 16) & 0xff, cg = (c >> 8) & 0xff, cb = c & 0xff;
+            int lum = luminance(c), chroma = Math.max(cr, Math.max(cg, cb)) - Math.min(cr, Math.min(cg, cb));
+            float w = r - l, h = b - t;
+            if (chroma > 14 || lum < 215 || lum > 244) return false;
+            if (w < 36 * density || h < 36 * density || h > 220 * density || w >= screenW * 0.95f) return false;
+            Context ctx = context(f); if (ctx == null || !active(ctx) || phoneDark()) return false;
+            boolean square = Math.abs(w - h) < 8 * density && w <= 64 * density;
+            if (square && lum < 230 && cb - cr >= 5) { p.setResult(null); return true; }
+            if (square && c == barColour) { p.setResult(null); return true; }
+            if (w >= 150 * density) barColour = c;
+            paint.setColor(HoleFrost.scaled(HoleFrost.solid(ctx), alpha));
+            Xp.setAdditionalInstanceField(p, "pixelsuite_card", c);
+            return true;
+        } catch (Throwable ignored) { return false; }
+    }
+
+    private static volatile int barColour;
+
+    private static Method sPaintBlend; private static boolean sPaintBlendMissing;
+    static boolean blends(Paint paint) {
+        if (paint == null) return false;
+        if (paint.getXfermode() == null || sPaintBlendMissing) return false;
+        try {
+            if (sPaintBlend == null) sPaintBlend = Paint.class.getMethod("getBlendMode");
+            Object m = sPaintBlend.invoke(paint);
+            String mode = String.valueOf(m);
+            return m != null && !"SRC_OVER".equals(mode) && !"SRC".equals(mode);
+        } catch (Throwable t) { sPaintBlendMissing = true; return false; }
     }
 
     static boolean frameCard(Xp.Param p, Paint paint) {
@@ -445,6 +514,15 @@ final class ComposeFrost {
             int lum = luminance(colour); boolean darkCard = lum <= 70;
             if (!darkCard && lum < 230) return;
             Context ctx = card.getContext();
+            if (darkCard && phoneDark() && SuperDark.inEffect(ctx)) {
+                float r = FrostedSurface.dp(ctx, 28);
+                try { Object inner = unwrap(card.getBackground()); if (inner instanceof android.graphics.drawable.GradientDrawable) { float x = (Float) Xp.callMethod(inner, "getCornerRadius"); if (x > 0) r = x; } } catch (Throwable ignored) { }
+                android.graphics.drawable.GradientDrawable black = new android.graphics.drawable.GradientDrawable();
+                black.setColor(0xff000000); black.setCornerRadius(r);
+                Drawable sd = new android.graphics.drawable.LayerDrawable(new Drawable[]{black, new DoodleOverlay.Rim(r, FrostedSurface.dp(ctx, 1.5f))});
+                if (card == decor) dialog.getWindow().setBackgroundDrawable(sd); else card.setBackground(sd);
+                return;
+            }
             boolean flip = invertDark && darkCard && !phoneDark() && !SuperDark.inEffect(ctx);
             if (flip) invert(decor);
             if (!active(ctx)) return;
@@ -583,19 +661,28 @@ final class ComposeFrost {
                 Method m;
                 synchronized (sFilterColor) { m = sFilterColor.get(filter.getClass()); if (m == null) { m = filter.getClass().getMethod("getColor"); sFilterColor.put(filter.getClass(), m); } }
                 int c = (Integer) m.invoke(filter);
-                int a = c >>> 24;
-                if (a < 0x40 || a > 0x80 || luminance(c) > 90) return false;
+                int v = iconInk(c); if (v == c) return false;
                 Xp.setAdditionalInstanceField(p, "pixelsuite_filter", filter);
-                paint.setColorFilter(new android.graphics.PorterDuffColorFilter((c & 0xffffff) | 0x8c000000, android.graphics.PorterDuff.Mode.SRC_IN));
+                paint.setColorFilter(new android.graphics.PorterDuffColorFilter(v, android.graphics.PorterDuff.Mode.SRC_IN));
                 return true;
             }
-            int c = paint.getColor(), a = c >>> 24;
-            if (paint.getShader() != null || a < 0x40 || a > 0x80 || luminance(c) > 90) return false;
+            int c = paint.getColor();
+            if (paint.getShader() != null) return false;
+            int v = iconInk(c); if (v == c) return false;
             Xp.setAdditionalInstanceField(p, "pixelsuite_ink", c);
-            paint.setColor((c & 0xffffff) | 0x8c000000);
+            paint.setColor(v);
             return true;
         } catch (Throwable t) { return false; }
     }
+    static int iconInk(int c) {
+        int a = c >>> 24, cr = (c >> 16) & 0xff, cg = (c >> 8) & 0xff, cb = c & 0xff;
+        int lum = luminance(c), chroma = Math.max(cr, Math.max(cg, cb)) - Math.min(cr, Math.min(cg, cb));
+        if (a >= 0x10 && lum >= 55 && lum <= 130 && chroma <= 24) { int ink = iconColour; return ink == 0 ? c : (a << 24) | (ink & 0xffffff); }
+        if (a >= 0xf0 && lum >= 20 && lum < 55 && chroma <= 16) iconColour = c;
+        if (a >= 0x58 && a <= 0x6a && lum < 55) return (c & 0xffffff) | 0x8c000000;
+        return c;
+    }
+    private static volatile int iconColour;
     static void unboost(Xp.Param p, Paint paint) {
         if (paint == null) return;
         Object filter = Xp.getAdditionalInstanceField(p, "pixelsuite_filter");
@@ -620,14 +707,24 @@ final class ComposeFrost {
         @Override protected void beforeHookedMethod(Xp.Param p) {
             try {
                 if (fullFill(p)) return;
+                if (!noEditors() && p.args.length >= 2 && p.args[p.args.length - 1] instanceof Paint) {
+                    Object a0 = p.args[0]; RectF b = null;
+                    if (a0 instanceof RectF) b = new RectF((RectF) a0);
+                    else if (a0 instanceof android.graphics.Rect) b = new RectF((android.graphics.Rect) a0);
+                    else if (a0 instanceof Float && p.args.length == 5) b = new RectF((Float) p.args[0], (Float) p.args[1], (Float) p.args[2], (Float) p.args[3]);
+                    if (b != null && editorPill(p, frame.get(), (Paint) p.args[p.args.length - 1], b.left, b.top, b.right, b.bottom, 0f)) return;
+                }
                 if (p.args.length == 2 && p.args[0] instanceof android.graphics.Path && !noEditors()) {
                     RectF b = new RectF(); ((android.graphics.Path) p.args[0]).computeBounds(b, true);
                     if (b.width() <= 48 * density && b.height() <= 48 * density) boostIcon(p, lastPaint(p));
+                    else if (p.args[1] instanceof Paint && editorPill(p, frame.get(), (Paint) p.args[1], b.left, b.top, b.right, b.bottom, Math.min(b.width(), b.height()) / 2f)) return;
                 }
             } catch (Throwable ignored) { }
         }
         @Override protected void afterHookedMethod(Xp.Param p) {
             restore(p);
+            Object was = Xp.getAdditionalInstanceField(p, "pixelsuite_card");
+            if (was instanceof Integer) try { ((Paint) p.args[p.args.length - 1]).setColor((Integer) was); } catch (Throwable ignored) { }
             if (p.args.length == 2 && p.args[0] instanceof android.graphics.Path) unboost(p, lastPaint(p));
         }
     }

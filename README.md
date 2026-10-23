@@ -1,6 +1,6 @@
-[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/314-2.0.7)
+[![Pixel Suite — Your Pixel. Your Way.](assets/pixelsuite-banner-v2.png)](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/358-2.0.8)
 
-# Pixel Suite 2.0.7
+# Pixel Suite 2.0.8
 
 Your Pixel. Your way.
 
@@ -8,16 +8,19 @@ Made by **RovianDev**. A free, open-source LSPosed module for Pixel customizatio
 
 **Open Pixel Suite from your home screen:** touch and hold an empty area, then choose **Pixel Suite settings**.
 
-[📥 GitHub download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.7) · [📥 Xposed download](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/314-2.0.7) · [Full 2.0.7 release notes](RELEASE-NOTES-v2.0.7.md) · [Changelog](CHANGELOG.md)
+[📥 GitHub download](https://github.com/RovianDev/PixelSuite/releases/tag/v2.0.8) · [📥 Xposed download](https://github.com/Xposed-Modules-Repo/io.github.roviandev.pixelsuite/releases/tag/358-2.0.8) · [Full 2.0.8 release notes](RELEASE-NOTES-v2.0.8.md) · [Changelog](CHANGELOG.md)
 
-## What's new in 2.0.7
+## What's new in 2.0.8
 
-🐛 **Fixes**
+- **Pixel Studio crop blur:** the part you're cutting away blurs live as you drag. Outlined corners stay clear on light and dark screenshots.
+- **Undo for drawer folders:** restore a removed folder with its apps, name, grid, sorting and lock. Home-folder Undo also restores its position and page.
+- **Pixel Studio polish:** matching Frosted Glass panels, clearer Undo/Redo, and Doodles that stays open while cropping and closes when you choose another tool.
+- **Google Photos:** the **Discard changes?** dialog follows Frosted Glass, light mode and Super Dark.
+- **Recents:** fixed status-bar flicker, a split-screen preview memory leak and misplaced action buttons. Landscape lock messages sit below the cards.
+- **Folder and dragging fixes:** dragged apps stay visible over open folders and return to full opacity after leaving Remove. Locked drawer folders stay locked when copied to the home screen.
+- **Editor fixes:** fixed stale Undo history, stray pen strokes, crop gestures drawing shapes, and the Doodles menu flickering or getting stuck. Pixel Studio's top bar stays visible while cropping.
 
-- Screenshot previews no longer go blank after the first screenshot with Reduce screenshot delay on.
-- The first screenshot after a restart is instant again.
-- Turning Reduce screenshot delay off no longer crashes the screenshot service.
-- The status bar no longer flashes in recents when the phone is sideways with auto-rotate off.
+Install over the current official build and reboot. See the [full release notes](RELEASE-NOTES-v2.0.8.md) for details.
 
 ## Features added in 2.0.6
 
@@ -127,7 +130,7 @@ Choose the look of supported folders, shortcut menus, toast messages, Google Pho
 
 **Root + LSPosed API 102 required.**
 
-1. Install **PixelSuite-v2.0.7.apk** over the current official build.
+1. Install **PixelSuite-v2.0.8.apk** over the current official build.
 2. Enable Pixel Suite in LSPosed and grant its app root access to save settings.
 3. Select **System Framework, System UI and Pixel Launcher** for Privacy/Recents, and **System Framework** for the screenshot, accessibility and Developer options controls.
 4. Select **Settings, Settings Intelligence, Google, Gboard and Package installer** alongside System UI/Pixel Launcher for Super Dark. Select **Google** for search customization.

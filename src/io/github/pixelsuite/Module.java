@@ -73,7 +73,7 @@ public class Module extends XposedModule {
             PhotosEditor.install(cl);
             PhotosDarkPanel.install();
             PhotosToasts.install(cl);
-            ComposeFrost.install("Google Photos video editor", null, true, "VideoEditorActivity");
+            ComposeFrost.install("Google Photos editors", null, true, "VideoEditorActivity|PhotoEditorNextActivity");
         } else if (ScreenshotEditor.PACKAGE.equals(pkg)) {
             ScreenshotEditor.install(cl, param.getApplicationInfo());
         } else if (DocumentsSort.GOOGLE.equals(pkg) || DocumentsSort.AOSP.equals(pkg)) {

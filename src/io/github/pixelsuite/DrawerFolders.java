@@ -901,11 +901,53 @@ final class DrawerFolders {
         if(!LauncherFeatures.data.save(list))return false;
         LauncherFeatures.refresh();return true;
     }
-    static void removeFolder(Object info){
-        LauncherData.Folder f=record(info);if(f==null)return;List<LauncherData.Folder> list=LauncherFeatures.data.folders();
+    static void removeFolder(Object info){removeFolder(info,null);}
+    static void removeFolder(Object info,final String lockKey){
+        final LauncherData.Folder f=record(info);if(f==null)return;List<LauncherData.Folder> list=LauncherFeatures.data.folders();
         try{ScatterEffect.play(shownCell(f.id));}catch(Throwable error){LauncherFeatures.logOnce("Folder remove animation unavailable",error);}
-        for(int i=list.size()-1;i>=0;i--)if(list.get(i).id==f.id)list.remove(i);
-        if(LauncherFeatures.data.save(list)){try{Object icon=cells.get("folder:"+f.id);if(icon instanceof FrameLayout){View child=((FrameLayout)icon).getChildAt(0);call(get(child,"mFolder"),"close",true);}}catch(Throwable ignored){}LauncherFeatures.refresh();}
+        int at=-1;for(int i=list.size()-1;i>=0;i--)if(list.get(i).id==f.id){list.remove(i);at=i;}
+        final int place=at;
+        if(LauncherFeatures.data.save(list)){try{Object icon=cells.get("folder:"+f.id);if(icon instanceof FrameLayout){View child=((FrameLayout)icon).getChildAt(0);call(get(child,"mFolder"),"close",true);}}catch(Throwable ignored){}LauncherFeatures.refresh();
+            offerUndo(f,place,lockKey);}
+    }
+
+    private static void offerUndo(final LauncherData.Folder f,final int place,final String lockKey){
+        try{
+            final Activity a=LauncherFeatures.activity.get();if(a==null)return;
+            android.content.res.Resources res=a.getResources();String pkg=a.getPackageName();
+            int text=res.getIdentifier("item_removed","string",pkg),undo=res.getIdentifier("undo","string",pkg);
+            if(text==0||undo==0)return;
+            Runnable gone=new Runnable(){public void run(){}};
+            Runnable back=new Runnable(){public void run(){
+                try{
+                    List<LauncherData.Folder> now=LauncherFeatures.data.folders();
+                    for(LauncherData.Folder item:now)if(item.id==f.id)return;
+                    now.add(place<0?now.size():Math.min(place,now.size()),f);
+                    if(!LauncherFeatures.data.save(now))return;
+                    if(lockKey!=null)PrivacyGuard.relock(lockKey);
+                    LauncherFeatures.refresh();
+                    growIn(f.id,0);
+                    Module.log("Drawer folder put back by Undo");
+                }catch(Throwable error){Module.log("Drawer folder Undo failed",error);}
+            }};
+            Class<?> snackbar=type("views.Snackbar");
+            for(Method m:snackbar.getDeclaredMethods()){
+                Class<?>[] t=m.getParameterTypes();
+                if(!m.getName().equals("show")||t.length!=5||t[1]!=CharSequence.class||t[2]!=int.class)continue;
+                m.setAccessible(true);m.invoke(null,a,res.getText(text),undo,gone,back);return;
+            }
+            LauncherFeatures.logOnce("Drawer folder Undo pill unavailable",null);
+        }catch(Throwable error){LauncherFeatures.logOnce("Drawer folder Undo pill unavailable",error);}
+    }
+    private static void growIn(final int id,final int tries){
+        View cell=shownCell(id);
+        if(cell==null||!cell.isAttachedToWindow()||cell.getWidth()<=0){
+            if(tries<10){Activity a=LauncherFeatures.activity.get();if(a!=null)a.getWindow().getDecorView().postDelayed(new Runnable(){public void run(){growIn(id,tries+1);}},50);}
+            return;
+        }
+        cell.setPivotX(cell.getWidth()/2f);cell.setPivotY(cell.getHeight()/2f);
+        cell.setScaleX(0.3f);cell.setScaleY(0.3f);cell.setAlpha(0f);
+        cell.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120).setDuration(420).setInterpolator(new android.view.animation.OvershootInterpolator(1.8f)).start();
     }
     static View shownCell(int id){
         View cell=cells.get("folder:"+id);

@@ -100,6 +100,10 @@ final class PrivacyLock {
                             if (ourUid >= 0 && android.os.Binder.getCallingUid() == ourUid) confirmed(i.getStringExtra(EXTRA_TOKEN), i.getBooleanExtra(EXTRA_OK, true));
                             p.setResult(0); return;
                         }
+                        if (PrivacyGuard.ACTION_RELOCK.equals(i.getAction())) {
+                            if (launcherUid >= 0 && android.os.Binder.getCallingUid() == launcherUid) relockFolder(i.getStringExtra(PrivacyFolders.EXTRA_FOLDER));
+                            p.setResult(0); return;
+                        }
                         if (!ACTION_OPENED.equals(i.getAction())) return;
                         int caller = android.os.Binder.getCallingUid();
                         String pkg = i.getStringExtra(EXTRA_PACKAGE);
@@ -341,6 +345,7 @@ final class PrivacyLock {
             }
             try { grace = graceOn(Settings.Secure.getString(c.getContentResolver(), GRACE_KEY)); } catch (Throwable ignored) { }
             try { ourUid = c.getPackageManager().getApplicationInfo(OUR, 0).uid; } catch (Throwable ignored) { }
+            try { launcherUid = c.getPackageManager().getApplicationInfo(LAUNCHER, 0).uid; } catch (Throwable ignored) { }
         } };
         h.post(load);
         try {
@@ -373,6 +378,22 @@ final class PrivacyLock {
                 }
             }, f, null, h);
         } catch (Throwable error) { Module.log("App lock: uninstall cleanup unavailable", error); }
+    }
+
+    private static volatile int launcherUid = -1;
+
+    private static void relockFolder(final String key) {
+        final Context c = system; Handler h = worker;
+        if (c == null || h == null || key == null || key.length() < 3 || !(key.startsWith("h:") || key.startsWith("d:"))) return;
+        h.post(new Runnable() { public void run() {
+            long id = android.os.Binder.clearCallingIdentity();
+            try {
+                Set<String> list = parse(Settings.Secure.getString(c.getContentResolver(), PrivacyFolders.KEY));
+                if (list.add(key)) Settings.Secure.putString(c.getContentResolver(), PrivacyFolders.KEY, join(list));
+                Module.log("App lock: folder lock given back after Undo");
+            } catch (Throwable error) { Module.log("App lock: folder lock not given back after Undo", error); }
+            finally { android.os.Binder.restoreCallingIdentity(id); }
+        } });
     }
 
     private static void forget(Context c, String pkg) {

@@ -80,6 +80,20 @@ final class MultiDrag {
             Xp.hookAllMethods(type("ButtonDropTarget"), "isDropEnabled", noUninstall);
             Xp.hookAllMethods(type("ButtonDropTarget"), "acceptDrop", noUninstall);
             } catch (Throwable error) { LauncherFeatures.logOnce("Multi-app drag: Remove/Uninstall buttons unavailable", error); }
+            try {
+                Xp.hookAllMethods(type("dragndrop.DragController"), "checkTouchMove", new Xp.Callback() {
+                    protected void afterHookedMethod(Xp.Param p) {
+                        try {
+                            Object target = p.getResult();
+                            if (target != null && type("ButtonDropTarget").isInstance(target)) return;
+                            Object drag = get(p.thisObject, "mDragObject"); if (drag == null) return;
+                            if (Boolean.TRUE.equals(get(drag, "dragComplete"))) return;
+                            View view = (View) get(drag, "dragView");
+                            if (view != null && Math.abs(view.getAlpha() - 0.65f) < 0.01f) view.setAlpha(1f);
+                        } catch (Throwable ignored) { }
+                    }
+                });
+            } catch (Throwable error) { LauncherFeatures.logOnce("Held app opacity fix unavailable", error); }
             Xp.hookAllMethods(type("dragndrop.DragController"), "callOnDragEnd", new Xp.Callback() {
                 protected void afterHookedMethod(Xp.Param p) { try { restoreStarters(); ended(); } catch (Throwable error) { Module.log("Multi-app drag end failed", error); reset(); } }
             });

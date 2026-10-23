@@ -38,10 +38,38 @@ final class ClearAll {
     private static Method sDismissAllWithView;
     private static Method sDismissAllNoArg;
 
+    private static void resyncRow(final View recents) {
+        {
+            try {
+                Object actions = Xp.getObjectField(recents, "mActionsView");
+                if (actions == null) return;
+                android.graphics.Rect task = (android.graphics.Rect) Xp.getObjectField(recents, "mLastComputedTaskSize");
+                if (task == null || task.isEmpty()) return;
+                Object dp = null;
+                try { dp = Xp.callMethod(Xp.getObjectField(recents, "mContainer"), "getDeviceProfile"); } catch (Throwable ignored) { }
+                if (dp == null) dp = Xp.getObjectField(actions, "mDp");
+                android.graphics.Rect given = (android.graphics.Rect) Xp.getObjectField(actions, "mTaskSize");
+                if (task.equals(given) && dp == Xp.getObjectField(actions, "mDp")) return;
+                Xp.callMethod(actions, "updateDimension", dp, new android.graphics.Rect(task));
+                LauncherFeatures.logOnce("Recents: action row placed again for the current card size", null);
+            } catch (Throwable error) { LauncherFeatures.logOnce("Recents: action row size check unavailable", error); }
+        }
+    }
+
     static void installLauncher(ClassLoader cl) {
         try {
             sRecentsClass = Xp.findClass(RECENTS_VIEW, cl);
             Class<?> actionsClass = Xp.findClass(ACTIONS_VIEW, cl);
+            try {
+                Xp.hookAllMethods(sRecentsClass, "setOverviewStateEnabled", new Xp.Callback() {
+                    @Override protected void afterHookedMethod(Xp.Param p) {
+                        if (p.args.length == 1 && Boolean.TRUE.equals(p.args[0]) && p.thisObject instanceof View) resyncRow((View) p.thisObject);
+                    }
+                });
+                Xp.hookAllMethods(sRecentsClass, "updateSizeAndPadding", new Xp.Callback() {
+                    @Override protected void afterHookedMethod(Xp.Param p) { if (p.thisObject instanceof View) resyncRow((View) p.thisObject); }
+                });
+            } catch (Throwable error) { Module.log(SUB + "action row size check unavailable", error); }
 
             sDismissAllWithView = Xp.findMethodExactIfExists(
                     sRecentsClass, "dismissAllTasks", View.class);

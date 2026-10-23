@@ -32,11 +32,19 @@ final class RecentsLandscape {
                     try {
                         final View rv = (View) p.thisObject;
                         if (Xp.getAdditionalInstanceField(rv, "pixelsuite_bar_watch") == null) {
-                            ViewTreeObserver.OnGlobalLayoutListener l = new ViewTreeObserver.OnGlobalLayoutListener() { public void onGlobalLayout() { update(rv); } };
+                            ViewTreeObserver.OnGlobalLayoutListener l = new ViewTreeObserver.OnGlobalLayoutListener() { public void onGlobalLayout() {
+                                View now = last == null ? null : last.get();
+                                if (now != null && now != rv) {
+                                    try { rv.getViewTreeObserver().removeOnGlobalLayoutListener(this); } catch (Throwable ignored) { }
+                                    return;
+                                }
+                                update(rv);
+                            } };
                             rv.getViewTreeObserver().addOnGlobalLayoutListener(l);
                             Xp.setAdditionalInstanceField(rv, "pixelsuite_bar_watch", l);
                         }
-                        last = new java.lang.ref.WeakReference<View>(rv);
+                        View was = last == null ? null : last.get();
+                        if (was == null || was == rv || rv.isAttachedToWindow() || !was.isAttachedToWindow()) last = new java.lang.ref.WeakReference<View>(rv);
                         rv.post(new Runnable() { public void run() { update(rv); } });
                     } catch (Throwable ignored) { }
                 }
@@ -47,6 +55,7 @@ final class RecentsLandscape {
                         View rv = (View) p.thisObject;
                         if (p.args.length != 1 || !(p.args[0] instanceof Integer) || !rv.isShown()) return;
                         int r = (Integer) p.args[0];
+                        sensed = r;
                         turned(rv, r == 1 || r == 3 || landscape(rv));
                     } catch (Throwable ignored) { }
                 }
@@ -61,10 +70,11 @@ final class RecentsLandscape {
                             if (rv == null || !rv.isShown() || p.args.length != 1 || !(p.args[0] instanceof Integer)) return;
                             int deg = (Integer) p.args[0];
                             if (deg < 0) return;
-                            if (!autoRotate(rv)) return;
                             Object outer = Xp.getObjectField(p.thisObject, "this$0");
-                            int now = ((Number) Xp.getObjectField(outer, "mRotation")).intValue();
+                            int now = sensed >= 0 ? sensed : phoneRotation(outer); if (now < 0) now = 0;
                             final int r = ((Number) Xp.callStaticMethod(state, "getRotationForUserDegreesRotated", (float) deg, now)).intValue();
+                            sensed = r;
+                            if (!autoRotate(rv)) return;
                             rv.post(new Runnable() { public void run() {
                                 try {
                                     Object st = Xp.getObjectField(rv, "mOverviewStateEnabled");
@@ -95,8 +105,23 @@ final class RecentsLandscape {
         try { Object h = Xp.callMethod(rv, "getPagedOrientationHandler"); return ((Number) Xp.callMethod(h, "getDegreesRotated")).floatValue(); } catch (Throwable t) { return 0f; }
     }
     static boolean sideways(View rv) {
+        if (landscape(rv)) return true;
         float d = Math.abs(degrees(rv)) % 360f;
-        return landscape(rv) || (d > 45f && d < 315f);
+        if (!(d > 45f && d < 315f)) return false;
+        if (!autoRotate(rv)) return false;
+        int r = sensed >= 0 ? sensed : phoneRotation(orientationState(rv));
+        return r < 0 || r == 1 || r == 3;
+    }
+    private static volatile int sensed = -1;
+    private static Object orientationState(View rv) {
+        try { return Xp.getObjectField(rv, "mOrientationState"); } catch (Throwable t) { return null; }
+    }
+    static int phoneRotation(Object state) {
+        if (state == null) return -1;
+        for (String name : new String[] { "mPreviousRotation", "mRotation", "mDeviceRotation" }) {
+            try { Object v = Xp.getObjectField(state, name); if (v instanceof Number) return ((Number) v).intValue(); } catch (Throwable ignored) { }
+        }
+        return -1;
     }
     static android.graphics.RectF drawn(View v) {
         android.graphics.RectF r = new android.graphics.RectF(0, 0, v.getWidth(), v.getHeight());
@@ -126,11 +151,14 @@ final class RecentsLandscape {
     }
 
     private static void update(View rv) {
+        View now = last == null ? null : last.get();
+        if (now != null && now != rv) return;
         boolean open = rv.isShown() && rv.isAttachedToWindow();
         try {
             Object state = Xp.getObjectField(rv, "mOverviewStateEnabled");
             if (state instanceof Boolean && !(Boolean) state) open = false;
         } catch (Throwable ignored) { }
+        if (!open) sensed = -1;
         if (open && android.os.SystemClock.uptimeMillis() < turnUntil) return;
         set(rv, open && sideways(rv));
     }
