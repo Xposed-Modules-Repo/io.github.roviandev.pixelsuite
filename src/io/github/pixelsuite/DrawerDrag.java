@@ -277,6 +277,7 @@ final class DrawerDrag {
                 List<Object> content=(List<Object>)get(copy,"contents");
                 if(f!=null)for(String appKey:f.apps){Object app=DrawerFolders.known.get(appKey);if(app!=null)content.add(call(app,"makeWorkspaceItem",activity));}
                 set(drag,"dragInfo",copy);set(drag,"originalDragInfo",call(copy,"makeShallowCopy"));
+                PrivacyFolders.draggedToHome(activity,info,copy);   // 2.0.8-preview5: a locked drawer folder's home copy is locked too
             }
             Object workspace=get(activity,"mWorkspace");set(workspace,"mDragSourceInternal",null);
             call(workspace,"onDragStart",drag,get(controller,"mOptions"));

@@ -47,10 +47,48 @@ final class ClearAll {
     private static Method sDismissAllWithView;
     private static Method sDismissAllNoArg;
 
+    /**
+     * 2.0.8-preview9 (owner's video: after split screen sideways, Screenshot / Select / Clear all sat about 48dp lower
+     * in portrait recents, with the cards their usual size): the launcher places that row from the card size it last
+     * gave it, which can stay the sideways split's size. Each time recents opens, the row is given recents' current
+     * card size and screen again (the launcher's own OverviewActionsView.updateDimension), if they differ.
+     */
+    private static void resyncRow(final View recents) {
+        // preview13 (owner's slowed-down video: the row showed in the old place for a moment, then snapped): done at
+        // once, before the row is drawn, not posted to a later frame.
+        {
+            try {
+                Object actions = Xp.getObjectField(recents, "mActionsView");
+                if (actions == null) return;
+                android.graphics.Rect task = (android.graphics.Rect) Xp.getObjectField(recents, "mLastComputedTaskSize");
+                if (task == null || task.isEmpty()) return;
+                Object dp = null;
+                try { dp = Xp.callMethod(Xp.getObjectField(recents, "mContainer"), "getDeviceProfile"); } catch (Throwable ignored) { }
+                if (dp == null) dp = Xp.getObjectField(actions, "mDp");
+                android.graphics.Rect given = (android.graphics.Rect) Xp.getObjectField(actions, "mTaskSize");
+                if (task.equals(given) && dp == Xp.getObjectField(actions, "mDp")) return;
+                Xp.callMethod(actions, "updateDimension", dp, new android.graphics.Rect(task));
+                LauncherFeatures.logOnce("Recents: action row placed again for the current card size", null);
+            } catch (Throwable error) { LauncherFeatures.logOnce("Recents: action row size check unavailable", error); }
+        }
+    }
+
     static void installLauncher(ClassLoader cl) {
         try {
             sRecentsClass = Xp.findClass(RECENTS_VIEW, cl);
             Class<?> actionsClass = Xp.findClass(ACTIONS_VIEW, cl);
+            try {   // preview9: the action row follows the current card size each time recents opens
+                Xp.hookAllMethods(sRecentsClass, "setOverviewStateEnabled", new Xp.Callback() {
+                    @Override protected void afterHookedMethod(Xp.Param p) {
+                        if (p.args.length == 1 && Boolean.TRUE.equals(p.args[0]) && p.thisObject instanceof View) resyncRow((View) p.thisObject);
+                    }
+                });
+                // preview13: also as soon as recents works out its card size (the start of the swipe up, a turn), so the
+                // row is already in place when it fades in
+                Xp.hookAllMethods(sRecentsClass, "updateSizeAndPadding", new Xp.Callback() {
+                    @Override protected void afterHookedMethod(Xp.Param p) { if (p.thisObject instanceof View) resyncRow((View) p.thisObject); }
+                });
+            } catch (Throwable error) { Module.log(SUB + "action row size check unavailable", error); }
 
             sDismissAllWithView = Xp.findMethodExactIfExists(
                     sRecentsClass, "dismissAllTasks", View.class);

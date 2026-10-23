@@ -93,6 +93,24 @@ final class MultiDrag {
             Xp.hookAllMethods(type("ButtonDropTarget"), "isDropEnabled", noUninstall);
             Xp.hookAllMethods(type("ButtonDropTarget"), "acceptDrop", noUninstall);
             } catch (Throwable error) { LauncherFeatures.logOnce("Multi-app drag: Remove/Uninstall buttons unavailable", error); }
+            // 2.0.8-preview42 (owner's video: an app dragged out of a folder onto Remove and off it again stayed
+            // see-through): the Remove button dims the held app to 65% and its exit should bring it back, which did
+            // not happen here. After every move the held app is back to full strength whenever it is not over a
+            // Remove / Uninstall button.
+            try {
+                Xp.hookAllMethods(type("dragndrop.DragController"), "checkTouchMove", new Xp.Callback() {
+                    protected void afterHookedMethod(Xp.Param p) {
+                        try {
+                            Object target = p.getResult();
+                            if (target != null && type("ButtonDropTarget").isInstance(target)) return;
+                            Object drag = get(p.thisObject, "mDragObject"); if (drag == null) return;
+                            if (Boolean.TRUE.equals(get(drag, "dragComplete"))) return;
+                            View view = (View) get(drag, "dragView");
+                            if (view != null && Math.abs(view.getAlpha() - 0.65f) < 0.01f) view.setAlpha(1f);
+                        } catch (Throwable ignored) { }
+                    }
+                });
+            } catch (Throwable error) { LauncherFeatures.logOnce("Held app opacity fix unavailable", error); }
             Xp.hookAllMethods(type("dragndrop.DragController"), "callOnDragEnd", new Xp.Callback() {
                 protected void afterHookedMethod(Xp.Param p) { try { restoreStarters(); ended(); } catch (Throwable error) { Module.log("Multi-app drag end failed", error); reset(); } }
             });

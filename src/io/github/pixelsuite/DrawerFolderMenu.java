@@ -124,8 +124,9 @@ final class DrawerFolderMenu {
                 // preview68 / preview70 (owner): a locked folder then asks for the fingerprint, which unlocks it, and
                 // it is removed (so a new folder never comes back locked). "No" leaves it locked, untouched.
                 android.app.Activity a = LauncherFeatures.activity.get();
-                if (a != null && PrivacyGuard.ask(a, info, new Runnable() { public void run() { DrawerFolders.removeFolder(info); } })) return;
-                DrawerFolders.removeFolder(info);
+                final String lockKey = a == null ? null : PrivacyBadges.lockedKey(a, info);   // preview14: Undo gives it back
+                if (a != null && PrivacyGuard.ask(a, info, new Runnable() { public void run() { DrawerFolders.removeFolder(info, lockKey); } })) return;
+                DrawerFolders.removeFolder(info, null);   // not asked: its lock (if protection is off) was not taken away
             }
         });
     }

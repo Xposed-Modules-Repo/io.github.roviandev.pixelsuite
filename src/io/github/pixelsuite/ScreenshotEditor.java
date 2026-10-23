@@ -62,6 +62,8 @@ final class ScreenshotEditor {
         loader = cl;
         StudioNames.resolve(cl, ai);
         installFreeCrop(cl);
+        CropLook.install(cl);
+        TopBarKeep.install(cl);
         installDoodles(cl);
         installUndoRedo(cl);
         // preview14 (owner): with Super Dark-Mode on, the tool bar is black with the Doodles menu's soft rim (DarkChips).
@@ -138,25 +140,119 @@ final class ScreenshotEditor {
             Xp.hookMethod(bar, new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
                     try {
-                        p.args[0] = Boolean.TRUE.equals(p.args[0]) || DoodleOverlay.canUndo();
-                        p.args[1] = Boolean.TRUE.equals(p.args[1]) || DoodleOverlay.canRedo();
-                        p.args[2] = wrapClick(function, p.args[2], true, unit);
-                        p.args[3] = wrapClick(function, p.args[3], false, unit);
+                        boolean here = doodlesHere();
+                        boolean canUndo = Boolean.TRUE.equals(p.args[0]) || (here && DoodleOverlay.canUndo());
+                        boolean canRedo = Boolean.TRUE.equals(p.args[1]) || (here && DoodleOverlay.canRedo());
+                        // 2.0.8-preview6 (owner: the greyed-out Undo / Redo were hard to see): they are always drawn at
+                        // full strength, like Share; with nothing to undo / redo a tap does nothing.
+                        // preview11 (owner, the outline of preview9 reverted): Undo is faded until there is something
+                        // to undo; Redo is always drawn at full strength. preview12 (owner: "faded, but not this much"):
+                        // the editor's own disabled look (38%) is too faint, so the button stays on and its arrow is
+                        // drawn at 55% instead (fadedIcons).
+                        p.args[0] = Boolean.TRUE; p.args[1] = Boolean.TRUE;
+                        undoFaded = !canUndo;
+                        p.args[2] = wrapClick(function, p.args[2], true, unit, canUndo);
+                        p.args[3] = wrapClick(function, p.args[3], false, unit, canRedo);
                     } catch (Throwable error) { logOnce("undo/redo wrap failed", error); }
                 }
             });
+            fadedIcons(cl);
+            boldIcons(cl);
             Module.log("screenshot-editor: undo/redo hooks installed");
         } catch (Throwable error) {
             logOnce("undo/redo for doodles unavailable in this Pixel Studio version", error);
         }
     }
 
-    private static Object wrapClick(Class<?> function, final Object original, final boolean undo, final Object unit) {
+    /**
+     * preview12: with nothing to undo, the editor's own undo arrow (gs_undo) is swapped in painterResource for the same
+     * arrow at 55% opacity; the editor tints it with its content colour as usual, so it follows every theme. The bar
+     * composes again whenever its state changes (its click handlers are new each time), so the arrow follows at once.
+     */
+    private static volatile boolean undoFaded;
+    private static int undoIcon = -1;
+    private static Object fadedPainter;
+    private static void fadedIcons(ClassLoader cl) {
+        try {
+            Method painterResource = method(StudioNames.cls("painterRes", cl), StudioNames.m("painterRes.m"), int.class, StudioNames.cls("composer", cl), int.class);
+            final Class<?> imageType = StudioNames.cls("imageBitmap", cl);
+            final Constructor<?> bitmapPainter = StudioNames.cls("bitmapPainter", cl).getDeclaredConstructor(imageType);
+            final Constructor<?> imageBitmap = imageType.getDeclaredConstructor(Bitmap.class);
+            bitmapPainter.setAccessible(true); imageBitmap.setAccessible(true);
+            Xp.hookMethod(painterResource, new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    try {
+                        if (!undoFaded) return;
+                        int id = (Integer) p.args[0];
+                        if (undoIcon < 0) {
+                            Context c = app(); if (c == null) return;
+                            undoIcon = c.getResources().getIdentifier("gs_undo_rond100_vd_theme_24", "drawable", c.getPackageName());
+                            if (undoIcon == 0) logOnce("undo icon not found, the editor's own faint look stays", null);
+                        }
+                        if (id == 0 || id != undoIcon) return;
+                        if (fadedPainter == null) {
+                            Bitmap b = faded(app(), id, 120);   // 47% (preview16, owner: 8% more faded than 55%)
+                            if (b == null) return;
+                            fadedPainter = bitmapPainter.newInstance(imageBitmap.newInstance(b));
+                        }
+                        p.setResult(fadedPainter);
+                    } catch (Throwable error) { logOnce("faded undo icon unavailable", error); }
+                }
+            });
+        } catch (Throwable error) { logOnce("faded undo icon unavailable", error); }
+    }
+    /**
+     * preview39 (owner's video, measured: the crop icon got heavier a moment after the editor opened): the editor draws
+     * the selected tool's icon in a bold weight (gs_crop_wght700…) and the others regular (gs_crop_rond100…). In the
+     * frosted editor the selection circle is left out (ComposeFrost.editorPill), so the bold icon is the only thing
+     * that changes; it takes the regular weight there, so nothing changes. Other themes keep the bold icon.
+     */
+    private static final Map<Integer, Integer> regularIcons = new java.util.HashMap<Integer, Integer>();
+    private static void boldIcons(ClassLoader cl) {
+        try {
+            Method painterResource = method(StudioNames.cls("painterRes", cl), StudioNames.m("painterRes.m"), int.class, StudioNames.cls("composer", cl), int.class);
+            Xp.hookMethod(painterResource, new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    try {
+                        int id = (Integer) p.args[0];
+                        Context c = app(); if (c == null || !ComposeFrost.frostedPanels(c)) return;
+                        Integer regular;
+                        synchronized (regularIcons) { regular = regularIcons.get(id); }
+                        if (regular == null) {
+                            regular = 0;
+                            try {
+                                String name = c.getResources().getResourceEntryName(id);
+                                int at = name.indexOf("wght700");
+                                if (at > 0) regular = c.getResources().getIdentifier(name.substring(0, at) + name.substring(at + 7), "drawable", c.getPackageName());
+                            } catch (Throwable ignored) { }
+                            synchronized (regularIcons) { regularIcons.put(id, regular); }
+                        }
+                        if (regular != 0) p.args[0] = regular;
+                    } catch (Throwable error) { logOnce("regular tool icons unavailable", error); }
+                }
+            });
+        } catch (Throwable error) { logOnce("regular tool icons unavailable", error); }
+    }
+
+    /** The editor's icon drawn at the given opacity (0-255), white, for the editor to tint. */
+    static Bitmap faded(Context c, int id, int alpha) {
+        if (c == null) return null;
+        android.graphics.drawable.Drawable d = c.getDrawable(id);
+        if (d == null) return null;
+        int size = Math.round(24 * c.getResources().getDisplayMetrics().density);
+        Bitmap b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        d = d.mutate(); d.setBounds(0, 0, size, size); d.setTint(0xffffffff); d.setAlpha(alpha);
+        d.draw(new Canvas(b));
+        return b;
+    }
+
+    private static Object wrapClick(Class<?> function, final Object original, final boolean undo, final Object unit, final boolean can) {
         if (original == null) return null;
         return Proxy.newProxyInstance(function.getClassLoader(), new Class<?>[]{function}, new InvocationHandler() {
             @Override public Object invoke(Object proxy, Method m, Object[] args) throws Throwable {
                 if (m.getDeclaringClass() != Object.class && m.getParameterTypes().length == 0) {
-                    if (undo ? DoodleOverlay.undo() : DoodleOverlay.redo()) return unit;
+                    if (!can) return unit;   // nothing to undo / redo: the always-shown button does nothing
+                    if (doodlesHere() && (undo ? DoodleOverlay.undo() : DoodleOverlay.redo())) return unit;
                 }
                 if (m.getDeclaringClass() == Object.class) {
                     if (m.getName().equals("equals")) return proxy == args[0];
@@ -168,12 +264,27 @@ final class ScreenshotEditor {
         });
     }
 
+    /**
+     * 2.0.8-preview15 (owner: Undo looked on for a fresh screenshot): the doodles' history is the one of the last picture
+     * Doodles was opened on. A new screenshot (Doodles not opened yet) still pointed at the previous picture's history,
+     * so Undo showed as available. It only counts now while that picture is the one on the screen.
+     */
+    static boolean doodlesHere() {
+        try {
+            Object r = DoodleOverlay.lastRenderer.get();
+            View v = canvasView.get();
+            if (r == null || v == null || !v.isAttachedToWindow()) return false;
+            return DoodleOverlay.Bridge.renderer(v) == r;
+        } catch (Throwable error) { return false; }
+    }
+
     /** Adds the doodles' undo/redo/modified flags to the editor's published state. */
     static void publishDoodleHistory(Object owner) {
         try {
             if (sHistoryState == null) sHistoryState = historyField(owner);
             Object state = sHistoryState == null ? null : sHistoryState.get(owner);
             if (state == null || sStateSet == null || !sStateGet.getDeclaringClass().isInstance(state)) return;
+            if (!doodlesHere()) return;
             boolean undo = DoodleOverlay.canUndo(), redo = DoodleOverlay.canRedo(), any = DoodleOverlay.hasShapes();
             if (!undo && !redo && !any) return;
             Object now = sStateGet.invoke(state);
@@ -307,6 +418,7 @@ final class ScreenshotEditor {
                     // (crop rect state, dragged handle state): the hit test below is recognised by holding exactly these
                     remember(sRectStates, p.args[0]);
                     remember(sHandleStates, p.args[1]);
+                    sCropBounds = p.args[2];   // the box's limits (the picture), in the same units as the box
                     if (!setting(sFreeCrop, Feature.SCREENSHOT_FREE_CROP)) return;
                     p.args[3] = 1f;
                 }
@@ -316,6 +428,48 @@ final class ScreenshotEditor {
         } catch (Throwable error) {
             logOnce("free crop unavailable in this Pixel Studio version", error);
         }
+    }
+
+    private static volatile Object sCropBounds;
+    private static volatile Field[] sLtrb;
+    private static volatile Method sRectGet;
+
+    /**
+     * 2.0.8-preview8 (owner's video: with Doodles open, dragging a crop corner sometimes drew an arrow instead): the
+     * crop box as it is on screen, mapped onto {@code image} (the picture's rect in the Doodles overlay), or null when
+     * unknown. The box and its limits share units, and the limits are the picture, so the box maps by proportion.
+     */
+    static android.graphics.RectF cropFrame(android.graphics.RectF image) {
+        try {
+            Field[] e = sLtrb; Method get = sRectGet; Object bounds = sCropBounds;
+            if (e == null || get == null || bounds == null || image == null || image.isEmpty()) return null;
+            Object state = null;
+            synchronized (sRectStates) { for (int i = sRectStates.size() - 1; i >= 0 && state == null; i--) state = sRectStates.get(i).get(); }
+            if (state == null) return null;
+            Object r = get.invoke(state);
+            if (r == null || r.getClass() != bounds.getClass()) return null;
+            float bl = e[0].getFloat(bounds), bt = e[1].getFloat(bounds), br = e[2].getFloat(bounds), bb = e[3].getFloat(bounds);
+            if (br - bl <= 0 || bb - bt <= 0) return null;
+            float kx = image.width() / (br - bl), ky = image.height() / (bb - bt);
+            return new android.graphics.RectF(image.left + (e[0].getFloat(r) - bl) * kx, image.top + (e[1].getFloat(r) - bt) * ky,
+                    image.left + (e[2].getFloat(r) - bl) * kx, image.top + (e[3].getFloat(r) - bt) * ky);
+        } catch (Throwable t) { return null; }
+    }
+
+    /** CropLook: the crop box's state, the box and its limits (the picture), in the box's px. */
+    static boolean isCropState(Object o) { return holds(sRectStates, o); }
+    static android.graphics.RectF cropRect(Object state) {
+        try {
+            Field[] e = sLtrb; Method get = sRectGet;
+            if (e == null || get == null || state == null) return null;
+            return ltrb(get.invoke(state));
+        } catch (Throwable t) { return null; }
+    }
+    static android.graphics.RectF cropBounds() { try { return ltrb(sCropBounds); } catch (Throwable t) { return null; } }
+    private static android.graphics.RectF ltrb(Object r) throws Exception {
+        Field[] e = sLtrb;
+        if (r == null || e == null || !e[0].getDeclaringClass().isInstance(r)) return null;
+        return new android.graphics.RectF(e[0].getFloat(r), e[1].getFloat(r), e[2].getFloat(r), e[3].getFloat(r));
     }
 
     private static final List<WeakReference<Object>> sRectStates = new java.util.ArrayList<WeakReference<Object>>();
@@ -359,6 +513,7 @@ final class ScreenshotEditor {
             if (v >= 1 && v <= 4) ltrb[v - 1] = f;
         }
         for (Field f : ltrb) if (f == null) throw new NoSuchFieldException("crop rect edges in " + rectType.getName());
+        sLtrb = ltrb; sRectGet = get;   // for cropFrame
         final Map<String, Object> edges = enumByName(StudioNames.cls("edges", cl));
         final Object[] handle = new Object[9];   // the order CropHit.pick answers in
         String[] names = {"LEFT", "TOP", "RIGHT", "BOTTOM", "TOP_LEFT", "TOP_RIGHT", "BOTTOM_LEFT", "BOTTOM_RIGHT", "INSIDE"};
@@ -408,6 +563,28 @@ final class ScreenshotEditor {
     static Object doneClick;
     static WeakReference<View> canvasView = new WeakReference<View>(null);
     static float lastDownRawY = -1, lastDownRawX = -1;
+    static long lastDownAt;
+    /** Where the Doodles button was tapped (the tool bar's row), -1 until it is. */
+    static float doodlesButtonX = -1, doodlesButtonY = -1;
+
+    /**
+     * preview23 (owner's video of preview21: tapping another tool still left Doodles open): a tap on the tool bar's row
+     * (same height as the Doodles button, away from it, not on the Doodles menu) closes Doodles; the tool's own tap goes
+     * on to Pixel Studio as usual, so that tool opens. Read from the touch itself, so it does not depend on telling
+     * which tool turned on.
+     */
+    static void toolbarTap(MotionEvent e) {
+        try {
+            if (doodlesButtonY < 0 || !DoodleOverlay.active()) return;
+            Context c = app(); if (c == null) return;
+            float d = c.getResources().getDisplayMetrics().density;
+            float x = e.getRawX(), y = e.getRawY();
+            if (Math.hypot(x - lastDownRawX, y - lastDownRawY) > 12 * d || e.getEventTime() - lastDownAt > 600) return;   // a tap
+            if (Math.abs(y - doodlesButtonY) > 30 * d || Math.abs(x - doodlesButtonX) < 28 * d) return;              // another button in the row
+            if (DoodleOverlay.onPanel(x, y)) return;
+            main.post(new Runnable() { public void run() { if (DoodleOverlay.active()) DoodleOverlay.leave(false); } });
+        } catch (Throwable error) { logOnce("tool bar tap not read", error); }
+    }
     static final Handler main = new Handler(Looper.getMainLooper());
 
     static void installDoodles(final ClassLoader cl) {
@@ -462,8 +639,12 @@ final class ScreenshotEditor {
                     synchronized (painterIds) { which = painterIds.get(p.args[1]); }
                     // preview17: only the tool bar's own pen buttons say which tool is on (a pen drawn elsewhere, as in the
                     // owner's "toolbar row not found" log, left a tool marked on, and opening Doodles pressed an old ✓).
-                    boolean row = fromToolbarRow();
-                    if (row) track("stroke" + which, Boolean.TRUE.equals(p.args[4]));
+                    // preview21 (owner: tapping another tool left Doodles open): a pen button that recomposes on its own
+                    // (its restart lambda, when only its selection changes) is still the tool bar's button; its on/off
+                    // counts too, so a tool turning on closes Doodles (and opening Doodles closes the pen that is on).
+                    int where = toolbarCaller();
+                    boolean row = where == ROW;
+                    if (where != OTHER) track("stroke" + which, Boolean.TRUE.equals(p.args[4]));
                     if (which == null || which != normalPen() || !doodlesOn() || !row) return;
                     try {
                         Object composer = p.args[6];
@@ -496,7 +677,8 @@ final class ScreenshotEditor {
             Xp.hookMethod(android.app.Activity.class.getDeclaredMethod("dispatchTouchEvent", MotionEvent.class), new Xp.Callback() {
                 @Override protected void beforeHookedMethod(Xp.Param p) {
                     MotionEvent e = (MotionEvent) p.args[0];
-                    if (e.getActionMasked() == MotionEvent.ACTION_DOWN) { lastDownRawX = e.getRawX(); lastDownRawY = e.getRawY(); }
+                    if (e.getActionMasked() == MotionEvent.ACTION_DOWN) { lastDownRawX = e.getRawX(); lastDownRawY = e.getRawY(); lastDownAt = e.getEventTime(); }
+                    else if (e.getActionMasked() == MotionEvent.ACTION_UP) toolbarTap(e);
                 }
             });
             Module.log("screenshot-editor: doodles hooks installed");
@@ -550,25 +732,28 @@ final class ScreenshotEditor {
      * lambda's name is known, the caller is told apart by shape: the recomposition lambda keeps
      * the pen's two painters, the row's lambda does not.
      */
-    static boolean fromToolbarRow() {
+    static final int ROW = 0, RESTART = 1, OTHER = 2;
+    static boolean fromToolbarRow() { return toolbarCaller() == ROW; }
+    /** Who composes the pen button: the tool bar row, the button's own recomposition, or something else. */
+    static int toolbarCaller() {
         String row = StudioNames.get("toolbarLambda"), restart = StudioNames.get("penRestart");
         StackTraceElement[] stack = new Throwable().getStackTrace();
         String caller = null;
-        for (int i = 0; i < stack.length && i < 80; i++) {
+        for (int i = 0; i < stack.length && i < 240; i++) {   // preview21: Compose stacks run deep (80 frames missed the row)
             String name = stack[i].getClassName();
-            if (name.equals(row)) return true;
-            if (name.equals(restart)) return false;
+            if (name.equals(row)) return ROW;
+            if (name.equals(restart)) return RESTART;
             if (caller == null && name.indexOf('.') < 0 && !name.equals(uiClass) && !name.startsWith("$") && !name.startsWith("LSP")) caller = name;
         }
         if (caller != null && painterClass != null) {
             try {
                 int painters = 0;
                 for (Field f : Class.forName(caller, false, loader).getDeclaredFields()) if (f.getType() == painterClass) painters++;
-                return painters < 2;
+                return painters < 2 ? ROW : RESTART;
             } catch (Throwable ignored) { }
         }
         logOnce("toolbar row not found on the stack, doodles button skipped", null);
-        return false;
+        return OTHER;
     }
 
     /**
@@ -605,6 +790,7 @@ final class ScreenshotEditor {
                 if ("equals".equals(name)) return proxy == args[0];
                 if ("hashCode".equals(name)) return System.identityHashCode(proxy);
                 if ("toString".equals(name)) return "PixelSuiteDoodlesClick";
+                doodlesButtonX = lastDownRawX; doodlesButtonY = lastDownRawY;
                 main.post(new Runnable() { public void run() { DoodleOverlay.toggle(); } });
                 return unit(loader);
             }
@@ -619,7 +805,11 @@ final class ScreenshotEditor {
         // preview17: only a ✓ shown since the tool turned on, and only once (an old ✓ left Pixel Studio unable to exit).
         openedAt = android.os.SystemClock.uptimeMillis();
         // The tools' on/off marks are kept (clearing them made the next recomposition look like tools turning on).
-        if (done == null || !anyNativeToolOn() || doneSeen < toolOnAt) { doneClick = null; return; }
+        // preview24 (owner's videos: a pen left on under Doodles kept drawing): the editor's own page says whether a tool
+        // is open (its ✓ is then on screen), whatever the tracking of the tool buttons saw.
+        String page = TopBarKeep.currentPage();
+        boolean toolPage = page != null && !"CROP_TOOL".equals(page) && !"READY".equals(page) && !"INITIAL".equals(page);
+        if (done == null || (!toolPage && (!anyNativeToolOn() || doneSeen < toolOnAt))) { doneClick = null; return; }
         doneClick = null;
         for (Map.Entry<String, Boolean> e : nativeSelected.entrySet()) e.setValue(Boolean.FALSE);
         try { sam(svfType).invoke(done); } catch (Throwable error) { logOnce("native tool could not be closed", error); }
@@ -637,6 +827,7 @@ final class ScreenshotEditor {
         canvasMatrix = method(area, StudioNames.m("area.matrix"));
         Xp.hookMethod(method(renderer, StudioNames.m("renderer.picture"), config), new Xp.Callback() {
             @Override protected void afterHookedMethod(Xp.Param p) {
+                if (p.getResult() instanceof Picture) CropLook.picture((Picture) p.getResult());
                 if (!(p.getResult() instanceof Picture) || !DoodleOverlay.hasShapes(p.thisObject)) return;
                 List<Doodle> shapes = DoodleOverlay.snapshot(p.thisObject);
                 if (shapes.isEmpty()) return;
@@ -652,6 +843,7 @@ final class ScreenshotEditor {
                     canvas.restoreToCount(save);
                     out.endRecording();
                     p.setResult(out);
+                    CropLook.picture(out);
                 } catch (Throwable error) { logOnce("doodles could not be drawn into the image", error); }
             }
         });
@@ -662,8 +854,10 @@ final class ScreenshotEditor {
                 // 2.0.4: only once the old canvas is really off the screen (Pixel Studio builds a new one while the old
                 // stays, e.g. when a tool's ✓ is pressed as Doodles opens, and Doodles must stay then).
                 // Doodles opened a moment ago (a tool's ✓ was just pressed for it) moves to the new canvas instead.
+                final View fresh = (View) p.thisObject;
                 main.postDelayed(new Runnable() { public void run() {
                     if (!DoodleOverlay.active() || !DoodleOverlay.studioCanvasGone()) return;
+                    if (DoodleOverlay.rehost(fresh)) return;   // preview39: the same picture on a new canvas (cropping)
                     DoodleOverlay.leave(false);
                     if (android.os.SystemClock.uptimeMillis() - openedAt < 1500) main.post(new Runnable() { public void run() { if (!DoodleOverlay.active()) DoodleOverlay.enter(); } });
                 } }, 300);

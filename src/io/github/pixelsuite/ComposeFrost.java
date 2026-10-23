@@ -194,10 +194,10 @@ final class ComposeFrost {
         int n = 0;
         try {
             if (Xp.hookMethod(android.app.Activity.class.getDeclaredMethod("onCreate", android.os.Bundle.class), new Xp.Callback() {
-                @Override protected void afterHookedMethod(Xp.Param p) { if (p.thisObject.getClass().getName().endsWith(activityFilter)) enableDraw(); }
+                @Override protected void afterHookedMethod(Xp.Param p) { if (named(p.thisObject.getClass().getName())) enableDraw(); }
             }) != null) n++;
             if (Xp.hookMethod(android.app.Activity.class.getDeclaredMethod("onDestroy"), new Xp.Callback() {
-                @Override protected void afterHookedMethod(Xp.Param p) { if (p.thisObject.getClass().getName().endsWith(activityFilter)) disableDraw(); }
+                @Override protected void afterHookedMethod(Xp.Param p) { if (named(p.thisObject.getClass().getName())) disableDraw(); }
             }) != null) n++;
         } catch (Throwable error) { Module.log("compose frost: activity hooks unavailable, always on", error); n += enableDraw(); }
         return n;
@@ -267,6 +267,7 @@ final class ComposeFrost {
     /** Registers an editor activity, frosted or not; every window of it counts (its own and its pop-ups). */
     static void editor(android.app.Activity a, boolean frosted) {
         synchronized (editors) { editors.put(a, frosted); }
+
         View decor = a.getWindow().getDecorView();
         // The activity's own window is found by its decor view (a decor view's context is never the activity).
         if (frosted) { synchronized (editorWindows) { editorWindows.put(decor, Boolean.TRUE); } }
@@ -285,6 +286,12 @@ final class ComposeFrost {
 
     // ------------------------------------------------------------------ helpers
 
+    /** preview21: the activity filter may name several activities, separated by "|". */
+    static boolean named(String className) {
+        if (activityFilter == null) return true;
+        for (String n : activityFilter.split("\\|")) if (className.endsWith(n)) return true;
+        return false;
+    }
     static android.app.Activity activityOf(Context c) {
         while (c instanceof android.content.ContextWrapper && !(c instanceof android.app.Activity)) c = ((android.content.ContextWrapper) c).getBaseContext();
         return c instanceof android.app.Activity ? (android.app.Activity) c : null;
@@ -292,7 +299,7 @@ final class ComposeFrost {
     static boolean activityWanted(Context c) {
         if (activityFilter == null) return true;
         android.app.Activity a = activityOf(c);
-        return a != null && a.getClass().getName().endsWith(activityFilter);
+        return a != null && named(a.getClass().getName());
     }
     /** The phone's theme from the system's own configuration (a dark-only screen's context says dark on a light phone). */
     static boolean phoneDark() {
@@ -326,12 +333,15 @@ final class ComposeFrost {
             } else {
                 View v = f.view;
                 android.app.Activity a = v == null ? null : activityOf(v.getContext());
-                ok = v != null && (a == null || a.getWindow().getDecorView() != v) && (activityFilter == null || (a != null && a.getClass().getName().endsWith(activityFilter)));
+                ok = v != null && (a == null || a.getWindow().getDecorView() != v) && (activityFilter == null || (a != null && named(a.getClass().getName())));
             }
         } catch (Throwable t) { ok = false; }
         synchronized (wantedCache) { wantedCache.put(f.root, ok); }
         return ok;
     }
+
+    /** preview39: the frosted editor's panels (light theme, Frosted Glass): the selection circle is left out there. */
+    static boolean frostedPanels(Context c) { return c != null && editorMode && !phoneDark() && active(c); }
 
     /** Frosted Glass, not Super Dark, the phone's blur on. */
     static boolean active(Context c) {
@@ -428,9 +438,17 @@ final class ComposeFrost {
             Integer was; synchronized (shownAlpha) { was = shownAlpha.get(d); }
             if ((was == null ? 255 : was) == a) continue;
             synchronized (shownAlpha) { shownAlpha.put(d, a); }
-            d.setAlpha(a); changed = true;
+            d.setAlpha(a * paintAlpha(d) / 255); changed = true;
         }
         if (changed && f.view != null) f.view.invalidate();
+    }
+    /** preview29: a frost's own opacity (its button's colour fading in), times the layers' (fade). */
+    static final Map<Drawable, Integer> paintAlphas = new WeakHashMap<Drawable, Integer>();
+    static int paintAlpha(Drawable d) { synchronized (paintAlphas) { Integer v = paintAlphas.get(d); return v == null ? 255 : v; } }
+    static void colourAlpha(Drawable d, int alpha) {
+        synchronized (paintAlphas) { Integer was = paintAlphas.get(d); if (was != null && was == alpha) return; paintAlphas.put(d, alpha); }
+        Integer layer; synchronized (shownAlpha) { layer = shownAlpha.get(d); }
+        d.setAlpha((layer == null ? 255 : layer) * alpha / 255);
     }
     /** The alpha a layer is shown at: its own times that of every layer it is drawn in. */
     static float shown(Object node, Method alpha) throws Exception {
@@ -451,16 +469,23 @@ final class ComposeFrost {
         final boolean rectF; Card(boolean rectF) { this.rectF = rectF; }
         @Override protected void beforeHookedMethod(Xp.Param p) {
             try {
+                // preview19 (owner: a light-theme screenshot opened all blurred): Pixel Studio's crop box cuts its veil
+                // (and the crop blur) out with a rounded rect drawn in a clearing blend mode; it is the screen's shape
+                // when nothing is cropped, so it was taken for the screenshot's frame and left out. Such a draw is never
+                // a card or a fill.
+                if (blends((Paint) p.args[rectF ? 3 : 6])) return;
                 if (fullFill(p)) return;   // the editor's fills first, whichever window (or none) is being drawn
                 Frame f = frame.get(); if (f == null) return;
                 Paint paint = (Paint) p.args[rectF ? 3 : 6];
                 if (f.editor == 2 && frameCard(p, paint)) return;
                 if (!wanted(f)) return;
                 if (paint == null || paint.getStyle() != Paint.Style.FILL || paint.getShader() != null) return;
-                int c = paint.getColor(); if ((c >>> 24) != 0xff) return;
+                int c = paint.getColor();
                 float l, t, r, b, rx;
                 if (rectF) { RectF box = (RectF) p.args[0]; if (box == null) return; l = box.left; t = box.top; r = box.right; b = box.bottom; rx = (Float) p.args[1]; }
                 else { l = (Float) p.args[0]; t = (Float) p.args[1]; r = (Float) p.args[2]; b = (Float) p.args[3]; rx = (Float) p.args[4]; }
+                if (f.editor == 2 && editorPill(p, f, paint, l, t, r, b, rx)) return;   // preview35: fading panels too
+                if ((c >>> 24) != 0xff) return;
                 float w = r - l, h = b - t;
                 int lum = luminance(c); boolean darkCard = lum <= 70;
                 if (w < 150 * density || w > screenW - 8 * density || h < 40 * density || h > screenH * 0.7f || (!darkCard && lum < 230)) return;
@@ -471,10 +496,25 @@ final class ComposeFrost {
                     if (w >= 330 * density && h <= 200 * density) toolbarColour = c;
                     return;
                 }
+                // preview21 (owner: Google Photos' "Discard changes?" kept its grey under Super Dark): under Super Dark
+                // a dialog's dark card is black with the soft rim of the other Super Dark menus and dialogs.
+                if (darkCard && phoneDark() && SuperDark.inEffect(ctx)) {
+                    if (c == 0xff000000) return;
+                    paint.setColor(0xff000000);
+                    Xp.setAdditionalInstanceField(p, "pixelsuite_card", c);
+                    Xp.setAdditionalInstanceField(p, "pixelsuite_rim", new float[]{l, t, r, b, rx});
+                    return;
+                }
                 boolean flip = invertDark && darkCard && !phoneDark() && !SuperDark.inEffect(ctx);
                 if (flip) invert(f.view);
                 if (!active(ctx)) return;
+                if (f.editor == 2 && !f.dialog) {   // preview30: the Doodles menu in the frosted editor, the same (see editorPill)
+                    paint.setColor(tone(ctx, darkCard));
+                    Xp.setAdditionalInstanceField(p, "pixelsuite_card", c);
+                    return;
+                }
                 Drawable d = region(f, f.regions++); if (d == null) return;
+                colourAlpha(d, 255);
                 d.setBounds(Math.round(l), Math.round(t), Math.round(r), Math.round(b));
                 try { Xp.callMethod(d, "setCornerRadius", rx); } catch (Throwable ignored) { }
                 d.draw((Canvas) p.thisObject);
@@ -486,7 +526,67 @@ final class ComposeFrost {
             restore(p);
             Object was = Xp.getAdditionalInstanceField(p, "pixelsuite_card");
             if (was instanceof Integer) try { ((Paint) p.args[rectF ? 3 : 6]).setColor((Integer) was); } catch (Throwable ignored) { }
+            Object rim = Xp.getAdditionalInstanceField(p, "pixelsuite_rim");
+            if (rim instanceof float[]) try { float[] k = (float[]) rim; DarkChips.drawRim((Canvas) p.thisObject, k[0], k[1], k[2], k[3], k[4], 255); } catch (Throwable ignored) { }
         }
+    }
+
+    /**
+     * preview25 (owner: Pixel Studio's tool bar, pen size bar, colour button, font bar and trash button stayed a solid
+     * light grey under Frosted Glass, while the Doodles menu above them is frosted): in a frosted editor window, the
+     * editor's light neutral buttons and bars (any shape: a rounded rect or a path) take the same frost as the
+     * Doodles menu: the window's blur under the folder tint. A selected tool's lighter-grey circle keeps a step of
+     * contrast (its tint a little darker). Dialogs, small marks (under 36dp) and whole-window surfaces are left alone.
+     */
+    static boolean editorPill(Xp.Param p, Frame f, Paint paint, float l, float t, float r, float b, float rx) {
+        try {
+            if (f == null || f.editor != 2 || f.dialog || paint == null || Boolean.TRUE.equals(PillFrost.DRAWING.get())) return false;
+            Canvas canvas = (Canvas) p.thisObject;
+            if (!canvas.isHardwareAccelerated() || !plain(paint)) return false;
+            int c = paint.getColor(), alpha = c >>> 24; if (alpha < 0x08) return false;
+            int cr = (c >> 16) & 0xff, cg = (c >> 8) & 0xff, cb = c & 0xff;
+            int lum = luminance(c), chroma = Math.max(cr, Math.max(cg, cb)) - Math.min(cr, Math.min(cg, cb));
+            float w = r - l, h = b - t;
+            if (chroma > 14 || lum < 215 || lum > 244) return false;   // > 244: a white colour swatch, not a panel
+            if (w < 36 * density || h < 36 * density || h > 220 * density || w >= screenW * 0.95f) return false;
+            Context ctx = context(f); if (ctx == null || !active(ctx) || phoneDark()) return false;
+            boolean square = Math.abs(w - h) < 8 * density && w <= 64 * density;
+            // The selected tool's circle (#e2e2e9, a bluish step, roughly square): Pixel Studio only draws it a moment
+            // after the editor has opened, so any shade of it shows as a change (owner: keep the look from the first
+            // frame). It is left out; the tool's icon still shows which tool is on.
+            if (square && lum < 230 && cb - cr >= 5) { p.setResult(null); return true; }
+            // preview36: each tool button also has its own round background in the bar's own colour (invisible in
+            // stock); drawn again over the veiled bar it would show as a lighter circle, so it is left out.
+            if (square && c == barColour) { p.setResult(null); return true; }
+            if (w >= 150 * density) barColour = c;
+            /*
+             * 2.0.8 (the owner's log of build 350): the editor records its panels once and replays that recording
+             * through its fade-in at changing opacity, so anything that depends on what lies beneath (a hole, a tint
+             * over a hole, a see-through veil) looks different while fading and after: the shifts of builds 339-349.
+             * The panel is the frost's own colour, solid (the folders' tint over the frost, then the light veil,
+             * worked out once): nothing shows through it, and it looks the same in and out of the fade.
+             */
+            paint.setColor(HoleFrost.scaled(HoleFrost.solid(ctx), alpha));
+            Xp.setAdditionalInstanceField(p, "pixelsuite_card", c);
+            return true;
+        } catch (Throwable ignored) { return false; }
+    }
+
+    /** The colour of the editor's wide bar (its buttons' own round backgrounds are the same colour). */
+    private static volatile int barColour;
+
+
+    private static Method sPaintBlend; private static boolean sPaintBlendMissing;
+    /** The paint draws with a blend mode or transfer mode other than the plain one (e.g. Compose's BlendMode.Clear). */
+    static boolean blends(Paint paint) {
+        if (paint == null) return false;
+        if (paint.getXfermode() == null || sPaintBlendMissing) return false;   // Compose's reused paint keeps an Xfermode at SRC_OVER
+        try {
+            if (sPaintBlend == null) sPaintBlend = Paint.class.getMethod("getBlendMode");
+            Object m = sPaintBlend.invoke(paint);
+            String mode = String.valueOf(m);
+            return m != null && !"SRC_OVER".equals(mode) && !"SRC".equals(mode);
+        } catch (Throwable t) { sPaintBlendMissing = true; return false; }
     }
 
     /**
@@ -528,6 +628,15 @@ final class ComposeFrost {
             int lum = luminance(colour); boolean darkCard = lum <= 70;
             if (!darkCard && lum < 230) return;
             Context ctx = card.getContext();
+            if (darkCard && phoneDark() && SuperDark.inEffect(ctx)) {   // preview21: Super Dark, black with the rim
+                float r = FrostedSurface.dp(ctx, 28);
+                try { Object inner = unwrap(card.getBackground()); if (inner instanceof android.graphics.drawable.GradientDrawable) { float x = (Float) Xp.callMethod(inner, "getCornerRadius"); if (x > 0) r = x; } } catch (Throwable ignored) { }
+                android.graphics.drawable.GradientDrawable black = new android.graphics.drawable.GradientDrawable();
+                black.setColor(0xff000000); black.setCornerRadius(r);
+                Drawable sd = new android.graphics.drawable.LayerDrawable(new Drawable[]{black, new DoodleOverlay.Rim(r, FrostedSurface.dp(ctx, 1.5f))});
+                if (card == decor) dialog.getWindow().setBackgroundDrawable(sd); else card.setBackground(sd);
+                return;
+            }
             boolean flip = invertDark && darkCard && !phoneDark() && !SuperDark.inEffect(ctx);
             if (flip) invert(decor);
             if (!active(ctx)) return;
@@ -690,19 +799,41 @@ final class ComposeFrost {
                 Method m;
                 synchronized (sFilterColor) { m = sFilterColor.get(filter.getClass()); if (m == null) { m = filter.getClass().getMethod("getColor"); sFilterColor.put(filter.getClass(), m); } }
                 int c = (Integer) m.invoke(filter);
-                int a = c >>> 24;
-                if (a < 0x40 || a > 0x80 || luminance(c) > 90) return false;
+                int v = iconInk(c); if (v == c) return false;
                 Xp.setAdditionalInstanceField(p, "pixelsuite_filter", filter);
-                paint.setColorFilter(new android.graphics.PorterDuffColorFilter((c & 0xffffff) | 0x8c000000, android.graphics.PorterDuff.Mode.SRC_IN));
+                paint.setColorFilter(new android.graphics.PorterDuffColorFilter(v, android.graphics.PorterDuff.Mode.SRC_IN));
                 return true;
             }
-            int c = paint.getColor(), a = c >>> 24;
-            if (paint.getShader() != null || a < 0x40 || a > 0x80 || luminance(c) > 90) return false;
+            int c = paint.getColor();
+            if (paint.getShader() != null) return false;
+            int v = iconInk(c); if (v == c) return false;
             Xp.setAdditionalInstanceField(p, "pixelsuite_ink", c);
-            paint.setColor((c & 0xffffff) | 0x8c000000);
+            paint.setColor(v);
             return true;
         } catch (Throwable t) { return false; }
     }
+    /**
+     * An icon's colour in the frosted editor (light theme), or the same colour when it is left alone:
+     *  - the disabled ink (dark at 38%, +-7%) is drawn at 55%, still clearly lighter than an enabled one; only that
+     *    level, so an icon fading in (its opacity sweeping up) is never caught (preview35: that was a blink);
+     *  - preview35 (owner's video: the crop icon turned grey a moment after the editor opened): the selected tool's
+     *    icon (the editor's mid grey, drawn once the editor has opened) keeps the ink of the other icons, so nothing
+     *    changes once shown; which tool is on still shows in its own panel (crop corners, pen bar).
+     */
+    static int iconInk(int c) {
+        int a = c >>> 24, cr = (c >> 16) & 0xff, cg = (c >> 8) & 0xff, cb = c & 0xff;
+        int lum = luminance(c), chroma = Math.max(cr, Math.max(cg, cb)) - Math.min(cr, Math.min(cg, cb));
+        // preview36 (owner: the crop icon still blinked): the editor cross-fades the icon to its selected grey, so the
+        // grey is recoloured at every opacity, not only once it is fully shown.
+        // preview38 (owner's video of 351: the crop icon went darker instead): the ink is the other icons' own colour,
+        // seen on them (#2e2d31 on the owner's phone), never a fixed one.
+        if (a >= 0x10 && lum >= 55 && lum <= 130 && chroma <= 24) { int ink = iconColour; return ink == 0 ? c : (a << 24) | (ink & 0xffffff); }
+        if (a >= 0xf0 && lum >= 20 && lum < 55 && chroma <= 16) iconColour = c;
+        if (a >= 0x58 && a <= 0x6a && lum < 55) return (c & 0xffffff) | 0x8c000000;
+        return c;
+    }
+    /** The colour the editor's enabled icons are drawn in (the last one seen), for the selected tool's icon. */
+    private static volatile int iconColour;
     static void unboost(Xp.Param p, Paint paint) {
         if (paint == null) return;
         Object filter = Xp.getAdditionalInstanceField(p, "pixelsuite_filter");
@@ -729,14 +860,27 @@ final class ComposeFrost {
         @Override protected void beforeHookedMethod(Xp.Param p) {
             try {
                 if (fullFill(p)) return;
+                // preview34 (owner: the tool bar didn't match the frosted Doodles menu; measured: it stayed the stock
+                // #eae7ea): the bar is a Compose surface clipped to its rounded shape and filled with a plain rect, which
+                // only the round-rect and path hooks looked at. Rect fills take the same frost.
+                if (!noEditors() && p.args.length >= 2 && p.args[p.args.length - 1] instanceof Paint) {
+                    Object a0 = p.args[0]; RectF b = null;
+                    if (a0 instanceof RectF) b = new RectF((RectF) a0);
+                    else if (a0 instanceof android.graphics.Rect) b = new RectF((android.graphics.Rect) a0);
+                    else if (a0 instanceof Float && p.args.length == 5) b = new RectF((Float) p.args[0], (Float) p.args[1], (Float) p.args[2], (Float) p.args[3]);
+                    if (b != null && editorPill(p, frame.get(), (Paint) p.args[p.args.length - 1], b.left, b.top, b.right, b.bottom, 0f)) return;
+                }
                 if (p.args.length == 2 && p.args[0] instanceof android.graphics.Path && !noEditors()) {
                     RectF b = new RectF(); ((android.graphics.Path) p.args[0]).computeBounds(b, true);
                     if (b.width() <= 48 * density && b.height() <= 48 * density) boostIcon(p, lastPaint(p));
+                    else if (p.args[1] instanceof Paint && editorPill(p, frame.get(), (Paint) p.args[1], b.left, b.top, b.right, b.bottom, Math.min(b.width(), b.height()) / 2f)) return;
                 }
             } catch (Throwable ignored) { }
         }
         @Override protected void afterHookedMethod(Xp.Param p) {
             restore(p);
+            Object was = Xp.getAdditionalInstanceField(p, "pixelsuite_card");
+            if (was instanceof Integer) try { ((Paint) p.args[p.args.length - 1]).setColor((Integer) was); } catch (Throwable ignored) { }
             if (p.args.length == 2 && p.args[0] instanceof android.graphics.Path) unboost(p, lastPaint(p));
         }
     }

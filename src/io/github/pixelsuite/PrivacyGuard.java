@@ -43,20 +43,22 @@ final class PrivacyGuard {
             n += Xp.hookAllMethods(handler, "onDeleteComplete", new Xp.Callback() {
                 @Override protected void beforeHookedMethod(final Xp.Param p) {
                     try {
-                        if (passingDelete || p.args.length < 2) return;
+                        if (p.args.length < 2) return;
                         final Object info = p.args[1];
                         final View view = p.args[0] instanceof View ? (View) p.args[0] : null;
-                        Activity a = LauncherFeatures.activity.get(); if (a == null) return;
-                        String key = PrivacyBadges.lockedKey(a, info);
-                        if (key == null || key.startsWith("a:")) return;   // only locked folders
                         final Object self = p.thisObject;
+                        if (passingDelete) { remember(self, view, info, passingKey); return; }   // confirmed: it goes now
+                        Activity a = LauncherFeatures.activity.get(); if (a == null) return;
+                        final String key = PrivacyBadges.lockedKey(a, info);
+                        if (key == null || key.startsWith("a:")) { remember(self, view, info, null); return; }   // only locked folders ask
                         boolean asked = ask(a, key, folderName(info), new Runnable() { public void run() {
-                            passingDelete = true;
+                            passingDelete = true; passingKey = key;
                             try { Xp.callMethod(self, "onDeleteComplete", view, info); Module.log("App lock: locked folder deleted after confirming"); }
                             catch (Throwable error) { Module.log("App lock: folder delete failed", error); }
-                            finally { passingDelete = false; }
+                            finally { passingDelete = false; passingKey = null; }
                         } }, new Runnable() { public void run() { restore(self, view != null ? view : heldView(info), info); } });
                         if (asked) p.setResult(null);   // not deleted (yet)
+                        else remember(self, view, info, null);   // protection off: deleted now, its lock stays as it is
                     } catch (Throwable error) { LauncherFeatures.logOnce("App lock: folder delete check unavailable (it is deleted)", error); }
                 }
             }).size();
@@ -71,7 +73,129 @@ final class PrivacyGuard {
                 }
             }).size();
         } catch (Throwable error) { Module.log("App lock: folder delete check unavailable", error); }
+        // 2.0.8-preview4 (owner's video: a folder removed by dragging it onto Remove, locked or not, never came back
+        // with the pill's Undo): the launcher's Undo cancels the delete and then loads the home screen again from its
+        // records, which does not bring the folder back. Undo now puts the folder's own tile back in its place with the
+        // same spring as cancelling the fingerprint sheet (X); a locked folder gets its lock back. If its page is gone
+        // (it was alone there), the launcher's own Undo runs as before.
+        try {
+            Class<?> pill = Xp.findClass("com.android.launcher3.DropTargetHandler$onDeleteComplete$onDismissed$1", cl);
+            final Field kind = intField(pill);
+            if (kind == null) Module.log("Folder undo: the pill's action is unreadable (the launcher's own Undo is kept)");
+            else n += Xp.hookAllMethods(pill, "run", new Xp.Callback() {
+                @Override protected void beforeHookedMethod(Xp.Param p) {
+                    try {
+                        Removed r = lastRemoved;
+                        if (kind.getInt(p.thisObject) == 0) { lastRemoved = null; return; }   // the pill went away: the delete stands
+                        if (r == null || android.os.SystemClock.uptimeMillis() - r.at > 30000) return;
+                        Object handler = null; try { handler = Xp.getObjectField(p.thisObject, "this$0"); } catch (Throwable ignored) { }
+                        if (handler != null && handler != r.handler) return;
+                        lastRemoved = null;
+                        if (r.lockKey != null) relock(r.lockKey);
+                        if (putBackAfterUndo(r)) p.setResult(null);   // done here; the launcher's reload is not needed
+                    } catch (Throwable error) { LauncherFeatures.logOnce("Folder undo failed (the launcher's own Undo runs)", error); }
+                }
+            }).size();
+        } catch (Throwable error) { Module.log("Folder undo unavailable (the launcher's own Undo is kept)", error); }
         Module.log("App lock remove checks: " + n + " hooks");
+    }
+
+    /** The folder just removed (until its pill goes away), so its Undo can put it back. */
+    private static final class Removed {
+        final Object handler, info; final java.lang.ref.WeakReference<View> view; final String lockKey; final long at; final int page;
+        Removed(Object handler, View view, Object info, String lockKey, int page) {
+            this.handler = handler; this.info = info; this.view = new java.lang.ref.WeakReference<View>(view); this.lockKey = lockKey;
+            this.at = android.os.SystemClock.uptimeMillis(); this.page = page;
+        }
+    }
+    private static volatile Removed lastRemoved;
+    private static volatile String passingKey;
+
+    /** A folder is being deleted now: its tile and record are kept for the pill's Undo. Anything else: forgotten. */
+    private static void remember(Object handler, View view, Object info, String lockKey) {
+        try {
+            if (!folder(info)) { lastRemoved = null; return; }
+            View tile = view != null ? view : heldView(info);
+            Activity a = LauncherFeatures.activity.get();
+            Object workspace = a == null ? null : LauncherFeatures.get(a, "mWorkspace");
+            if (tile == null && workspace != null) {
+                Object v = Xp.callMethod(workspace, "getViewByItemId", ((Number) LauncherFeatures.get(info, "id")).intValue());
+                if (v instanceof View) tile = (View) v;
+            }
+            int page = -1;   // its page, in case the page goes with it (it was alone there)
+            try { if (workspace != null && ((Number) LauncherFeatures.get(info, "container")).intValue() == -100) page = ((Number) Xp.callMethod(workspace, "getPageIndexForScreenId", ((Number) LauncherFeatures.get(info, "screenId")).intValue())).intValue(); } catch (Throwable ignored) { }
+            lastRemoved = tile == null ? null : new Removed(handler, tile, info, lockKey, page);
+        } catch (Throwable error) { lastRemoved = null; }
+    }
+    private static Class<?> collection;
+    private static boolean folder(Object info) {
+        if (info == null) return false;
+        try { if (collection == null) collection = LauncherFeatures.type("model.data.CollectionInfo"); if (collection.isInstance(info)) return true; } catch (Throwable ignored) { }
+        String n = info.getClass().getName();
+        return n.endsWith(".FolderInfo") || n.endsWith(".CollectionInfo") || DrawerFolders.isFolder(info);
+    }
+
+    /**
+     * Undo: the delete is cancelled exactly as the launcher's own Undo does it (nothing was written yet), then the
+     * folder's tile goes back into its place, growing in. False: the launcher's own Undo should run instead.
+     */
+    private static boolean putBackAfterUndo(Removed r) {
+        Activity a = LauncherFeatures.activity.get();
+        View view = r.view.get();
+        if (a == null || view == null) return false;
+        Object workspace = LauncherFeatures.get(a, "mWorkspace");
+        if (workspace == null) return false;
+        try {
+            int container = ((Number) LauncherFeatures.get(r.info, "container")).intValue();
+            int screen = ((Number) LauncherFeatures.get(r.info, "screenId")).intValue();
+            if (container == -100 && Xp.callMethod(workspace, "getScreenWithId", screen) == null) {
+                // it was alone on its page, which went with it: the page comes back in the same place first
+                try {
+                    int count = ((android.view.ViewGroup) workspace).getChildCount();
+                    int at = r.page < 0 ? count : Math.min(r.page, count);
+                    Xp.callMethod(workspace, "insertNewWorkspaceScreen", screen, at);
+                } catch (Throwable ignored) { }
+                if (Xp.callMethod(workspace, "getScreenWithId", screen) == null) {
+                    Module.log("Folder undo: its page is gone, the launcher's own Undo runs");
+                    return false;
+                }
+            }
+        } catch (Throwable error) { return false; }
+        try {
+            Object controller = Xp.getObjectField(r.handler, "undoDeleteController");
+            ((java.util.List<?>) Xp.getObjectField(controller, "pendingDeletes")).clear();
+            Object writer = Xp.callMethod(Xp.getObjectField(controller, "activityContext"), "getModelWriter");
+            boolean resumed = false;
+            for (java.lang.reflect.Method m : writer.getClass().getMethods()) if (m.getName().equals("resumeWrites") && m.getParameterTypes().length == 2) { m.invoke(writer, null, true); resumed = true; break; }
+            if (!resumed) return false;
+        } catch (Throwable error) { Module.log("Folder undo: the delete could not be cancelled here, the launcher's own Undo runs", error); return false; }
+        try {
+            if (view.getParent() == null) Xp.callMethod(workspace, "addInScreenFromBind", view, r.info);
+            if (view.getParent() == null) { Module.log("Folder undo: tile not placed, home screen loaded again"); reload(); return true; }
+            inflate(view);
+            Module.log("Folder undo: folder put back");
+        } catch (Throwable error) { Module.log("Folder undo: tile not placed, home screen loaded again", error); reload(); }
+        return true;
+    }
+
+    /** The folder's tile grows back into its place (the same spring as cancelling the sheet). */
+    private static void inflate(View view) {
+        view.setVisibility(View.VISIBLE);
+        try { Xp.callMethod(view, "setIconVisible", true); } catch (Throwable ignored) { }
+        view.setTranslationX(0f); view.setTranslationY(0f);
+        view.setPivotX(view.getWidth() / 2f); view.setPivotY(view.getHeight() / 2f);
+        view.setScaleX(0.3f); view.setScaleY(0.3f); view.setAlpha(0f);
+        view.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120).setDuration(420)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(1.8f)).start();
+    }
+
+    /** A locked folder's lock was taken off when its delete was confirmed; Undo gives it back (the system writes it). */
+    static final String ACTION_RELOCK = "io.github.pixelsuite.APP_LOCK_FOLDER_RELOCK";
+    static void relock(String key) {
+        try {
+            Activity a = LauncherFeatures.activity.get(); if (a == null) return;
+            a.sendBroadcast(new Intent(ACTION_RELOCK).setPackage("android").putExtra(PrivacyFolders.EXTRA_FOLDER, key));
+        } catch (Throwable error) { Module.log("Folder undo: lock not given back", error); }
     }
 
     /** Dismissed: writes go on again (nothing was deleted) and the home screen is loaded again, the folder with it. */
@@ -101,12 +225,7 @@ final class PrivacyGuard {
                 Object workspace = LauncherFeatures.get(a, "mWorkspace");
                 Xp.callMethod(workspace, "addInScreenFromBind", view, info);
             }
-            view.setVisibility(View.VISIBLE);
-            try { Xp.callMethod(view, "setIconVisible", true); } catch (Throwable ignored) { }
-            view.setPivotX(view.getWidth() / 2f); view.setPivotY(view.getHeight() / 2f);
-            view.setScaleX(0.3f); view.setScaleY(0.3f); view.setAlpha(0f);
-            view.animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(120).setDuration(420)
-                    .setInterpolator(new android.view.animation.OvershootInterpolator(1.8f)).start();
+            inflate(view);
             Module.log("App lock: folder delete cancelled, folder put back");
         } catch (Throwable error) { Module.log("App lock: folder tile could not be put back", error); reload(); }
     }
@@ -116,33 +235,6 @@ final class PrivacyGuard {
             Object model = a == null ? null : LauncherFeatures.get(a, "mModel");
             if (model != null) Xp.callMethod(model, "forceReload", "pixelsuite locked folder kept");
         } catch (Throwable ignored) { }
-    }
-
-    private static void restoreOld(Object handler) {
-        try {
-            Object controller = Xp.getObjectField(handler, "undoDeleteController");
-            ((java.util.List<?>) Xp.getObjectField(controller, "pendingDeletes")).clear();
-            Object writer = Xp.callMethod(Xp.getObjectField(controller, "activityContext"), "getModelWriter");
-            for (java.lang.reflect.Method m : writer.getClass().getMethods()) if (m.getName().equals("resumeWrites") && m.getParameterTypes().length == 2) { m.invoke(writer, null, true); break; }
-            Activity a = LauncherFeatures.activity.get();
-            Object model = a == null ? null : LauncherFeatures.get(a, "mModel");
-            if (model != null) Xp.callMethod(model, "forceReload", "pixelsuite locked folder kept");
-            Module.log("App lock: folder delete cancelled, folder kept");
-        } catch (Throwable error) { Module.log("App lock: folder could not be brought back", error); }
-    }
-
-    /** The Undo button of the launcher's "Item removed" pill, or null. */
-    private static View findUndo(View v) {
-        if (v.getClass().getName().endsWith(".Snackbar") && v instanceof android.view.ViewGroup) {
-            int id = v.getResources().getIdentifier("action", "id", v.getContext().getPackageName());
-            View b = id == 0 ? null : v.findViewById(id);
-            if (b != null && b.isShown()) return b;
-        }
-        if (v instanceof android.view.ViewGroup) {
-            android.view.ViewGroup g = (android.view.ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) { View r = findUndo(g.getChildAt(i)); if (r != null) return r; }
-        }
-        return null;
     }
 
     private static Field intField(Class<?> k) {

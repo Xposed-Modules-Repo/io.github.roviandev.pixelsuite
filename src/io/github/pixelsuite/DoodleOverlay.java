@@ -90,8 +90,12 @@ final class DoodleOverlay extends FrameLayout {
 
     /** Pixel Studio's screenshot editor. */
     static final class StudioHost implements Host {
-        final View canvas; final Object renderer;
+        View canvas; final Object renderer;
         StudioHost(View canvas) throws Exception { this.canvas = canvas; renderer = Bridge.renderer(canvas); }
+        /** preview39: the editor rebuilt its canvas for the same picture (cropping): Doodles moves onto the new one. */
+        boolean rehost(View newCanvas) {
+            try { if (Bridge.renderer(newCanvas) != renderer) return false; canvas = newCanvas; return true; } catch (Throwable t) { return false; }
+        }
         public Object key() { return renderer; }
         public Bridge.Space space(View overlay) { return Bridge.space(canvas, overlay); }
         public void picture() { canvas.invalidate(); }
@@ -101,7 +105,23 @@ final class DoodleOverlay extends FrameLayout {
         public void outside(float rawX, float rawY) { }
         public RectF[] slots(View overlay) { return null; }
         public boolean fixed() { return false; }
-        public boolean editorTouch(Bridge.Space s, float x, float y) { return false; }
+        /**
+         * 2.0.8-preview8 (owner's video: with Doodles open, dragging a crop corner sometimes drew an arrow instead): a
+         * touch within 28dp of the crop box's edges or corners (either side) that is not on a shape goes to the editor,
+         * which crops with it, as in Google Photos. Shapes are still drawn from anywhere else on the picture.
+         */
+        public boolean editorTouch(Bridge.Space s, float x, float y) {
+            // preview24 (owner's videos: with a pen still on, Doodles drew pen strokes): only on the crop screen does the
+            // band go to the editor; on a pen's screen the old crop box's place meant the pen got the touch.
+            String page = TopBarKeep.currentPage();
+            if (page != null && !"CROP_TOOL".equals(page)) return false;
+            RectF r = ScreenshotEditor.cropFrame(s.image);
+            if (r == null) r = s.image;
+            float band = 28 * canvas.getResources().getDisplayMetrics().density;
+            boolean nearX = x > r.left - band && x < r.right + band, nearY = y > r.top - band && y < r.bottom + band;
+            if (!nearX || !nearY) return false;
+            return Math.abs(x - r.left) < band || Math.abs(x - r.right) < band || Math.abs(y - r.top) < band || Math.abs(y - r.bottom) < band;
+        }
     }
 
     static Host lastHost;
@@ -115,6 +135,7 @@ final class DoodleOverlay extends FrameLayout {
     final FrameLayout panel;
     final float density;
     int surface;
+    boolean frosted;   // preview31: the menu in the folders' frost (Pixel Studio, Frosted Glass, light theme)
     final int onSurface, onSurfaceVariant, accent, onAccent, outline;
     boolean superDark;
     float toolbarTopRaw;
@@ -125,15 +146,39 @@ final class DoodleOverlay extends FrameLayout {
 
     // ------------------------------------------------------------------ static entry points
 
+    /** preview35: no layer while the Doodles layer fades, so the frosted menu's hole in the window fades with it. */
+    @Override public boolean hasOverlappingRendering() { return false; }
+
     static boolean active() {
         DoodleOverlay o = current.get();
         return o != null && o.isAttachedToWindow();
+    }
+
+    /** preview23: this screen point is on the open Doodles menu. */
+    static boolean onPanel(float rawX, float rawY) {
+        DoodleOverlay o = current.get();
+        if (o == null || o.panel == null || !o.panel.isShown()) return false;
+        int[] at = new int[2]; o.panel.getLocationOnScreen(at);
+        float w = o.panel.getWidth() * o.panel.getScaleX(), h = o.panel.getHeight() * o.panel.getScaleY();
+        return rawX >= at[0] && rawX <= at[0] + w && rawY >= at[1] && rawY <= at[1] + h;
     }
 
     /** The open Doodles is Pixel Studio's and its canvas has left the screen. */
     static boolean studioCanvasGone() {
         DoodleOverlay o = current.get();
         return o != null && o.host instanceof StudioHost && !((StudioHost) o.host).canvas.isAttachedToWindow();
+    }
+    /**
+     * preview39 (owner's video: the Doodles menu went away and popped back at every crop change): the editor rebuilds
+     * its canvas while cropping, for the same picture. If the new canvas shows the same picture, Doodles just moves
+     * onto it (its shapes and menu stay); only a canvas for another picture closes it.
+     */
+    static boolean rehost(View newCanvas) {
+        DoodleOverlay o = current.get();
+        if (o == null || !(o.host instanceof StudioHost) || newCanvas == null || !newCanvas.isAttachedToWindow()) return false;
+        if (!((StudioHost) o.host).rehost(newCanvas)) return false;
+        o.layer.invalidate();
+        return true;
     }
 
     /** The picture moved under the open Doodles (Google Photos): redraw the layer. */
@@ -185,6 +230,10 @@ final class DoodleOverlay extends FrameLayout {
         o.setEnabled(false);
         final Runnable gone = new Runnable() { public void run() { if (o.getParent() instanceof ViewGroup) ((ViewGroup) o.getParent()).removeView(o); } };
         if (o.host.fixed()) { o.leaving = true; o.layer.invalidate(); o.motion(false, gone); return; }   // the editor's own preview shows the shapes now
+        // preview27 (owner's slowed video: the menu went white as it faded, and drawn without the fade's layer it showed
+        // dark): a fading view is drawn through an offscreen layer, where the window's blur can't show. The menu itself
+        // goes at once (it was barely visible in the fade anyway); the layer under it still fades.
+        o.panel.setVisibility(View.INVISIBLE);   // the menu goes at once (preview27); preview39: the frosted one too, its hole would outlast its tint
         o.animate().alpha(0f).setDuration(140).withEndAction(gone).start();
     }
 
@@ -323,6 +372,7 @@ final class DoodleOverlay extends FrameLayout {
         // build 208 (owner: match the panel under it perfectly): the editor's tool bar colour, as drawn (#1f1f21 on the
         // owner's phone), in Pixel Studio; Google Photos' editor keeps its black panel (host.fixed()).
         else if (dark) surface = ComposeFrost.toolbarColour != 0 ? ComposeFrost.toolbarColour : 0xff1f1f21;
+        frosted = host instanceof StudioHost && !dark && SurfaceStyle.get(a) == SurfaceStyle.FROSTED && FrostedSurface.blurEnabled(a);
         onSurface = system(a, dark ? "system_on_surface_dark" : "system_on_surface_light", dark ? 0xffe6e0e9 : 0xff1d1b20);
         onSurfaceVariant = system(a, dark ? "system_on_surface_variant_dark" : "system_on_surface_variant_light", dark ? 0xffcac4d0 : 0xff49454f);
         accent = system(a, dark ? "system_accent1_200" : "system_accent1_600", dark ? 0xffd0bcff : 0xff6750a4);
@@ -500,6 +550,8 @@ final class DoodleOverlay extends FrameLayout {
             Bridge.Space s = host.space(DoodleOverlay.this);
             if (s == null) { if (e.getActionMasked() == MotionEvent.ACTION_DOWN) host.outside(e.getRawX(), e.getRawY()); return false; }
             float x = e.getX(), y = e.getY();
+            fingerRawX = e.getRawX(); fingerRawY = e.getRawY();
+            if (busy && e.getActionMasked() == MotionEvent.ACTION_MOVE) fadeFor(fingerRawX, fingerRawY);
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN: {
                     if (!ours(s, x, y)) { host.outside(e.getRawX(), e.getRawY()); return false; }
@@ -715,9 +767,23 @@ final class DoodleOverlay extends FrameLayout {
         canvas.restoreToCount(save);
     }
 
-    void dim(boolean busy) {
-        // While a shape is being dragged the whole Doodles menu is out of the way.
-        panel.animate().alpha(busy ? 0f : 1f).setDuration(busy ? 80 : 160).start();
+    /*
+     * preview24 (owner: the menu flickered while drawing): it used to vanish for every drag. Now it steps aside (fades
+     * to 15%) only while the finger is near it, and comes back as soon as the finger moves away or lifts.
+     */
+    boolean busy, faded;
+    float fingerRawX = -1, fingerRawY = -1;
+    void dim(boolean busy) { this.busy = busy; fadeFor(fingerRawX, fingerRawY); }
+    void fadeFor(float rawX, float rawY) {
+        boolean near = false;
+        if (busy && rawX >= 0 && panel.getAlpha() >= 0f) {
+            int[] at = new int[2]; panel.getLocationOnScreen(at);
+            float w = panel.getWidth() * panel.getScaleX(), h = panel.getHeight() * panel.getScaleY(), m = dp(40);
+            near = rawX > at[0] - m && rawX < at[0] + w + m && rawY > at[1] - m && rawY < at[1] + h + m;
+        }
+        if (near == faded) return;
+        faded = near;
+        panel.animate().alpha(near ? 0.15f : 1f).setDuration(near ? 90 : 160).start();
     }
 
     // ------------------------------------------------------------------ the panel
@@ -809,13 +875,20 @@ final class DoodleOverlay extends FrameLayout {
     }
 
     FrameLayout buildPanel(final Context c) {
-        FrameLayout shell = new FrameLayout(c);
+        // preview35 (owner: the menu in the same frost as the editor's own panels): the menu is drawn without a layer
+        // while it fades (its hole in the window follows its fade), as is the whole Doodles layer (see the class).
+        FrameLayout shell = new FrameLayout(c) { @Override public boolean hasOverlappingRendering() { return false; } };
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(surface);
         bg.setCornerRadius(dp(28));
-        shell.setBackground(bg);
+        shell.setBackground(frosted ? HoleFrost.panel(c, dp(28)) : bg);
         if (superDark) shell.setForeground(new Rim(dp(28), dp(1.5f)));   // a soft frosted rim instead of preview12's hairline
         shell.setElevation(dp(6));
+        // preview31 (owner: one blur for the whole editor, the menu frosted, not see-through, and no shift as it shows or
+        // goes): in Pixel Studio under Frosted Glass (light theme) the menu is the folders' frost drawn in its own
+        // window (PillFrost): what lies under it in the editor, blurred, under the same tint as the editor's tool bar
+        // and buttons. It is ordinary drawing, so it looks the same while the menu fades in or out (a window blur
+        // region doesn't show inside a fading view's layer: the white and dark flashes of builds 339-344).
         shell.setClipToOutline(true);   // rows wider than the compact menu are cut at its rounded edge
         shell.setClickable(true);       // the panel keeps its touches
 
@@ -1248,6 +1321,7 @@ final class DoodleOverlay extends FrameLayout {
      * kept, so zooming or panning the picture later does not move the limit.
      */
     float sTopLimit = -1, sBottomLimit = -1;
+    static float sFullTop = -1, sFullBottom = -1; static int sFullFor = -1;
     /** How far the editor's corner brackets stand out from the picture; the menu's limits sit on them. */
     static final float FRAME_DP = 18;
     float topLimit() {
@@ -1255,8 +1329,28 @@ final class DoodleOverlay extends FrameLayout {
             Bridge.Space s = host.space(this);
             // the top of the editor's corner brackets around the picture (owner's screenshot): picture top - 18dp
             if (s != null && s.image.top > dp(40)) {
-                sTopLimit = Math.max(dp(32), Math.min(dp(160), s.image.top - FRAME_DP * density));
-                sBottomLimit = s.image.bottom + FRAME_DP * density;
+                // preview20 (owner's video: after cropping, the menu could no longer go down to its place above the
+                // tool bar): the places are those of a whole screenshot's frame, not of the cropped picture. A
+                // picture in the screen's shape is remembered as that frame; a cropped one uses the remembered
+                // frame, or else the screen-shaped picture that fits the editor's canvas around it.
+                float top = s.image.top, bottom = s.image.bottom;
+                View root = getRootView();
+                float screen = root != null && root.getHeight() > 0 ? root.getWidth() / (float) root.getHeight() : 0;
+                float aspect = s.image.height() > 0 ? s.image.width() / s.image.height() : 0;
+                if (screen > 0 && Math.abs(aspect - screen) <= screen * 0.04f) { sFullTop = top; sFullBottom = bottom; sFullFor = getHeight(); }
+                else if (sFullFor == getHeight() && sFullTop > 0) { top = sFullTop; bottom = sFullBottom; }
+                else if (screen > 0) {
+                    View cv = ScreenshotEditor.canvasView.get();
+                    if (cv != null && cv.isAttachedToWindow() && cv.getHeight() > 0) {
+                        int[] a = new int[2], b = new int[2]; cv.getLocationOnScreen(a); getLocationOnScreen(b);
+                        float cTop = a[1] - b[1], cBottom = cTop + cv.getHeight();
+                        float h = Math.min(cv.getHeight(), s.image.width() / screen);
+                        top = Math.max(cTop, s.image.centerY() - h / 2f); bottom = Math.min(cBottom, s.image.centerY() + h / 2f);
+                        top = Math.min(top, s.image.top); bottom = Math.max(bottom, s.image.bottom);
+                    }
+                }
+                sTopLimit = Math.max(dp(32), Math.min(dp(160), top - FRAME_DP * density));
+                sBottomLimit = bottom + FRAME_DP * density;
             }
             if (sTopLimit < 0) return dp(110);   // the picture is not placed yet
         }

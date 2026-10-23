@@ -216,7 +216,12 @@ final class RecentsLock {
         } catch (Throwable error) { Module.log("Recents lock: picture fill unavailable", error); return 0; }
     }
     /** Tasks that have been in split screen since the launcher started. */
-    private static final Set<Integer> wasSplit = new HashSet<Integer>();
+    private static final Set<Integer> wasSplit = java.util.Collections.newSetFromMap(RecentsLock.<Boolean>lastUsedIds(64));   // 2.0.8-preview3: bounded
+    private static <V> java.util.Map<Integer, V> lastUsedIds(final int max) {
+        return new java.util.LinkedHashMap<Integer, V>(16, 0.75f, false) {
+            @Override protected boolean removeEldestEntry(java.util.Map.Entry<Integer, V> eldest) { return size() > max; }
+        };
+    }
     /** Per picture: the rows that hold the app and a soft copy of them, or NO_BAND; absent while it is being measured. */
     private static final WeakHashMap<android.graphics.Bitmap, Band> bands = new WeakHashMap<android.graphics.Bitmap, Band>();
     private static final Band NO_BAND = new Band(0, 0, null);
@@ -345,10 +350,20 @@ final class RecentsLock {
             } });
         } catch (Throwable ignored) { }
     }
-    /** preview36: the last made picture per task: {"band"/"squat", source width, source height, Band or card}. */
-    private static final java.util.Map<Integer, Object[]> byTask = new java.util.HashMap<Integer, Object[]>();
-    /** Made ahead of time for a pair's locked app: task id to {card, source width, source height}. */
-    private static final java.util.Map<Integer, Object[]> ahead = new java.util.HashMap<Integer, Object[]>();
+    /**
+     * preview36: the last made picture per task: {"band"/"squat", source width, source height, Band or card}.
+     * 2.0.8-preview3 (owner asked for a leak check): entries were never removed, so every split-screen task kept its
+     * made picture (a few MB) for the launcher's whole life. Now only the most recently used tasks keep theirs.
+     */
+    private static final java.util.Map<Integer, Object[]> byTask = lastUsed(12);
+    /** Made ahead of time for a pair's locked app: task id to {card, source width, source height}. Bounded as above. */
+    private static final java.util.Map<Integer, Object[]> ahead = lastUsed(6);
+    /** A task id map that keeps only its {@code max} most recently used entries. */
+    private static <V> java.util.Map<Integer, V> lastUsed(final int max) {
+        return new java.util.LinkedHashMap<Integer, V>(16, 0.75f, true) {
+            @Override protected boolean removeEldestEntry(java.util.Map.Entry<Integer, V> eldest) { return size() > max; }
+        };
+    }
 
     /** A squat (half-screen) picture: measured once, then shown as a made card-shaped picture. False: not handled. */
     private static final WeakHashMap<android.graphics.Bitmap, android.graphics.Bitmap> squats = new WeakHashMap<android.graphics.Bitmap, android.graphics.Bitmap>();
@@ -1320,6 +1335,21 @@ final class RecentsLock {
 
     // ------------------------------------------------------------------ the message
 
+    /** preview33: how far the launcher has turned this card's app chips for a sideways phone (0, 90 or 270). */
+    static int turnOf(View card) {
+        try {
+            for (Object c : containers(card)) {
+                View chip = (View) Xp.callMethod(c, "getIconView");
+                if (chip == null) continue;
+                float r = ((chip.getRotation() % 360f) + 360f) % 360f;
+                if (r > 45f && r < 135f) return 90;
+                if (r > 225f && r < 315f) return 270;
+                return 0;
+            }
+        } catch (Throwable ignored) { }
+        return 0;
+    }
+
     private static TextView shown;
     /** "App is locked" and friends: a compact pill, like the system's "Saved", above the card for two and a half seconds. */
     static void toast(View card, String message) {
@@ -1353,6 +1383,37 @@ final class RecentsLock {
             if (!overCard) cx = layer.getWidth() / 2f;
             float half = pill.getMeasuredWidth() / 2f + 16 * d;
             if (layer.getWidth() > 2 * half) cx = Math.max(half, Math.min(layer.getWidth() - half, cx));
+            // preview33 (owner, landscape recents): with the phone sideways the launcher stays upright and turns the cards,
+            // so the message is turned the same way (as the cards' app chips) and sits at the bottom centre as the user
+            // sees it: in the middle of the empty strip between the screen's edge and the cards, centred along it.
+            int turn = turnOf(card);
+            if (turn != 0) {
+                float cardLeft = at[0] - base[0], cardRight = cardLeft + card.getWidth() * s;
+                float gx = turn == 90 ? cardLeft / 2f : (cardRight + layer.getWidth()) / 2f;
+                // 2.0.8-preview43 (owner's screenshot: the message sat a little high, near the cards): 14dp further
+                // down as the user sees it (toward the screen's edge), so it sits in the middle of the blurred strip.
+                gx += (turn == 90 ? -14 : 14) * d;
+                float edge = pill.getMeasuredHeight() / 2f + 8 * d;
+                gx = Math.max(edge, Math.min(layer.getWidth() - edge, gx));
+                if ((turn == 90 ? cardLeft : layer.getWidth() - cardRight) < pill.getMeasuredHeight() + 8 * d)
+                    gx = turn == 90 ? pill.getMeasuredHeight() / 2f + 8 * d : layer.getWidth() - pill.getMeasuredHeight() / 2f - 8 * d;
+                float gy = layer.getHeight() / 2f;
+                int mt = 0, ml = 0;
+                if (pill.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) { mt = ((ViewGroup.MarginLayoutParams) pill.getLayoutParams()).topMargin; ml = ((ViewGroup.MarginLayoutParams) pill.getLayoutParams()).leftMargin; }
+                pill.setRotation(turn);
+                pill.setTranslationX(gx - pill.getMeasuredWidth() / 2f - ml);
+                pill.setTranslationY(gy - pill.getMeasuredHeight() / 2f - mt);
+                pill.setAlpha(0f); pill.setScaleX(.92f); pill.setScaleY(.92f);
+                pill.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(160).setInterpolator(new DecelerateInterpolator()).start();
+                shown = pill;
+                pill.postDelayed(new Runnable() { public void run() {
+                    pill.animate().alpha(0f).setDuration(200).setListener(new AnimatorListenerAdapter() { @Override public void onAnimationEnd(Animator x) {
+                        if (pill.getParent() != null) ((ViewGroup) pill.getParent()).removeView(pill);
+                        if (shown == pill) shown = null;
+                    } }).start();
+                } }, 2500);
+                return;
+            }
             // Above the card; where its badge sits, the badge steps aside for the message.
             float y = cardTop - pill.getMeasuredHeight() - 10 * d;
             int topInset = 0;

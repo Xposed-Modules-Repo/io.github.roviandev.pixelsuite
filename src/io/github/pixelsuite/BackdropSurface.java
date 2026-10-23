@@ -329,11 +329,25 @@ final class BackdropSurface extends GradientDrawable {
     /** Whether DragLayer draws {@code child} before (under) {@code top}: lower Z, or same Z and earlier. */
     static boolean drawnUnder(ViewGroup layer,View child,View top){
         if(child==top)return false;
+        // 2.0.8-preview40 (owner's video: an app dragged onto a home folder went behind the folder once it opened): the
+        // DragLayer draws the dragged app (DragView) last whatever its index (its own drawing order), so it is never
+        // under a panel: never clipped out of it, nor blurred into it.
+        // preview41 (owner's video of 354: still hidden over the folder): the dragged app is a subclass of DragView
+        // (LauncherDragView), so the class itself is checked, not its name.
+        if(isDragView(child))return false;
+        if(isDragView(top))return true;
         float a=child.getZ(),b=top.getZ();
         if(a!=b)return a<b;
         return layer.indexOfChild(child)<layer.indexOfChild(top);
     }
 
+    private static Class<?> dragViewType;private static boolean dragViewMissing;
+    static boolean isDragView(View v){
+        if(dragViewType==null&&!dragViewMissing){try{dragViewType=LauncherFeatures.type("dragndrop.DragView");}catch(Throwable t){dragViewMissing=true;}}
+        if(dragViewType!=null)return dragViewType.isInstance(v);
+        for(Class<?> c=v.getClass();c!=null;c=c.getSuperclass())if(c.getName().endsWith("DragView"))return true;
+        return false;
+    }
     static ViewGroup dragLayerOf(View view){
         Class<?> type=dragLayerType();
         if(type==null)return null;

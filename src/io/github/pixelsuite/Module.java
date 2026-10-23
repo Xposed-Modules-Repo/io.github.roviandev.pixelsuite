@@ -85,7 +85,8 @@ public class Module extends XposedModule {
             PhotosDarkPanel.install();
             PhotosToasts.install(cl);
             // build 197: the video editor's "Saving video..." dialog (opened from the recording preview's Edit) follows the phone's theme and the Themes slider
-            ComposeFrost.install("Google Photos video editor", null, true, "VideoEditorActivity");
+            // preview21 (owner): the photo editor's dialogs too ("Discard changes?"): frost, light phone, Super Dark
+            ComposeFrost.install("Google Photos editors", null, true, "VideoEditorActivity|PhotoEditorNextActivity");
         } else if (ScreenshotEditor.PACKAGE.equals(pkg)) {
             ScreenshotEditor.install(cl, param.getApplicationInfo());
         } else if (DocumentsSort.GOOGLE.equals(pkg) || DocumentsSort.AOSP.equals(pkg)) {

@@ -1,3 +1,34 @@
+## v2.0.8
+Pixel Suite 2.0.8 is a polish and bug-fix update for the screenshot editor, launcher folders and recents, including fixes for bugs in Pixel Studio and Pixel Launcher themselves.
+
+New
+• Crop blur: cropping in Pixel Studio blurs the part you're cutting away, live as you drag, instead of just dimming it.
+• Outlined crop corners, easy to see on light and dark screenshots.
+• Undo for drawer folders: removing one shows "Item removed  Undo", like the home screen.
+
+Polish
+• Frosted Glass: Pixel Studio's tool bar, pen size bar, font bar, trash button and Doodles menu share one frost, with no shift or blink as the editor opens.
+• Undo stays faded until there's something to undo; Redo is always shown clearly.
+• Tapping another tool closes Doodles at once, and the Doodles menu fades only near your finger.
+• Google Photos' "Discard changes?" dialog follows Frosted Glass, light and Super Dark.
+• Landscape recents: the lock messages read the right way up, centred in the blurred strip below the cards.
+
+Bug fixes
+• Recents: no more status bar flicker (apps last used in landscape, and after long use).
+• Recents: fixed a memory leak with split-screen cards.
+• Frosted Glass: an app dragged onto a home folder no longer goes behind the open folder.
+• An app dragged onto Remove and off again is no longer left see-through.
+• A locked drawer folder dragged to the home screen stays locked.
+• Pixel Studio: Undo on a fresh screenshot can no longer undo the previous screenshot's doodles.
+• Pixel Studio: with Doodles open, crop corners always crop (no stray arrows), and a pen left on no longer draws in Doodles.
+• Pixel Studio: the Doodles menu no longer flickers, vanishes on crop changes, or gets stuck after cropping.
+
+Google & Pixel bugs fixed
+• Pixel Studio: the top bar no longer blinks while you drag the crop corners.
+• Pixel Studio: the crop button no longer changes a moment after the editor opens (Frosted Glass).
+• Pixel Launcher: Screenshot / Select / Clear all no longer drop lower after landscape split screen.
+• Pixel Launcher: Undo after removing a home folder now brings the folder back.
+
 ## Pixel Suite 2.0.7
 
 🐛 **Fixes**
@@ -9,6 +40,8 @@
 • Turning Reduce screenshot delay off no longer crashes the screenshot service.
 
 • The status bar no longer flashes in recents when the phone is sideways with auto-rotate off.
+
+• The status bar no longer flickers while scrolling recents past apps last used in landscape.
 
 Install over the current build and reboot.
 

@@ -32,6 +32,7 @@ final class StudioNames {
         "spacer", "spacer.m", "width", "width.m",
         "crop", "rect", "cropLambda", "edges",
         "renderer", "renderer.picture", "config", "area", "area.width", "area.matrix", "scene", "scene.area", "view",
+        "cropDraw", "cropDraw.cut", "cropDraw.arcs", "touch", "touch.m",
     };
 
     /** versionCode, then the values in {@link #KEYS} order. Newest first. */
@@ -41,13 +42,15 @@ final class StudioNames {
                 "cvj", "j", "cis", "cfy", "bvc", "bvd", "bvl",
                 "agl", "w", "ajx", "j",
                 "jjv", "cfs", "hyx", "jje",
-                "iwg", "a", "iwb", "ivp", "d", "e", "iwp", "k", "iwj"},
+                "iwg", "a", "iwb", "ivp", "d", "e", "iwp", "k", "iwj",
+                "qw", "6", "7", "jne|jij", "N"},
         {"192285", "ssh", "jqx", "khq", "f", "bsd", "svf", "svq", "bqi", "cbw", "chx",
                 "jix", "k", "L", "e", "f", "jgn", "jip",
                 "dee", "J", "chv", "cey", "btx", "bty", "buf",
                 "afq", "z", "ajd", "i",
                 "jfs", "cer", "hsj", "jez",
-                "irq", "a", "irl", "ira", "d", "f", "irz", "k", "irt"},
+                "irq", "a", "irl", "ira", "d", "f", "irz", "k", "irt",
+                "jfp", "0", "2", "jje|jee", "M"},
     };
 
     private static Map<String, String> sNames = new HashMap<String, String>();
